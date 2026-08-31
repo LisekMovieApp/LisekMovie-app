@@ -46,6 +46,23 @@
 		"log_out": "Log out",
 		"logging_out": "Logging out…"
 	},
+	"nav": {
+		"home": "Home",
+		"my_list": "My List",
+		"games": "Games",
+		"coming_soon": "Coming soon",
+		"account_menu": "Account menu"
+	},
+	"home": {
+		"play": "Play",
+		"more_info": "More Info",
+		"row_top10": "Top 10 Today",
+		"row_recently_added": "Recently Added",
+		"row_recommended": "Recommended For You",
+		"row_popular": "Popular Now",
+		"scroll_left": "Scroll left",
+		"scroll_right": "Scroll right"
+	},
 	"errors": {
 		"database_connection_failed": "Couldn't connect to the database. Check the connection details and try again.",
 		"database_connection_timeout": "Connecting to the database timed out. Check the host and port.",

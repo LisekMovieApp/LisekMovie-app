@@ -7,7 +7,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { t, setLocale, getLocale, type Locale } from '$lib/i18n';
+	import { t, setLocale, getLocale, setLocaleCookie, type Locale } from '$lib/i18n';
 	import logoText from '$lib/assets/logo_text.svg';
 
 	interface DatabaseConfig {
@@ -69,6 +69,12 @@
 	function selectLanguage(locale: Locale) {
 		uiLanguage = locale;
 		setLocale(locale);
+		// Persisted immediately, not just held at `finishSetup` time — this is
+		// the only record of the choice that survives a full page load, and
+		// it's what lets the *next* page (the login screen `finishSetup`
+		// redirects to, since finishing setup doesn't sign anyone in) render
+		// in the right language too, not just the rest of this wizard.
+		setLocaleCookie(locale);
 	}
 
 	function selectDatabaseSource(source: 'compose' | 'custom') {
@@ -135,7 +141,16 @@
 		finishing = false;
 
 		if (result.ok) {
-			await goto(resolve('/'));
+			// `invalidateAll` matters here, not just style: without it this is a
+			// plain client-side navigation, and SvelteKit reuses the root
+			// layout's already-cached load result rather than re-running
+			// `+layout.server.ts` — so it would still be reading the request
+			// that rendered /setup, before the language cookie
+			// `selectLanguage` just set even existed. That cached result is
+			// also what sends this browser on to /login in the first place
+			// (setup finishing doesn't sign anyone in) — the same page that
+			// needs the fresh cookie to render in the chosen language at all.
+			await goto(resolve('/'), { invalidateAll: true });
 		} else {
 			finishErrorCode = result.errorCode;
 		}

@@ -4,12 +4,18 @@
 //
 // SSR note: this is a module-level singleton, which is normally unsafe for
 // per-request state on a server (one request's value could leak into
-// another's rendered HTML). It's safe here only because nothing sets it
-// during server-side rendering — `setLocale` is only ever called from
-// browser event handlers. If a later phase adds server-side locale
-// detection (e.g. from a saved user preference), it must NOT call
-// `setLocale` from a `load` function; it should pass the locale down through
-// page data instead.
+// another's rendered HTML) if it's mutated from inside an async `load`
+// function — after an `await`, a concurrent request's own `load` could
+// interleave and stomp this one's value before it's read. The root layout
+// (`+layout.svelte`) resolves the locale itself, from `data` a `load`
+// function already computed, and calls `setLocale` from its own top-level
+// script — that runs as part of Svelte's SSR render of the component tree,
+// which is a single synchronous call with no `await` inside it, so no other
+// request's render can interleave between that assignment and this whole
+// request finishing. The rule going forward: only ever mutate
+// `localeState` synchronously — from a browser event handler, or from a
+// component's own top-level/`$effect` code — never from inside an async
+// `load` function.
 
 import { DEFAULT_LOCALE, translate, type Locale } from './translations';
 

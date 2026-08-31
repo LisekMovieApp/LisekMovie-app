@@ -46,6 +46,23 @@
 		"log_out": "Wyloguj",
 		"logging_out": "Wylogowywanie…"
 	},
+	"nav": {
+		"home": "Strona główna",
+		"my_list": "Moja lista",
+		"games": "Gry",
+		"coming_soon": "Wkrótce",
+		"account_menu": "Menu konta"
+	},
+	"home": {
+		"play": "Odtwórz",
+		"more_info": "Więcej informacji",
+		"row_top10": "Top 10 dzisiaj",
+		"row_recently_added": "Ostatnio dodane",
+		"row_recommended": "Polecane dla Ciebie",
+		"row_popular": "Popularne teraz",
+		"scroll_left": "Przewiń w lewo",
+		"scroll_right": "Przewiń w prawo"
+	},
 	"errors": {
 		"database_connection_failed": "Nie udało się połączyć z bazą danych. Sprawdź dane połączenia i spróbuj ponownie.",
 		"database_connection_timeout": "Przekroczono czas oczekiwania na połączenie z bazą danych. Sprawdź host i port.",

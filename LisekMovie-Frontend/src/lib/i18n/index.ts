@@ -6,3 +6,4 @@ export {
 	translate,
 	type Locale
 } from './translations';
+export { LOCALE_COOKIE_NAME, setLocaleCookie, parseLocaleCookie } from './cookie';

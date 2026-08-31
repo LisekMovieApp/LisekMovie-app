@@ -36,6 +36,14 @@ export default defineConfig(
 	{
 		// Override or add rule settings here, such as:
 		// 'svelte/button-has-type': 'error'
-		rules: {}
+		rules: {
+			// Standard convention for a deliberately-unused binding, e.g. the
+			// item name in `{#each Array(count) as _, i}` when only the index
+			// is needed.
+			'@typescript-eslint/no-unused-vars': [
+				'error',
+				{ argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
+			]
+		}
 	}
 );

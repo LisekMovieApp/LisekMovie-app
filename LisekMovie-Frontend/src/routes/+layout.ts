@@ -8,6 +8,7 @@
 import { redirect } from '@sveltejs/kit';
 import type { LayoutLoad } from './$types';
 import { buildAuthHeader } from '$lib/auth';
+import { DEFAULT_LOCALE, isSupportedLocale, type Locale } from '$lib/i18n';
 
 export interface ServerStatus {
 	setup_required: boolean;
@@ -61,7 +62,20 @@ export const load: LayoutLoad = async ({ fetch, url, data }) => {
 		}
 	}
 
-	return { status, user };
+	// The signed-in account's own saved preference is authoritative once it
+	// exists — that's what makes the language choice follow the *account*
+	// rather than the browser (a different browser or device with no locale
+	// cookie yet still renders correctly once signed in). Before that —
+	// /setup after its own language step, and /login right after finishing
+	// the wizard, since finishing setup doesn't sign anyone in — the cookie
+	// the wizard set is all there is to go on. DEFAULT_LOCALE only applies
+	// to a browser that has never chosen a language at all.
+	const locale: Locale =
+		(user && isSupportedLocale(user.ui_language) ? user.ui_language : null) ??
+		data.localeFromCookie ??
+		DEFAULT_LOCALE;
+
+	return { status, user, locale };
 };
 
 async function fetchCurrentUser(

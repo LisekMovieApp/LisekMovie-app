@@ -1,58 +1,29 @@
 <!--
-  Temporary Faza 1 scaffold-verification page, now also exercising the Faza
-  3 sign-in state: proves the brand palette (Tailwind @theme tokens), the
-  logo asset pipeline, and that a signed-in session round-trips end to end.
-  Replaced entirely by the real Home screen in Faza 4 (see roadmap).
+  Home screen — Faza 4. Hero banner + media rows, all skeleton/placeholder
+  content: real items arrive once library scanning and metadata exist
+  (Faza 5+). The account controls that used to live directly on this page
+  (Faza 3 scaffold) now live in the navbar, in the root layout, so they
+  show up on every page rather than just this one.
 -->
 <script lang="ts">
-	import { goto } from '$app/navigation';
-	import { resolve } from '$app/paths';
-	import { t } from '$lib/i18n';
-	import { buildAuthHeader, clearSessionCookie, getSessionCookieClientSide } from '$lib/auth';
-	import logoText from '$lib/assets/logo_text.svg';
-	import type { PageProps } from './$types';
+	import HeroBanner from '$lib/components/HeroBanner.svelte';
+	import MediaRow from '$lib/components/MediaRow.svelte';
+	import Top10Row from '$lib/components/Top10Row.svelte';
 
-	let { data }: PageProps = $props();
-
-	let loggingOut = $state(false);
-
-	async function handleLogout() {
-		loggingOut = true;
-		const token = getSessionCookieClientSide();
-
-		if (token) {
-			try {
-				await fetch('/api/auth/logout', { method: 'POST', headers: buildAuthHeader(token) });
-			} catch {
-				// The session is being cleared client-side regardless — a
-				// failed logout call just means the (now-abandoned) server
-				// session outlives the cookie until its own 30-day expiry,
-				// not that the user stays signed in on this browser.
-			}
-		}
-
-		clearSessionCookie();
-		await goto(resolve('/'), { invalidateAll: true });
-	}
+	const rows = [
+		{ titleKey: 'home.row_recently_added', count: 12 },
+		{ titleKey: 'home.row_recommended', count: 10 },
+		{ titleKey: 'home.row_popular', count: 14 }
+	];
 </script>
 
-<main class="flex min-h-screen flex-col items-center justify-center gap-6 bg-base px-6">
-	<img src={logoText} alt="LisekMovie" class="w-64" />
-	<p class="text-sm tracking-wide text-gold uppercase">Faza 1 — toolchain scaffold</p>
+<main class="min-h-screen bg-base pb-16">
+	<HeroBanner />
 
-	{#if data.user}
-		<div class="flex flex-col items-center gap-2">
-			<p class="text-sm text-neutral-400">
-				{t('auth.logged_in_as', { username: data.user.username })}
-			</p>
-			<button
-				type="button"
-				class="rounded-md border border-neutral-700 px-4 py-2 text-sm text-neutral-200 transition-colors hover:border-gold-dim disabled:cursor-not-allowed disabled:opacity-50"
-				disabled={loggingOut}
-				onclick={handleLogout}
-			>
-				{loggingOut ? t('auth.logging_out') : t('auth.log_out')}
-			</button>
-		</div>
-	{/if}
+	<div class="mt-8 flex flex-col gap-8">
+		<Top10Row />
+		{#each rows as row (row.titleKey)}
+			<MediaRow titleKey={row.titleKey} count={row.count} />
+		{/each}
+	</div>
 </main>
