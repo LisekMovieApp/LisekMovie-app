@@ -15,6 +15,17 @@ export default defineConfig({
 			adapter: adapter()
 		})
 	],
+	server: {
+		// Forward /api/* to the Rust backend during `npm run dev`, both for
+		// browser fetches and for SvelteKit's server-side `load` fetches
+		// (those resolve relative URLs against this same dev server, so the
+		// proxy applies to them too). Production deployment reverse-proxies
+		// the two behind one origin instead — see the deployment notes
+		// planned for the packaging phase.
+		proxy: {
+			'/api': 'http://localhost:8080'
+		}
+	},
 	test: {
 		expect: { requireAssertions: true },
 		projects: [

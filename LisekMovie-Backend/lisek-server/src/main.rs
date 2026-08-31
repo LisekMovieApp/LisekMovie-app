@@ -1,28 +1,122 @@
 //! LisekMovie server binary.
 //!
-//! Faza 1 scope: prove the workspace links and boots end-to-end. Exposes a single
-//! health-check endpoint. Real routing, middleware, and the OpenAPI surface
-//! (utoipa) land in Faza 3 per the architecture plan.
+//! Faza 2 added detecting whether a database connection has already been
+//! saved from a completed First-Run Wizard run. Faza 3 adds login/sessions
+//! and splits the router into a public group and an `AuthUser`-protected
+//! group — see `auth.rs` for what "protected" means here. The OpenAPI
+//! surface (utoipa) is still open for a later phase.
 
-use axum::{Json, Router, routing::get};
+mod auth;
+mod env_file;
+mod setup;
+mod state;
+
+use std::sync::Arc;
+
+use axum::{
+    Json, Router,
+    routing::{get, post},
+};
 use serde_json::{Value, json};
+use tokio::sync::RwLock;
+use tower_http::cors::CorsLayer;
+
+use state::{AppState, ServerMode};
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    // No RUST_LOG set → default to "info" so a plain `cargo run` actually
+    // shows startup logs, instead of silently sitting at the default
+    // "errors only" level.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
 
-    let app = Router::new().route("/api/health", get(health));
+    // Ignored if `.env` doesn't exist yet — that's the normal state before
+    // the First-Run Wizard has ever completed.
+    dotenvy::dotenv().ok();
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
+    let mode = detect_initial_mode().await;
+    match &mode {
+        ServerMode::SetupRequired => {
+            tracing::info!(
+                "No database configured yet — starting in setup mode. \
+                 Open the web app to run the First-Run Wizard."
+            );
+        }
+        ServerMode::DatabaseError(reason) => {
+            tracing::error!("A database is configured but not reachable: {reason}");
+        }
+        ServerMode::Ready(_) => {
+            tracing::info!("Connected to the configured database.");
+        }
+    }
+
+    let state = Arc::new(AppState {
+        mode: RwLock::new(mode),
+    });
+
+    // Reachable with no session at all: health/status checks, the setup
+    // wizard (which by definition runs before any account exists), and
+    // login itself.
+    let public_routes = Router::new()
+        .route("/api/health", get(health))
+        .route("/api/status", get(setup::status))
+        .route("/api/setup/database/test", post(setup::test_database))
+        .route("/api/setup/finish", post(setup::finish))
+        .route("/api/auth/login", post(auth::login));
+
+    // PROTECTED ROUTES — every handler here takes `auth::AuthUser` as a
+    // parameter; that extractor rejecting the request with 401 *is* the
+    // enforcement (see auth.rs's doc comment on `AuthUser`). Add every
+    // future data-serving endpoint (libraries, media, admin settings, ...)
+    // to this group, not `public_routes`.
+    let protected_routes = Router::new()
+        .route("/api/auth/me", get(auth::me))
+        .route("/api/auth/logout", post(auth::logout));
+
+    // Permissive for now: same-origin in dev (via the frontend's Vite
+    // proxy) and planned same-origin in production (one reverse proxy in
+    // front of both). The custom Authorization header and the frontend's
+    // session cookie both need this revisited before this server is ever
+    // exposed to a different origin than its own web app.
+    let app = public_routes
+        .merge(protected_routes)
+        .layer(CorsLayer::permissive())
+        .with_state(state);
+
+    let bind_addr = std::env::var("LISEK_BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
+    let listener = tokio::net::TcpListener::bind(&bind_addr)
         .await
-        .expect("failed to bind to 0.0.0.0:8080");
+        .unwrap_or_else(|err| panic!("failed to bind to {bind_addr}: {err}"));
 
     tracing::info!(
-        "lisek-server listening on {}",
+        "LisekMovie backend listening on http://{}",
         listener.local_addr().unwrap()
     );
 
     axum::serve(listener, app).await.expect("server error");
+}
+
+/// Looks for a previously saved `DATABASE_URL` and tries to connect. No
+/// saved URL at all means the wizard has never run; a saved URL that fails
+/// to connect is a real operational problem, not a fresh install, so it's
+/// reported distinctly (see [`ServerMode`]).
+async fn detect_initial_mode() -> ServerMode {
+    let Ok(database_url) = std::env::var("DATABASE_URL") else {
+        return ServerMode::SetupRequired;
+    };
+
+    match lisek_db::connect(&database_url).await {
+        Ok(pool) => match lisek_db::run_migrations(&pool).await {
+            Ok(()) => ServerMode::Ready(pool),
+            Err(err) => ServerMode::DatabaseError(err.to_string()),
+        },
+        Err(err) => ServerMode::DatabaseError(err.to_string()),
+    }
 }
 
 async fn health() -> Json<Value> {

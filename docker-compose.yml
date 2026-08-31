@@ -15,6 +15,11 @@ services:
       POSTGRES_USER: lisekmovie
       POSTGRES_PASSWORD: lisekmovie
       POSTGRES_DB: lisekmovie
+      # Postgres 18's images expect PGDATA to be a subdirectory of the
+      # mounted volume, not the mount point itself (the image now stores
+      # data in a pg_ctlcluster-style, major-version-specific layout).
+      # Without this the container loop-restarts on a fresh volume.
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "5432:5432"
     volumes:
