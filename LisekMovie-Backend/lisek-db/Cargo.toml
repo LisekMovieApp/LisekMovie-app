@@ -1,0 +1,9 @@
+[package]
+name = "lisek-db"
+description = "PostgreSQL access layer (sqlx) and migrations."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

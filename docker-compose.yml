@@ -1,0 +1,29 @@
+# Convenience PostgreSQL instance for the "set it up for me" path in the
+# First-Run Wizard. lisek-server itself always runs as a separate process —
+# this only provides the database, it does not run the app.
+#
+# Usage: docker compose up -d
+# Then point the wizard (or DATABASE_URL) at localhost:5432 with the
+# credentials below, or your own values if you changed them.
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: lisekmovie-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lisekmovie
+      POSTGRES_PASSWORD: lisekmovie
+      POSTGRES_DB: lisekmovie
+    ports:
+      - "5432:5432"
+    volumes:
+      - lisekmovie-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lisekmovie"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  lisekmovie-postgres-data:

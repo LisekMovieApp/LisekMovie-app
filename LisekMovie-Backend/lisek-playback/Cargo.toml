@@ -1,0 +1,9 @@
+[package]
+name = "lisek-playback"
+description = "Playback sessions, transcoding (FFmpeg), transcode safety."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

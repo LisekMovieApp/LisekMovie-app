@@ -1,0 +1,26 @@
+# Rust
+/LisekMovie-Backend/target/
+**/target/
+
+# Node / SvelteKit
+/LisekMovie-Frontend/node_modules/
+/LisekMovie-Frontend/.svelte-kit/
+/LisekMovie-Frontend/build/
+**/node_modules/
+
+# Secrets — never commit real values, only .env.example
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+*.swp
+
+# Local dev data (DB dumps, thumbnail/poster cache)
+*.sql.gz
+/thumbnail-cache/

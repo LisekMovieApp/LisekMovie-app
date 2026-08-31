@@ -1,0 +1,9 @@
+[package]
+name = "lisek-metadata"
+description = "Metadata provider registry: ordering, overrides, locks."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

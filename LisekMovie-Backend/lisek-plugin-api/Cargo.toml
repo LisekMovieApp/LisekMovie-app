@@ -1,0 +1,9 @@
+[package]
+name = "lisek-plugin-api"
+description = "Shared contract (trait) for external metadata provider extensions."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

@@ -1,0 +1,25 @@
+[package]
+name = "lisek-server"
+description = "Main binary: Axum routing, middleware, startup."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+lisek-core = { path = "../lisek-core" }
+lisek-db = { path = "../lisek-db" }
+lisek-auth = { path = "../lisek-auth" }
+lisek-library = { path = "../lisek-library" }
+lisek-metadata = { path = "../lisek-metadata" }
+lisek-playback = { path = "../lisek-playback" }
+lisek-telemetry = { path = "../lisek-telemetry" }
+lisek-notifications = { path = "../lisek-notifications" }
+lisek-games = { path = "../lisek-games" }
+lisek-plugin-api = { path = "../lisek-plugin-api" }
+tokio = { version = "1.53.1", features = ["full"] }
+axum = "0.8.9"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"

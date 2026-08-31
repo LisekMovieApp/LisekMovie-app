@@ -1,0 +1,9 @@
+[package]
+name = "lisek-core"
+description = "Domain types and business logic: libraries, media items, users."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

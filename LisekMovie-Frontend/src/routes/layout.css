@@ -1,0 +1,25 @@
+@import 'tailwindcss';
+@plugin '@tailwindcss/forms';
+
+/*
+ * LisekMovie brand tokens.
+ * Source of truth: decided by the project author, Faza 1. Generates
+ * bg-gold / text-gold / border-gold (etc.) utilities for every token below.
+ */
+@theme {
+	--color-gold: #bda24d; /* primary accent: CTAs, buttons, active state, focus ring */
+	--color-gold-dim: #8a7638; /* hover/pressed state, secondary accent */
+	--color-surface: #1a1a1a; /* cards, panels, nav menu, containers */
+	--color-base: #000000; /* page background */
+}
+
+@layer base {
+	body {
+		@apply bg-base text-neutral-100;
+	}
+
+	/* Visible keyboard focus everywhere — required for remote/D-pad TV navigation, where there is no mouse cursor to show state. */
+	:focus-visible {
+		@apply rounded-sm outline-2 outline-offset-2 outline-gold;
+	}
+}
