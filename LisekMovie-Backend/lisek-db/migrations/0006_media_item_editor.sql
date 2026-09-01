@@ -1,0 +1,21 @@
+-- Faza 5 completion: backs the metadata editor's "Pola aktywne" section —
+-- an admin can protect individual fields from being overwritten by a
+-- future automatic re-scan/refresh without locking the whole item the way
+-- `metadata_locked` already does (see `media_items`'s Faza 1 columns).
+--
+-- Field names stored here are the same identifiers the editor's own form
+-- uses ("title", "overview" today), not display labels — see
+-- `lisek-db::locked_fields`'s doc comment for the exact set and where each
+-- one is enforced. Empty by default: nothing is individually protected
+-- until an admin explicitly unchecks a field in the editor.
+ALTER TABLE media_items ADD COLUMN locked_fields TEXT[] NOT NULL DEFAULT '{}';
+
+-- An admin-entered original/native-language title — distinct from `title`
+-- (which a scan can still refresh), and from any provider's own title
+-- match (providers here are only ever asked to enrich `overview` plus
+-- their own id, never a second title). Lives in the same `metadata` JSONB
+-- blob as the scan-derived `year`/`season`/`episode` fields already do,
+-- at the top level (not under `provider_data`, since this is never
+-- provider-sourced) — no schema column needed for one optional string.
+-- No backfill: `NULL` here simply means "not entered yet", which every
+-- reader already treats correctly as "nothing to show".

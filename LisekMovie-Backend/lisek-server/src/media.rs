@@ -1,9 +1,16 @@
 //! Client-facing media endpoints: the home-page feed (hero item + four
-//! rows) and serving one item's poster/backdrop image. No `require_admin`
-//! gate here — unlike everything in `admin.rs`, browsing the library and
-//! viewing its images is for every signed-in account, not just admins;
-//! `AuthUser` alone (see its own module's doc comment on why every
-//! data-serving route needs it) is this module's whole security boundary.
+//! rows), one item's full detail (the "Movie Detail View" the admin asked
+//! for once cards became clickable), and serving one item's
+//! poster/backdrop/logo image. No `require_admin` gate here — unlike
+//! everything in `admin.rs`, browsing the library and viewing its images
+//! and details is for every signed-in account, not just admins; `AuthUser`
+//! alone (see its own module's doc comment on why every data-serving route
+//! needs it) is this module's whole security boundary. The *editing*
+//! surface for an item's metadata stays admin-only, unchanged, in
+//! `admin.rs`'s own `get_media_item`/`update_media_item` — this module's
+//! [`media_item_detail`] is a read-only, non-admin-safe view of the same
+//! row (no `original_title`/`locked_fields`/`forced_provider` exposed here,
+//! nothing an ordinary account shouldn't see).
 //!
 //! As of Faza 5 round 2, an item's image doesn't always live in the local
 //! `config_dir` cache — a library with `save_metadata_in_media_folder`
@@ -30,11 +37,21 @@ use uuid::Uuid;
 use crate::auth::AuthUser;
 use crate::state::SharedState;
 
-/// One item as the frontend consumes it: `lisek_core::MediaItem` plus the
-/// two image URLs, which aren't stored anywhere — they're just this item's
-/// id slotted into the two routes below. Always present, even for an item
-/// with no cached image yet; the routes themselves 404 rather than this
-/// struct trying to know in advance whether a file exists on disk.
+/// One item as the frontend consumes it: `lisek_core::MediaItem` plus its
+/// image URLs, which aren't stored anywhere — they're just this item's id
+/// slotted into the routes below. Always present, even for an item with no
+/// cached image of that kind yet; the routes themselves 404 rather than
+/// this struct trying to know in advance whether a file exists on disk —
+/// mirrors the poster/backdrop `<img onerror>` pattern already established
+/// on the frontend (see `MediaCard.svelte`/`HeroBanner.svelte`), which
+/// `logo_url` reuses as-is: a card or the Detail View just tries loading it
+/// and falls back to the plain text title if that 404s, exactly like a
+/// missing poster falls back to nothing.
+///
+/// `item_type` is `"movie"` or `"series"` as of Runda 8 — never a bare
+/// `"episode"` any more (see `lisek_db`'s `home_candidates` CTE doc
+/// comment): every response this module hands out already represents
+/// something browsable on its own, not one file out of a season.
 #[derive(Serialize)]
 pub struct MediaItemResponse {
     pub id: Uuid,
@@ -46,6 +63,15 @@ pub struct MediaItemResponse {
     pub episode: Option<i32>,
     pub poster_url: String,
     pub backdrop_url: String,
+    pub logo_url: String,
+    /// `"new_series"` / `"new_season"` / `"new_episodes"`, or `None` — see
+    /// `lisek_db::classify_series_badge`'s doc comment. Only ever set by
+    /// [`to_response`] for a `item_type: "series"` row coming back from a
+    /// home-feed query; the plain [`From`] impl below always leaves it
+    /// `None`, which is what [`media_item_detail`] (the single-item Detail
+    /// View endpoint) returns as-is — the badge is a home-feed-card
+    /// affordance, not something the Detail View itself was asked to show.
+    pub badge: Option<String>,
 }
 
 impl From<lisek_core::MediaItem> for MediaItemResponse {
@@ -53,6 +79,7 @@ impl From<lisek_core::MediaItem> for MediaItemResponse {
         Self {
             poster_url: format!("/api/media/{}/poster", item.id),
             backdrop_url: format!("/api/media/{}/backdrop", item.id),
+            logo_url: format!("/api/media/{}/logo", item.id),
             id: item.id,
             item_type: item.item_type,
             title: item.title,
@@ -60,8 +87,43 @@ impl From<lisek_core::MediaItem> for MediaItemResponse {
             overview: item.overview,
             season: item.season,
             episode: item.episode,
+            badge: None,
         }
     }
+}
+
+/// [`MediaItemResponse::from`] plus, for a `"series"` item, its "new"
+/// badge — a separate async step because computing the badge needs its own
+/// database round trip (see `lisek_db::classify_series_badge`), which a
+/// plain `From` impl can't do. Used for every item the home feed hands
+/// back; [`media_item_detail`] deliberately skips this and uses the plain
+/// `From` conversion instead (see [`MediaItemResponse::badge`]'s own doc
+/// comment for why).
+async fn to_response(pool: &lisek_db::PgPool, item: lisek_core::MediaItem) -> MediaItemResponse {
+    let badge = if item.item_type == "series" {
+        lisek_db::classify_series_badge(pool, item.library_id, &item.title)
+            .await
+            .ok()
+            .flatten()
+            .map(|badge| badge.as_str().to_string())
+    } else {
+        None
+    };
+
+    let mut response = MediaItemResponse::from(item);
+    response.badge = badge;
+    response
+}
+
+async fn to_responses(
+    pool: &lisek_db::PgPool,
+    items: Vec<lisek_core::MediaItem>,
+) -> Vec<MediaItemResponse> {
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        out.push(to_response(pool, item).await);
+    }
+    out
 }
 
 /// How many cards each row fetches — generous enough to fill and slightly
@@ -108,13 +170,101 @@ pub async fn home_feed(
         .await
         .map_err(|_| MediaError::Internal)?;
 
+    let hero = match hero {
+        Some(item) => Some(to_response(&pool, item).await),
+        None => None,
+    };
+
     Ok(Json(HomeFeedResponse {
-        hero: hero.map(Into::into),
-        recently_added: recently_added.into_iter().map(Into::into).collect(),
-        top10: top10.into_iter().map(Into::into).collect(),
-        recommended: recommended.into_iter().map(Into::into).collect(),
-        popular: popular.into_iter().map(Into::into).collect(),
+        hero,
+        recently_added: to_responses(&pool, recently_added).await,
+        top10: to_responses(&pool, top10).await,
+        recommended: to_responses(&pool, recommended).await,
+        popular: to_responses(&pool, popular).await,
     }))
+}
+
+/// One item's full detail — the "Movie Detail View" the admin asked for
+/// once cards became clickable. Public (any signed-in account, not just
+/// admins — see this module's own doc comment), and deliberately reuses
+/// [`MediaItemResponse`] rather than a bespoke type: the home feed already
+/// carries everything this view shows (title/year/overview/season/episode
+/// plus every image URL), so a separate response shape would just be the
+/// same fields under different names. A dedicated route exists at all
+/// because the home feed only ever returns a handful of rows — an item
+/// reached by direct link (or simply not among the home feed's most-recent
+/// picks) still needs to be fetchable on its own.
+pub async fn media_item_detail(
+    _auth: AuthUser,
+    State(state): State<SharedState>,
+    Path(item_id): Path<Uuid>,
+) -> Result<Json<MediaItemResponse>, MediaError> {
+    let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
+    let item = lisek_db::get_media_item(&pool, item_id)
+        .await
+        .map_err(|_| MediaError::Internal)?
+        .ok_or(MediaError::NotFound)?;
+    Ok(Json(item.into()))
+}
+
+/// One episode, as the "Sezony" section renders it — see
+/// `lisek_db::list_series_seasons`'s doc comment for exactly why this is
+/// this thin (no title/thumbnail/runtime/overview: none of it exists
+/// anywhere in this app yet). `poster_url`/`backdrop_url` reuse the exact
+/// same `/api/media/{id}/...` routes as [`MediaItemResponse`] — `id` here
+/// is a real `media_items` row, so they resolve the same way.
+#[derive(Serialize)]
+pub struct SeriesEpisodeResponse {
+    pub id: Uuid,
+    pub episode: i32,
+    pub end_episode: Option<i32>,
+    pub poster_url: String,
+    pub backdrop_url: String,
+}
+
+impl From<lisek_db::SeriesEpisode> for SeriesEpisodeResponse {
+    fn from(episode: lisek_db::SeriesEpisode) -> Self {
+        Self {
+            poster_url: format!("/api/media/{}/poster", episode.id),
+            backdrop_url: format!("/api/media/{}/backdrop", episode.id),
+            id: episode.id,
+            episode: episode.episode,
+            end_episode: episode.end_episode,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct SeriesSeasonResponse {
+    pub season: i32,
+    pub episodes: Vec<SeriesEpisodeResponse>,
+}
+
+impl From<lisek_db::SeriesSeason> for SeriesSeasonResponse {
+    fn from(season: lisek_db::SeriesSeason) -> Self {
+        Self {
+            season: season.season,
+            episodes: season.episodes.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// The "Sezony" section's own data — every season, and every season's
+/// episodes, for the show `item_id` resolves to. Public, same as every
+/// other route in this module; an empty array (not a 404) for an id that
+/// doesn't exist, isn't a `media_items` row, or names a movie — see
+/// `lisek_db::list_series_seasons`'s own doc comment on why that's the
+/// right response rather than a distinct error case here.
+pub async fn media_item_seasons(
+    _auth: AuthUser,
+    State(state): State<SharedState>,
+    Path(item_id): Path<Uuid>,
+) -> Result<Json<Vec<SeriesSeasonResponse>>, MediaError> {
+    let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
+    let seasons = lisek_db::list_series_seasons(&pool, item_id)
+        .await
+        .map_err(|_| MediaError::Internal)?;
+    Ok(Json(seasons.into_iter().map(Into::into).collect()))
 }
 
 /// Serves one item's poster. `AuthUser` accepts a `?token=` query param
@@ -130,6 +280,7 @@ pub async fn poster_image(
         item_id,
         "poster.jpg",
         lisek_metadata::image_cache::poster_cache_path,
+        "image/jpeg",
     )
     .await
 }
@@ -145,6 +296,32 @@ pub async fn backdrop_image(
         item_id,
         "backdrop.jpg",
         lisek_metadata::image_cache::backdrop_cache_path,
+        "image/jpeg",
+    )
+    .await
+}
+
+/// Same as [`poster_image`] for the transparent title-logo image — `.png`
+/// media-folder filename and `image/png` content type, matching
+/// `lisek_metadata::image_cache::logo_cache_path`'s own `.png` convention
+/// (see that function's doc comment for why: real transparency, and every
+/// logo this app downloads has already been filtered to PNG at the
+/// provider layer). A 404 here just means this item has no logo — a very
+/// common, unremarkable case (most titles don't have one cataloged, and
+/// TVDB-only items never will yet — see `lisek_plugin_api::ProviderMatch`'s
+/// own doc comment), which is exactly why the frontend treats it the same
+/// as a missing poster: an `<img onerror>` fallback, not an error state.
+pub async fn logo_image(
+    _auth: AuthUser,
+    State(state): State<SharedState>,
+    Path(item_id): Path<Uuid>,
+) -> Response {
+    serve_item_image(
+        &state,
+        item_id,
+        "logo.png",
+        lisek_metadata::image_cache::logo_cache_path,
+        "image/png",
     )
     .await
 }
@@ -157,20 +334,25 @@ pub async fn backdrop_image(
 /// there — is treated identically as "no media-folder candidate, try the
 /// cache" rather than as the request's final error; only the cache read at
 /// the end decides between success and 404, exactly like before this
-/// media-folder lookup was added.
+/// media-folder lookup was added. `content_type` is a fixed value per image
+/// kind (`"image/jpeg"` for poster/backdrop, `"image/png"` for logo) rather
+/// than sniffed from the bytes — cheap and correct, since every write path
+/// already guarantees which format lands at each of these three cache
+/// paths.
 async fn serve_item_image(
     state: &SharedState,
     item_id: Uuid,
     media_folder_filename: &str,
     cache_path_fn: fn(&FsPath, Uuid) -> PathBuf,
+    content_type: &'static str,
 ) -> Response {
     if let Some(bytes) = read_media_folder_image(state, item_id, media_folder_filename).await {
-        return image_response(bytes);
+        return image_response(bytes, content_type);
     }
 
     let cache_path = cache_path_fn(&crate::state::config_dir(), item_id);
     match tokio::fs::read(&cache_path).await {
-        Ok(bytes) => image_response(bytes),
+        Ok(bytes) => image_response(bytes, content_type),
         // Neither a media-folder copy nor a cached one — either this item
         // has no provider match yet, or no provider is configured at all.
         // A 404 is exactly right here: the frontend's `<img>` `onerror`
@@ -233,10 +415,10 @@ async fn read_media_folder_image(
     }
 }
 
-fn image_response(bytes: Vec<u8>) -> Response {
+fn image_response(bytes: Vec<u8>, content_type: &'static str) -> Response {
     (
         [
-            (header::CONTENT_TYPE, "image/jpeg"),
+            (header::CONTENT_TYPE, content_type),
             // Not content-addressed the way the old cache-only path was
             // (a media-folder file can be replaced by the admin at any
             // time outside a scan), but still only ever changes on a
@@ -252,6 +434,11 @@ fn image_response(bytes: Vec<u8>) -> Response {
 #[derive(Debug)]
 pub enum MediaError {
     ServerNotReady,
+    /// No `media_items` row with this id — [`media_item_detail`]'s own
+    /// "the item this link points to doesn't exist" case, distinct from
+    /// [`MediaError::Internal`] so the frontend can show a real "not
+    /// found" state instead of a generic error banner.
+    NotFound,
     Internal,
 }
 
@@ -262,6 +449,11 @@ impl IntoResponse for MediaError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_not_ready",
                 "The server isn't fully configured yet.",
+            ),
+            MediaError::NotFound => (
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "No such media item exists.",
             ),
             MediaError::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,

@@ -51,15 +51,30 @@ pub struct SeriesQuery<'a> {
 /// One provider's match for an item: whatever fields it wants merged into
 /// the item's `media_items.metadata` (namespaced under `"provider_data"`
 /// by the caller — see `lisek_db::attach_provider_metadata`), plus ready-
-/// to-download poster/backdrop URLs when it has them. A provider only ever
+/// to-download image URLs when it has them. A provider only ever
 /// returns a URL here — `lisek-server`'s `metadata_enrichment` module is
 /// what actually downloads and writes the image to disk (media folder or
 /// local cache); no provider extension touches the filesystem itself.
+///
+/// `logo_url`/`banner_url` were added alongside `poster_url`/`backdrop_url`
+/// once the admin asked for the fuller asset set a Hero Banner wants (a
+/// transparent title logo instead of plain HTML text). Neither is
+/// guaranteed populated by every provider: TMDB's `/images` endpoint has a
+/// real `logos` array (see `LisekMovie-plugin-tmdb`) but no equivalent
+/// "banner" artwork type at all, so `banner_url` is always `None` from
+/// TMDB — there is no TMDB asset to put there, not a bug. TVDB v4 *does*
+/// have wide-banner artwork, but its type ids are returned dynamically by
+/// `GET /artwork/types` rather than being fixed, documented constants (the
+/// way TMDB's genre ids are) — wiring that up needs its own verified
+/// implementation, not a guessed type id, so it's left `None` here too for
+/// now rather than risk shipping a silently-wrong artwork lookup.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ProviderMatch {
     pub fields: serde_json::Value,
     pub poster_url: Option<String>,
     pub backdrop_url: Option<String>,
+    pub logo_url: Option<String>,
+    pub banner_url: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -106,10 +121,208 @@ pub trait MetadataProvider: Send + Sync {
     ) -> Result<Option<ProviderMatch>, ProviderError>;
 }
 
+/// Lowercases `title` and turns punctuation a provider's search backend
+/// generally treats as noise — colons, commas, semicolons, dashes, periods,
+/// and similar marks — into a plain word boundary, collapsing whitespace
+/// runs down to single spaces. Apostrophes are dropped outright rather than
+/// turned into a space (`"Ocean's Eleven"` → `"oceans eleven"`, not `"ocean
+/// s eleven"` — the latter is a worse query, not a cleaner one).
+///
+/// Safe to apply unconditionally, to every query this crate's provider
+/// extensions send: a title that was already plain text comes back
+/// unchanged in substance (every provider's search is already
+/// case-insensitive), while a title still carrying scene-release
+/// punctuation or subtitle separators — `"Movie: The Subtitle"`,
+/// `"Asterix.I.Obelix..."`-style dotted names that slipped past
+/// `lisek-library`'s own cleanup — comes back normalized into the plain,
+/// spaced-out form providers actually index well.
+pub fn normalize_query_title(title: &str) -> String {
+    let lowered = title.to_lowercase();
+    let mut out = String::with_capacity(lowered.len());
+    for ch in lowered.chars() {
+        match ch {
+            '\'' | '\u{2019}' | '`' => {}
+            c if c.is_alphanumeric() || c.is_whitespace() => out.push(c),
+            _ => out.push(' '),
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Folds a handful of Latin-alphabet diacritics — the Polish and Czech
+/// letters this app's own shipped locales (PL/EN/CS) actually use — down to
+/// their plain ASCII base letter. Not a general Unicode normalizer (no
+/// `unicode-normalization` dependency pulled in for it): a small, explicit
+/// table matches this project's existing preference for plain, auditable
+/// Rust over a general-purpose crate for a narrow, known need — see
+/// `lisek-library`'s own hand-rolled junk-token lists for the same idea
+/// applied to filename parsing.
+fn strip_diacritics_char(ch: char) -> char {
+    match ch {
+        'ą' => 'a',
+        'ć' => 'c',
+        'ę' => 'e',
+        'ł' => 'l',
+        'ń' => 'n',
+        'ó' => 'o',
+        'ś' => 's',
+        'ź' | 'ż' => 'z',
+        'á' => 'a',
+        'č' => 'c',
+        'ď' => 'd',
+        'é' | 'ě' => 'e',
+        'í' => 'i',
+        'ň' => 'n',
+        'ř' => 'r',
+        'š' => 's',
+        'ť' => 't',
+        'ú' | 'ů' => 'u',
+        'ý' => 'y',
+        // Czech 'ž' (U+017E, LATIN SMALL LETTER Z WITH CARON) is a
+        // different character from Polish 'ż' (U+017C, ...WITH DOT ABOVE)
+        // above despite looking near-identical — easy to drop by accident
+        // in a hand-rolled table exactly like this one; the test this fixed
+        // is what caught it.
+        'ž' => 'z',
+        other => other,
+    }
+}
+
+/// Applies [`strip_diacritics_char`] to every character of `title` — call
+/// this on an already-[`normalize_query_title`]'d (lowercased) string, not
+/// raw input; the table above only covers lowercase letters.
+pub fn strip_diacritics(title: &str) -> String {
+    title.chars().map(strip_diacritics_char).collect()
+}
+
+/// The first `n` whitespace-separated words of `title`, rejoined with
+/// single spaces. Used to build a deliberately loose last-resort search
+/// query — see [`query_candidates`] — for a title a provider's search
+/// rejected in full; fewer words than `n` in `title` just returns what's
+/// there instead of padding or erroring.
+pub fn first_words(title: &str, n: usize) -> String {
+    title
+        .split_whitespace()
+        .take(n)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Builds an ordered list of increasingly loose search-query candidates out
+/// of a scanned title, for a provider extension to try in order and stop at
+/// the first real match: the [`normalize_query_title`]'d title first, then
+/// — only when it actually differs — a [`strip_diacritics`]'d variant, then
+/// — only when *that* differs from every earlier entry and isn't empty —
+/// just its [`first_words`]`(_, 2)`. A title with no diacritics and only
+/// one or two words to begin with comes back as a single-entry list, not
+/// three copies of the same string; every provider extension using this is
+/// still responsible for its own per-candidate retry policy (e.g. TMDB's
+/// own year → no-year retry), this only ever varies the *title* text.
+pub fn query_candidates(title: &str) -> Vec<String> {
+    let normalized = normalize_query_title(title);
+    let mut candidates = vec![normalized.clone()];
+
+    let diacritics_stripped = strip_diacritics(&normalized);
+    if diacritics_stripped != normalized {
+        candidates.push(diacritics_stripped.clone());
+    }
+
+    let fallback = first_words(&diacritics_stripped, 2);
+    if !fallback.is_empty() && !candidates.contains(&fallback) {
+        candidates.push(fallback);
+    }
+
+    candidates
+}
+
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn crate_scaffold_compiles() {
         assert_eq!(env!("CARGO_PKG_NAME"), "lisek-plugin-api");
+    }
+
+    #[test]
+    fn normalize_query_title_lowercases_and_turns_punctuation_into_boundaries() {
+        assert_eq!(
+            normalize_query_title("Movie: The Subtitle, Part One - Redux"),
+            "movie the subtitle part one redux"
+        );
+    }
+
+    #[test]
+    fn normalize_query_title_drops_apostrophes_without_splitting_the_word() {
+        assert_eq!(normalize_query_title("Ocean's Eleven"), "oceans eleven");
+    }
+
+    #[test]
+    fn normalize_query_title_collapses_repeated_whitespace() {
+        assert_eq!(normalize_query_title("Movie   Title"), "movie title");
+    }
+
+    #[test]
+    fn strip_diacritics_folds_polish_and_czech_letters() {
+        assert_eq!(
+            strip_diacritics("asterix i obelix w służbie jej królewskiej mości"),
+            "asterix i obelix w sluzbie jej krolewskiej mosci"
+        );
+        assert_eq!(
+            strip_diacritics("příliš žluťoučký kůň"),
+            "prilis zlutoucky kun"
+        );
+    }
+
+    #[test]
+    fn strip_diacritics_leaves_plain_ascii_untouched() {
+        assert_eq!(strip_diacritics("plain title"), "plain title");
+    }
+
+    #[test]
+    fn first_words_takes_only_the_requested_count() {
+        assert_eq!(first_words("asterix i obelix w sluzbie", 2), "asterix i");
+        assert_eq!(first_words("one", 2), "one");
+        assert_eq!(first_words("", 2), "");
+    }
+
+    #[test]
+    fn query_candidates_normalizes_only_once_for_a_plain_ascii_title() {
+        assert_eq!(query_candidates("Inception"), vec!["inception"]);
+    }
+
+    #[test]
+    fn query_candidates_adds_a_diacritics_stripped_variant_when_it_differs() {
+        // Entry 0 is always the plain normalized (lowercased, punctuation-
+        // cleaned) title — diacritics untouched; entry 1 is the
+        // diacritics-stripped variant, only added because it differs.
+        let candidates = query_candidates("Śluby Panieńskie");
+        assert_eq!(candidates, vec!["śluby panieńskie", "sluby panienskie"]);
+
+        let candidates = query_candidates("Żółć");
+        assert_eq!(candidates, vec!["żółć", "zolc"]);
+    }
+
+    #[test]
+    fn query_candidates_appends_a_two_word_fallback_for_a_longer_title() {
+        // The exact real-world case this cascade exists for: TMDB rejected
+        // the full, correctly-parsed title outright — this is the last
+        // resort, tried only once both fuller attempts have failed.
+        let candidates = query_candidates("Asterix i Obelix W Służbie Jej Królewskiej Mości");
+        assert_eq!(
+            candidates,
+            vec![
+                "asterix i obelix w służbie jej królewskiej mości",
+                "asterix i obelix w sluzbie jej krolewskiej mosci",
+                "asterix i",
+            ]
+        );
+    }
+
+    #[test]
+    fn query_candidates_skips_the_fallback_when_it_duplicates_an_earlier_entry() {
+        // A plain two-word ASCII title: the fallback (its own first two
+        // words) is identical to the normalized entry already in the list.
+        assert_eq!(query_candidates("Plain Title"), vec!["plain title"]);
     }
 }

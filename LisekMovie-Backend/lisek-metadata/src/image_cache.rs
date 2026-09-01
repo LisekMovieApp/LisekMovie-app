@@ -7,9 +7,11 @@
 //! and the app never has to re-fetch the same image from a provider on
 //! every page load.
 //!
-//! Cache layout: `{config_dir}/metadata/posters/{item_id}.jpg` and
-//! `{config_dir}/metadata/backdrops/{item_id}.jpg` — see
-//! [`poster_cache_path`]/[`backdrop_cache_path`]. `config_dir` itself is
+//! Cache layout: `{config_dir}/metadata/posters/{item_id}.jpg`,
+//! `{config_dir}/metadata/backdrops/{item_id}.jpg`, and
+//! `{config_dir}/metadata/logos/{item_id}.png` — see
+//! [`poster_cache_path`]/[`backdrop_cache_path`]/[`logo_cache_path`].
+//! `config_dir` itself is
 //! `lisek-server`'s concern (an env var with a sensible default); this
 //! module only needs *a* directory, not where it comes from. Likewise, the
 //! exact filename used inside a media folder (`poster.jpg`, `backdrop.jpg`)
@@ -61,6 +63,18 @@ pub fn backdrop_cache_path(config_dir: &Path, item_id: Uuid) -> PathBuf {
         .join("metadata")
         .join("backdrops")
         .join(format!("{item_id}.jpg"))
+}
+
+/// Same as [`poster_cache_path`] for the transparent title-logo image —
+/// `.png`, not `.jpg`, since a logo needs real transparency and every logo
+/// this app ever downloads has already been filtered down to PNG at the
+/// provider layer (see `LisekMovie-plugin-tmdb`'s own doc comment on why a
+/// non-PNG logo is treated as "no logo" rather than saved mislabeled).
+pub fn logo_cache_path(config_dir: &Path, item_id: Uuid) -> PathBuf {
+    config_dir
+        .join("metadata")
+        .join("logos")
+        .join(format!("{item_id}.png"))
 }
 
 /// Downloads whatever's at `url` and writes it to `dest`, creating any
@@ -178,6 +192,10 @@ mod tests {
         assert_eq!(
             backdrop_cache_path(config_dir, item_id),
             Path::new("/config/metadata/backdrops/00000000-0000-0000-0000-000000000000.jpg")
+        );
+        assert_eq!(
+            logo_cache_path(config_dir, item_id),
+            Path::new("/config/metadata/logos/00000000-0000-0000-0000-000000000000.png")
         );
     }
 

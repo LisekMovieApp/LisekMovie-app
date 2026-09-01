@@ -27,6 +27,15 @@
   component doesn't re-implement or repeat that fix, it just doesn't
   interfere with it since there's no `overflow-x-auto` container to
   implicitly gain `overflow-y: auto` from anymore.
+
+  Drag engagement is threshold-based (`DRAG_THRESHOLD_PX`), not immediate
+  on press — found and fixed after the cards inside this track (once made
+  clickable links) turned out to never actually navigate. Capturing the
+  pointer on every `pointerdown`, as the first version did, retargets the
+  browser's synthesized `click` for the rest of that gesture to the
+  capturing element per the Pointer Events spec — so the `click` never
+  reached a card's own `<a>` at all, on every single press. See the
+  `onPointerDown`/`onPointerMove`/`endDrag` comments below for the fix.
 -->
 <script lang="ts">
 	import { t } from '$lib/i18n';
@@ -75,26 +84,73 @@
 	let dragPointerId: number | null = null;
 	let dragStartX = 0;
 	let dragStartOffset = 0;
+	/** Whether this pointer's movement has actually crossed `DRAG_THRESHOLD_PX`
+	 * and engaged real dragging (`setPointerCapture` called) — see the
+	 * `onPointerDown` comment below for why capture is deliberately NOT
+	 * engaged immediately on press. */
+	let dragEngaged = false;
+
+	/** Minimum horizontal movement (CSS px) before a press counts as a drag.
+	 * Below this, pointerup is left completely alone and behaves like an
+	 * ordinary click/tap on whatever it landed on. */
+	const DRAG_THRESHOLD_PX = 6;
 
 	function onPointerDown(event: PointerEvent) {
 		if (event.pointerType === 'mouse' && event.button !== 0) return;
 		if (maxOffset <= 0) return;
-		dragging = true;
 		dragPointerId = event.pointerId;
 		dragStartX = event.clientX;
 		dragStartOffset = offset;
-		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		dragEngaged = false;
+		// Deliberately NOT calling `setPointerCapture` here, and NOT setting
+		// `dragging = true` yet. The original version did both immediately on
+		// every press — but per the Pointer Events spec, once a pointer is
+		// captured, every later event for it (pointermove, pointerup, and the
+		// *synthesized `click`* that follows) is retargeted to the capturing
+		// element instead of whatever was actually under the pointer. That
+		// silently ate the `click` on every card link inside the track: each
+		// card's own `<a href>` was wired up correctly, the event just never
+		// reached it, on every plain click, every time — capture engaged
+		// before the pointer ever moved. Waiting for real movement (see
+		// `onPointerMove`) before capturing lets a plain tap/click reach its
+		// target completely untouched, while a real drag still works exactly
+		// as before once it crosses the threshold.
 	}
 
 	function onPointerMove(event: PointerEvent) {
-		if (!dragging || event.pointerId !== dragPointerId) return;
-		offset = clampOffset(dragStartOffset - (event.clientX - dragStartX), maxOffset);
+		if (dragPointerId === null || event.pointerId !== dragPointerId) return;
+		const deltaX = event.clientX - dragStartX;
+		if (!dragEngaged) {
+			if (Math.abs(deltaX) < DRAG_THRESHOLD_PX) return;
+			dragEngaged = true;
+			dragging = true;
+			(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+		}
+		offset = clampOffset(dragStartOffset - deltaX, maxOffset);
 	}
 
 	function endDrag(event: PointerEvent) {
 		if (event.pointerId !== dragPointerId) return;
+		if (dragEngaged) {
+			// A real drag happened, not a plain click — but the browser still
+			// fires one `click` right after this pointerup, on whatever card
+			// happens to be under the pointer at release. Swallow exactly
+			// that one so letting go after a drag never also navigates a
+			// card, the same way releasing a native scroll container doesn't
+			// "click" whatever you happened to let go over.
+			swallowNextClick(event.currentTarget as HTMLElement);
+		}
 		dragging = false;
+		dragEngaged = false;
 		dragPointerId = null;
+	}
+
+	function swallowNextClick(target: HTMLElement) {
+		const suppressOnce = (clickEvent: MouseEvent) => {
+			clickEvent.preventDefault();
+			clickEvent.stopPropagation();
+		};
+		target.addEventListener('click', suppressOnce, { capture: true, once: true });
 	}
 
 	$effect(() => {

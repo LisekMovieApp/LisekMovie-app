@@ -19,9 +19,15 @@
   metrics leave more space below the baseline than above the cap-height),
   so bottom- or top-aligning it against the poster's plain rectangle reads
   as visibly off — centering is what actually looks centered here.
+
+  Each real entry's whole `<a>` (number + poster together, not just the
+  poster) navigates to that item's Detail View (`/media/[id]`) — matching
+  how the number is visually part of the same clickable unit as the art
+  underneath it, per the reference layout.
 -->
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
+	import { resolve } from '$app/paths';
 	import { t } from '$lib/i18n';
 	import Carousel from './Carousel.svelte';
 	import { imageUrl, type MediaItem } from '$lib/media/api';
@@ -70,7 +76,7 @@
 				{/each}
 			{:else}
 				{#each items as item, i (item.id)}
-					<div class="flex shrink-0 items-center">
+					<a href={resolve('/media/[id]', { id: item.id })} class="flex shrink-0 items-center">
 						<span
 							aria-hidden="true"
 							class="-mr-5 text-[6.5rem] leading-none font-black text-transparent select-none [-webkit-text-stroke:3px_var(--color-gold)] sm:-mr-7 sm:text-[8.5rem] md:-mr-9 md:text-[10rem]"
@@ -78,7 +84,7 @@
 							{i + 1}
 						</span>
 						<div
-							class="aspect-[2/3] w-[110px] shrink-0 overflow-hidden rounded-md bg-surface sm:w-[140px] md:w-[160px]"
+							class="relative aspect-[2/3] w-[110px] shrink-0 overflow-hidden rounded-md bg-surface sm:w-[140px] md:w-[160px]"
 						>
 							{#if !failedIds.has(item.id)}
 								<img
@@ -91,8 +97,16 @@
 							{:else}
 								<p class="p-2 text-center text-xs text-neutral-400">{item.title}</p>
 							{/if}
+							<!-- Same badge idiom as MediaCard.svelte — see its own comment. -->
+							{#if item.badge}
+								<span
+									class="absolute top-1.5 left-1.5 rounded bg-gold px-1.5 py-0.5 text-[0.6rem] font-semibold text-black sm:text-xs"
+								>
+									{t(`home.badge_${item.badge}`)}
+								</span>
+							{/if}
 						</div>
-					</div>
+					</a>
 				{/each}
 			{/if}
 		</Carousel>

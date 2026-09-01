@@ -15,7 +15,8 @@
 
 	const tabs = [
 		{ href: '/admin/plugins', labelKey: 'admin.tab_plugins' },
-		{ href: '/admin/libraries', labelKey: 'admin.tab_libraries' }
+		{ href: '/admin/libraries', labelKey: 'admin.tab_libraries' },
+		{ href: '/admin/media/fallback', labelKey: 'admin.tab_fallback' }
 	] as const;
 </script>
 

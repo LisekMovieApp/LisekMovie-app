@@ -12,6 +12,7 @@
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { resolve } from '$app/paths';
 	import { t } from '$lib/i18n';
 	import { getSessionCookieClientSide } from '$lib/auth';
 	import {
@@ -140,6 +141,12 @@
 							</div>
 
 							<div class="flex items-center gap-2">
+								<a
+									href={resolve('/admin/libraries/[id]/items', { id: library.id })}
+									class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-gold-dim"
+								>
+									{t('admin.browse_items')}
+								</a>
 								<button
 									type="button"
 									disabled={busyLibraryId === library.id}

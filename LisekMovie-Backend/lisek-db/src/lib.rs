@@ -568,16 +568,36 @@ pub enum EnrichTarget {
 /// save_image`) without a second round trip to look it back up.
 pub struct PersistedScan {
     pub summary: ScanSummary,
-    pub enrich_targets: Vec<(Uuid, EnrichTarget, PathBuf)>,
+    /// `(item_id, target, file_path, forced_provider)` — `forced_provider`
+    /// is this item's own admin-set override (see the metadata editor's
+    /// "Pola aktywne" section), carried straight through from the upsert
+    /// below so the caller can skip straight to that one provider instead
+    /// of the admin's normal priority list. `None` for the overwhelming
+    /// majority of items that have never had one set.
+    pub enrich_targets: Vec<(Uuid, EnrichTarget, PathBuf, Option<String>)>,
 }
 
-/// Upserts one item, returning its id only when the row was actually
-/// inserted or updated. `None` means an existing row was found but left
-/// untouched because it's `metadata_locked` — Postgres's `ON CONFLICT ...
-/// DO UPDATE ... WHERE` skips (and `RETURNING` reports nothing for) a
-/// conflicting row whose `WHERE` condition evaluates false, which is
-/// exactly the "was this actually applied" signal the caller needs to
-/// decide whether the item is worth a metadata-provider lookup at all.
+/// Upserts one item, returning its id (and current `forced_provider`) only
+/// when the row was actually inserted or updated. `None` means an existing
+/// row was found but left untouched because it's `metadata_locked` —
+/// Postgres's `ON CONFLICT ... DO UPDATE ... WHERE` skips (and `RETURNING`
+/// reports nothing for) a conflicting row whose `WHERE` condition
+/// evaluates false, which is exactly the "was this actually applied"
+/// signal the caller needs to decide whether the item is worth a
+/// metadata-provider lookup at all.
+///
+/// A fully `metadata_locked` item skips this whole upsert (as before); a
+/// merely partially-protected one (an individual field in `locked_fields`,
+/// set from the same editor section) still gets scanned and re-enriched
+/// normally, except that field specifically keeps its old value:
+/// `title` when `'title'` is locked, `year` when `'year'` is locked — the
+/// `CASE` expressions below reference the pre-update row (plain
+/// `media_items.*`, not `EXCLUDED.*`) to pull the value back in.
+/// `original_title` (never scanner-derived — see the Faza 5-completion
+/// migration) and `provider_data` (owned by [`attach_provider_metadata`],
+/// applied in a separate follow-up call) are carried forward unconditionally
+/// either way, since this function has no fresh value for either of them
+/// and would otherwise silently erase them on every re-scan.
 async fn upsert_media_item(
     pool: &PgPool,
     library_id: Uuid,
@@ -585,16 +605,31 @@ async fn upsert_media_item(
     title: &str,
     file_path: &Path,
     metadata: &serde_json::Value,
-) -> Result<Option<Uuid>, DbError> {
+) -> Result<Option<(Uuid, Option<String>)>, DbError> {
     let file_path = file_path.to_string_lossy();
-    let id: Option<(Uuid,)> = sqlx::query_as(
+    let row: Option<(Uuid, Option<String>)> = sqlx::query_as(
         r#"
         INSERT INTO media_items (library_id, item_type, title, file_path, metadata)
         VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (library_id, file_path)
-        DO UPDATE SET title = EXCLUDED.title, metadata = EXCLUDED.metadata, updated_at = now()
+        DO UPDATE SET
+            title = CASE
+                WHEN 'title' = ANY(media_items.locked_fields) THEN media_items.title
+                ELSE EXCLUDED.title
+            END,
+            metadata = EXCLUDED.metadata
+                || CASE WHEN media_items.metadata ? 'original_title'
+                        THEN jsonb_build_object('original_title', media_items.metadata->'original_title')
+                        ELSE '{}'::jsonb END
+                || CASE WHEN media_items.metadata ? 'provider_data'
+                        THEN jsonb_build_object('provider_data', media_items.metadata->'provider_data')
+                        ELSE '{}'::jsonb END
+                || CASE WHEN 'year' = ANY(media_items.locked_fields) AND media_items.metadata ? 'year'
+                        THEN jsonb_build_object('year', media_items.metadata->'year')
+                        ELSE '{}'::jsonb END,
+            updated_at = now()
         WHERE NOT media_items.metadata_locked
-        RETURNING id
+        RETURNING id, forced_provider
         "#,
     )
     .bind(library_id)
@@ -605,7 +640,7 @@ async fn upsert_media_item(
     .fetch_optional(pool)
     .await?;
 
-    Ok(id.map(|(id,)| id))
+    Ok(row)
 }
 
 /// Persists every [`ScanResult`] from a library scan into `media_items`,
@@ -626,7 +661,7 @@ pub async fn persist_scan_results(
         match result {
             ScanResult::Movie(movie) => {
                 let metadata = serde_json::json!({ "year": movie.year });
-                let id = upsert_media_item(
+                let row = upsert_media_item(
                     pool,
                     library_id,
                     "movie",
@@ -635,7 +670,7 @@ pub async fn persist_scan_results(
                     &metadata,
                 )
                 .await?;
-                if let Some(id) = id {
+                if let Some((id, forced_provider)) = row {
                     enrich_targets.push((
                         id,
                         EnrichTarget::Movie {
@@ -643,6 +678,7 @@ pub async fn persist_scan_results(
                             year: movie.year,
                         },
                         movie.file_path.clone(),
+                        forced_provider,
                     ));
                 }
                 summary.movies_found += 1;
@@ -653,7 +689,7 @@ pub async fn persist_scan_results(
                     "episode": episode.episode,
                     "end_episode": episode.end_episode,
                 });
-                let id = upsert_media_item(
+                let row = upsert_media_item(
                     pool,
                     library_id,
                     "episode",
@@ -662,13 +698,14 @@ pub async fn persist_scan_results(
                     &metadata,
                 )
                 .await?;
-                if let Some(id) = id {
+                if let Some((id, forced_provider)) = row {
                     enrich_targets.push((
                         id,
                         EnrichTarget::Series {
                             title: episode.series_title.clone(),
                         },
                         episode.file_path.clone(),
+                        forced_provider,
                     ));
                 }
                 summary.episodes_found += 1;
@@ -692,22 +729,43 @@ pub async fn persist_scan_results(
 /// provider fields sit alongside the scan-derived ones (`year`,
 /// `season`/`episode`) already written by [`upsert_media_item`] rather than
 /// replacing them.
+///
+/// Respects the item's own `locked_fields` — here that's `overview`
+/// specifically: when locked, the freshly-fetched `fields.overview` this
+/// call was about to write is swapped back out for whatever the item's
+/// `provider_data` already had, right inside the query (`locked_fields`
+/// and the old `provider_data` are both read live off the row being
+/// updated, not passed in from the caller — so this stays correct however
+/// the item got locked, whether that was before or after the caller
+/// fetched `fields`), so a provider re-match never quietly overwrites an
+/// admin's manual description edit. Every other key in `fields`
+/// (`tmdb_id`/`tvdb_id`) still updates normally either way — only the
+/// single locked key reverts.
 pub async fn attach_provider_metadata(
     pool: &PgPool,
     item_id: Uuid,
     provider_key: &str,
     fields: &serde_json::Value,
 ) -> Result<(), DbError> {
-    let metadata = serde_json::json!({ "provider": provider_key, "provider_data": fields });
     sqlx::query(
         r#"
         UPDATE media_items
-        SET metadata = metadata || $2::jsonb, updated_at = now()
+        SET metadata = metadata || jsonb_build_object(
+                'provider', $2::text,
+                'provider_data',
+                ($3::jsonb) || CASE
+                    WHEN 'overview' = ANY(locked_fields) AND metadata->'provider_data' ? 'overview'
+                    THEN jsonb_build_object('overview', metadata->'provider_data'->'overview')
+                    ELSE '{}'::jsonb
+                END
+            ),
+            updated_at = now()
         WHERE id = $1
         "#,
     )
     .bind(item_id)
-    .bind(metadata)
+    .bind(provider_key)
+    .bind(fields)
     .execute(pool)
     .await?;
 
@@ -752,6 +810,367 @@ pub async fn get_media_item_file_path(
     Ok(row.map(|(file_path,)| file_path))
 }
 
+/// One item's full editable shape — what the metadata editor loads and
+/// what it hands back for [`update_media_item`]. `original_title` reads
+/// straight from `metadata->>'original_title'` (see the Faza
+/// 5-completion migration's doc comment for why that's a JSONB key, not a
+/// column) and `overview` from the same `provider_data` slot the home feed
+/// already reads (a manual edit and a provider match both land there —
+/// see [`update_media_item`]). `locked_fields` names, verbatim, whichever
+/// of `"title"`/`"original_title"`/`"year"`/`"overview"` the admin has
+/// individually protected — the same identifiers the editor's own
+/// checkboxes use, so the frontend never needs a translation table.
+#[derive(Debug, Clone, Serialize)]
+pub struct MediaItemDetail {
+    pub id: Uuid,
+    pub library_id: Uuid,
+    pub item_type: String,
+    pub title: String,
+    pub original_title: Option<String>,
+    pub year: Option<i32>,
+    pub overview: Option<String>,
+    pub season: Option<i32>,
+    pub episode: Option<i32>,
+    pub metadata_locked: bool,
+    pub forced_provider: Option<String>,
+    pub locked_fields: Vec<String>,
+}
+
+type MediaItemDetailRow = (
+    Uuid,
+    Uuid,
+    String,
+    String,
+    Option<String>,
+    Option<i32>,
+    Option<String>,
+    Option<i32>,
+    Option<i32>,
+    bool,
+    Option<String>,
+    Vec<String>,
+);
+
+fn media_item_detail_from_row(row: MediaItemDetailRow) -> MediaItemDetail {
+    MediaItemDetail {
+        id: row.0,
+        library_id: row.1,
+        item_type: row.2,
+        title: row.3,
+        original_title: row.4,
+        year: row.5,
+        overview: row.6,
+        season: row.7,
+        episode: row.8,
+        metadata_locked: row.9,
+        forced_provider: row.10,
+        locked_fields: row.11,
+    }
+}
+
+/// Loads one item for the metadata editor. `None` when no such item
+/// exists (a stale id from a deleted/re-scanned library) — the caller
+/// turns that into a 404, same as every other single-resource lookup in
+/// this crate.
+pub async fn get_media_item_detail(
+    pool: &PgPool,
+    item_id: Uuid,
+) -> Result<Option<MediaItemDetail>, DbError> {
+    let row = sqlx::query_as::<_, MediaItemDetailRow>(
+        r#"
+        SELECT id, library_id, item_type, title,
+               metadata->>'original_title' AS original_title,
+               (metadata->>'year')::int AS year,
+               metadata->'provider_data'->>'overview' AS overview,
+               (metadata->>'season')::int AS season,
+               (metadata->>'episode')::int AS episode,
+               metadata_locked, forced_provider, locked_fields
+        FROM media_items
+        WHERE id = $1
+        "#,
+    )
+    .bind(item_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(media_item_detail_from_row))
+}
+
+/// The metadata editor's save action — an admin's own edit, so unlike
+/// every automatic write in this module, this one is never gated on
+/// `locked_fields` (those only ever protect a field from a *future
+/// automatic* re-scan/refresh, never from the admin editing it directly
+/// right now) and always applies every field, including setting
+/// `metadata_locked`/`forced_provider`/`locked_fields` themselves — this
+/// is the one place all three actually get written. `overview` lands in
+/// the same `metadata->'provider_data'->>'overview'` slot a provider match
+/// already uses (see [`attach_provider_metadata`]), so every reader keeps
+/// working unchanged regardless of whether the current value came from an
+/// admin or a provider; `tmdb_id`/`tvdb_id`/`provider`, if already present
+/// in `provider_data`, survive this call untouched. Returns `false` (no
+/// error) for an id that doesn't exist, same "not found, not a failure"
+/// shape as [`delete_library`].
+#[allow(clippy::too_many_arguments)]
+pub async fn update_media_item(
+    pool: &PgPool,
+    item_id: Uuid,
+    title: &str,
+    original_title: Option<&str>,
+    year: Option<i32>,
+    overview: Option<&str>,
+    metadata_locked: bool,
+    forced_provider: Option<&str>,
+    locked_fields: &[String],
+) -> Result<bool, DbError> {
+    let row: Option<(Uuid,)> = sqlx::query_as(
+        r#"
+        UPDATE media_items
+        SET title = $2,
+            metadata = (metadata - 'original_title' - 'year' - 'provider_data')
+                || jsonb_build_object('original_title', $3::text)
+                || jsonb_build_object('year', $4::int)
+                || jsonb_build_object(
+                    'provider_data',
+                    COALESCE(metadata->'provider_data', '{}'::jsonb)
+                        || jsonb_build_object('overview', $5::text)
+                ),
+            metadata_locked = $6,
+            forced_provider = $7,
+            locked_fields = $8,
+            updated_at = now()
+        WHERE id = $1
+        RETURNING id
+        "#,
+    )
+    .bind(item_id)
+    .bind(title)
+    .bind(original_title)
+    .bind(year)
+    .bind(overview)
+    .bind(metadata_locked)
+    .bind(forced_provider)
+    .bind(locked_fields)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.is_some())
+}
+
+/// Every item in one library, for the Admin Panel's browse view that opens
+/// the metadata editor — deliberately not paginated yet (a self-hosted
+/// library's realistic size doesn't need it at Faza 5's scope; revisit if
+/// that stops being true). `metadata_locked`/`metadata_fallback` ride
+/// along so the browse list itself can show a lock/warning badge without a
+/// second request per row.
+#[derive(Debug, Clone, Serialize)]
+pub struct MediaItemSummary {
+    pub id: Uuid,
+    pub item_type: String,
+    pub title: String,
+    pub year: Option<i32>,
+    pub season: Option<i32>,
+    pub episode: Option<i32>,
+    pub metadata_locked: bool,
+    pub metadata_fallback: bool,
+}
+
+type MediaItemSummaryRow = (
+    Uuid,
+    String,
+    String,
+    Option<i32>,
+    Option<i32>,
+    Option<i32>,
+    bool,
+    bool,
+);
+
+pub async fn list_media_items_for_library(
+    pool: &PgPool,
+    library_id: Uuid,
+) -> Result<Vec<MediaItemSummary>, DbError> {
+    let rows = sqlx::query_as::<_, MediaItemSummaryRow>(
+        r#"
+        SELECT id, item_type, title,
+               (metadata->>'year')::int AS year,
+               (metadata->>'season')::int AS season,
+               (metadata->>'episode')::int AS episode,
+               metadata_locked, metadata_fallback
+        FROM media_items
+        WHERE library_id = $1
+        ORDER BY title ASC
+        "#,
+    )
+    .bind(library_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(
+            |(id, item_type, title, year, season, episode, metadata_locked, metadata_fallback)| {
+                MediaItemSummary {
+                    id,
+                    item_type,
+                    title,
+                    year,
+                    season,
+                    episode,
+                    metadata_locked,
+                    metadata_fallback,
+                }
+            },
+        )
+        .collect())
+}
+
+/// Every item currently flagged `metadata_fallback` — the Admin Panel's
+/// warning view (see the Faza 5-completion roadmap item) lists these with
+/// a "move to the media folder" action per row, so the admin doesn't have
+/// to `SELECT` the database by hand to find out which items only ever got
+/// their poster/backdrop into the local cache. `file_path` rides along so
+/// the caller (`lisek-server`) can derive the exact media-folder
+/// destination the same way `metadata_enrichment::media_folder_destination`
+/// already does, without a second lookup.
+#[derive(Debug, Clone, Serialize)]
+pub struct FallbackItem {
+    pub id: Uuid,
+    pub library_id: Uuid,
+    pub title: String,
+    pub file_path: String,
+}
+
+pub async fn list_fallback_items(pool: &PgPool) -> Result<Vec<FallbackItem>, DbError> {
+    let rows: Vec<(Uuid, Uuid, String, String)> = sqlx::query_as(
+        r#"
+        SELECT id, library_id, title, file_path
+        FROM media_items
+        WHERE metadata_fallback = true
+        ORDER BY title ASC
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(id, library_id, title, file_path)| FallbackItem {
+            id,
+            library_id,
+            title,
+            file_path,
+        })
+        .collect())
+}
+
+/// A library's saved custom provider order for one item type (`"movie"` or
+/// `"episode"`) — `library_provider_config`'s own Faza 1 schema, unused
+/// by any endpoint until the Admin Panel's drag-and-drop reordering UI.
+/// `None` means no override has ever been saved for this (library,
+/// item_type) pair, which the caller treats as "use the admin's global
+/// priority order" (see `lisek-server`'s `provider_registry` doc comment
+/// on where that global order itself comes from).
+pub async fn get_library_provider_order(
+    pool: &PgPool,
+    library_id: Uuid,
+    item_type: &str,
+) -> Result<Option<Vec<String>>, DbError> {
+    let row: Option<(Vec<String>,)> = sqlx::query_as(
+        "SELECT provider_order FROM library_provider_config WHERE library_id = $1 AND item_type = $2",
+    )
+    .bind(library_id)
+    .bind(item_type)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|(order,)| order))
+}
+
+/// Saves a library's custom provider order for one item type — an upsert,
+/// since the Admin Panel's drag-and-drop list always submits the whole
+/// order in one request rather than one move at a time.
+pub async fn set_library_provider_order(
+    pool: &PgPool,
+    library_id: Uuid,
+    item_type: &str,
+    order: &[String],
+) -> Result<(), DbError> {
+    sqlx::query(
+        r#"
+        INSERT INTO library_provider_config (library_id, item_type, provider_order)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (library_id, item_type) DO UPDATE SET provider_order = EXCLUDED.provider_order
+        "#,
+    )
+    .bind(library_id)
+    .bind(item_type)
+    .bind(order)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Every item eligible for the background metadata-refresh job: not
+/// `metadata_locked` (the same gate [`upsert_media_item`] already applies
+/// to a fresh scan — a locked item is exempt from automatic changes
+/// either way), enough to rebuild its [`EnrichTarget`], and its
+/// `forced_provider` so the refresh job can respect it exactly the way a
+/// scan's own enrichment pass does. Individual `locked_fields` need no
+/// equivalent here — [`attach_provider_metadata`] reads that column live
+/// off the row it's updating, not from anything this function hands back.
+/// `library_id` rides along so the caller can look up each item's library
+/// (for `save_metadata_in_media_folder` and any per-library provider
+/// order) without a second per-item query.
+/// Raw row shape for [`list_unlocked_items_for_refresh`]'s query — factored
+/// out purely to keep that function's own signature and query-binding line
+/// readable (clippy's `type_complexity` lint).
+type UnlockedItemRow = (
+    Uuid,
+    Uuid,
+    String,
+    String,
+    Option<i32>,
+    String,
+    Option<String>,
+);
+
+pub async fn list_unlocked_items_for_refresh(
+    pool: &PgPool,
+) -> Result<Vec<(Uuid, Uuid, EnrichTarget, PathBuf, Option<String>)>, DbError> {
+    let rows: Vec<UnlockedItemRow> = sqlx::query_as(
+        r#"
+        SELECT id, library_id, item_type, title,
+               (metadata->>'year')::int AS year,
+               file_path, forced_provider
+        FROM media_items
+        WHERE NOT metadata_locked
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(
+            |(id, library_id, item_type, title, year, file_path, forced_provider)| {
+                let target = if item_type == "movie" {
+                    EnrichTarget::Movie { title, year }
+                } else {
+                    EnrichTarget::Series { title }
+                };
+                (
+                    id,
+                    library_id,
+                    target,
+                    PathBuf::from(file_path),
+                    forced_provider,
+                )
+            },
+        )
+        .collect())
+}
+
 /// The raw shape every `media_items` row comes back as for the read side
 /// (the home feed, and later a full browse view) — `year`/`overview`/
 /// `season`/`episode` are pulled out of the `metadata` JSONB blob right in
@@ -786,14 +1205,80 @@ fn media_item_from_row(row: MediaItemRow) -> MediaItem {
     }
 }
 
-/// Every read query below selects the exact same nine columns in the exact
-/// same order as [`MediaItemRow`] (a reordered `SELECT` would silently
-/// scramble which tuple field gets which value, since `sqlx::query_as` on a
-/// tuple binds positionally, not by column name) — spelled out in full in
-/// each query rather than built from one shared constant, since sqlx 0.9's
-/// injection-safety check only accepts a genuine `&'static str` literal per
-/// call site, not one assembled at runtime via `format!`.
-///
+// Runda 8: every one of the five home-feed queries below now reads from a
+// `home_candidates` CTE instead of `media_items` directly. The bug it
+// fixes: a library scan writes one `media_items` row *per episode file*
+// (`item_type = 'episode'`), so once a single TV show existed, every query
+// here started handing back every one of its episodes as its own card — a
+// 20-episode season meant 20 near-identical cards in "Ostatnio dodane"
+// alone, reported after the first TV library was scanned.
+//
+// There is no `series`/`season` row anywhere in this schema (see
+// `lisek_core`'s doc comment on `MediaItem::item_type` — the scanner only
+// ever writes "movie" or "episode") and this round deliberately does NOT
+// add one as a real table: every episode of one show already shares the
+// exact same `library_id` + `title` (episodes are upserted under their
+// *series* title, never a per-episode one — see `persist_scan_results`),
+// and the exact same provider match too, since `EnrichTarget::Series`
+// enriches by series title, not per episode. That makes "the show" fully
+// derivable as `GROUP BY (library_id, title)` over `item_type = 'episode'`
+// rows, with no migration needed. The CTE below does exactly that:
+//   - every `movie` row passes through unchanged;
+//   - every distinct `(library_id, title)` group of `episode` rows
+//     collapses to ONE synthetic row, `item_type = 'series'` (a value that
+//     never exists in the table itself — computed here, same idea as
+//     `EnrichTarget::Series` on the write side), picking the single most
+//     recently-added episode in that group as its representative `id`
+//     (`DISTINCT ON` ordered by `created_at DESC, id DESC` — the `id`
+//     tie-break makes the pick fully deterministic even for two episodes
+//     inserted in the same transaction). `year`/`season`/`episode` are
+//     `NULL` for a series row on purpose: none of those describe the show
+//     as a whole (a season/episode number is one specific episode's, and
+//     — unlike a movie — `ScannedEpisode` never even carries a year at
+//     all), and showing "the latest episode's" numbers as if they were the
+//     show's own would be inventing a fact this schema doesn't have.
+// The representative id is a perfectly real `media_items` row, so
+// `GET /api/media/{id}/poster|backdrop|logo` keeps working unmodified —
+// every episode of a show was enriched (and had its images cached) on its
+// own row, all from the same series-level provider match, so whichever
+// episode `DISTINCT ON` happens to pick has its own valid poster/backdrop
+// /logo files already sitting wherever `serve_item_image` already looks.
+//
+// Spelled out in full at every one of the five call sites below (each
+// still selects the same nine `MediaItemRow` columns) — sqlx 0.9's
+// injection-safety check only accepts a genuine `&'static str` literal per
+// call site, not one assembled at runtime via `format!`, and a `const
+// &str` fragment can't help either, since the literal each call passes to
+// `sqlx::query_as` has to be one complete string token, not several
+// concatenated at compile time. This comment is the single source of
+// truth for what's otherwise five identical copies of:
+//
+// ```sql
+// WITH home_candidates AS (
+//     SELECT id, library_id, item_type, title,
+//            (metadata->>'year')::int AS year,
+//            metadata->'provider_data'->>'overview' AS overview,
+//            NULL::int AS season,
+//            NULL::int AS episode,
+//            created_at
+//     FROM media_items
+//     WHERE item_type = 'movie'
+//
+//     UNION ALL
+//
+//     SELECT DISTINCT ON (library_id, title)
+//            id, library_id, 'series' AS item_type, title,
+//            NULL::int AS year,
+//            metadata->'provider_data'->>'overview' AS overview,
+//            NULL::int AS season,
+//            NULL::int AS episode,
+//            created_at
+//     FROM media_items
+//     WHERE item_type = 'episode'
+//     ORDER BY library_id, title, created_at DESC, id DESC
+// )
+// ```
+
 /// The single item the Hero Banner features: preferring one a metadata
 /// provider has actually matched (so there's a real synopsis to show)
 /// over just whatever was scanned most recently, but falling back to plain
@@ -801,17 +1286,39 @@ fn media_item_from_row(row: MediaItemRow) -> MediaItem {
 /// very first scan, before any provider is configured) rather than leaving
 /// the banner empty. Postgres orders `false < true`, so `DESC` on the
 /// "has an overview" test puts an enriched row first without a `CASE`.
+///
+/// Reads from the `home_candidates` CTE above (see its doc comment) — a show can
+/// feature here exactly like a movie can, represented by its own most
+/// recently-added episode.
 pub async fn get_hero_item(pool: &PgPool) -> Result<Option<MediaItem>, DbError> {
     let row = sqlx::query_as::<_, MediaItemRow>(
         r#"
-        SELECT id, library_id, item_type, title,
-               (metadata->>'year')::int AS year,
-               metadata->'provider_data'->>'overview' AS overview,
-               (metadata->>'season')::int AS season,
-               (metadata->>'episode')::int AS episode,
-               created_at
-        FROM media_items
-        ORDER BY (metadata->'provider_data'->>'overview' IS NOT NULL) DESC, created_at DESC
+        WITH home_candidates AS (
+            SELECT id, library_id, item_type, title,
+                   (metadata->>'year')::int AS year,
+                   metadata->'provider_data'->>'overview' AS overview,
+                   NULL::int AS season,
+                   NULL::int AS episode,
+                   created_at
+            FROM media_items
+            WHERE item_type = 'movie'
+
+            UNION ALL
+
+            SELECT DISTINCT ON (library_id, title)
+                   id, library_id, 'series' AS item_type, title,
+                   NULL::int AS year,
+                   metadata->'provider_data'->>'overview' AS overview,
+                   NULL::int AS season,
+                   NULL::int AS episode,
+                   created_at
+            FROM media_items
+            WHERE item_type = 'episode'
+            ORDER BY library_id, title, created_at DESC, id DESC
+        )
+        SELECT id, library_id, item_type, title, year, overview, season, episode, created_at
+        FROM home_candidates
+        ORDER BY (overview IS NOT NULL) DESC, created_at DESC
         LIMIT 1
         "#,
     )
@@ -821,18 +1328,333 @@ pub async fn get_hero_item(pool: &PgPool) -> Result<Option<MediaItem>, DbError> 
     Ok(row.map(media_item_from_row))
 }
 
+/// One item by id, in the same public [`MediaItem`] shape every other
+/// reader in this section returns — backs `lisek-server`'s public (any
+/// signed-in account, not just admins) Movie/Series Detail View endpoint,
+/// distinct from `get_media_item_detail` below which is the admin-only
+/// editor's fuller, editable shape (`original_title`/`locked_fields`/
+/// `forced_provider` included, and which still addresses one literal
+/// episode row by its own id — the editor manages individual scanned
+/// files, unaffected by this round's change). `None` covers "no such id at
+/// all" and "the id exists but isn't a `media_items` row".
+///
+/// Runda 8: a bare `episode` row is never handed back as itself any more —
+/// nothing in the frontend can even navigate to one after the home-feed
+/// collapse above, but an old bookmark/copied link to one still can. Such
+/// an id now resolves to that show's own canonical "series" view instead —
+/// the exact same representative-episode pick the `home_candidates` CTE above
+/// uses, scoped to just this row's own `(library_id, title)` group — so
+/// every entry point into a show, old or new, lands on the same page
+/// rather than a bare, out-of-context single episode.
+pub async fn get_media_item(pool: &PgPool, item_id: Uuid) -> Result<Option<MediaItem>, DbError> {
+    let Some((item_type, library_id, title)) = resolve_item_group(pool, item_id).await? else {
+        return Ok(None);
+    };
+
+    if item_type != "episode" {
+        let row = sqlx::query_as::<_, MediaItemRow>(
+            r#"
+            SELECT id, library_id, item_type, title,
+                   (metadata->>'year')::int AS year,
+                   metadata->'provider_data'->>'overview' AS overview,
+                   (metadata->>'season')::int AS season,
+                   (metadata->>'episode')::int AS episode,
+                   created_at
+            FROM media_items
+            WHERE id = $1
+            "#,
+        )
+        .bind(item_id)
+        .fetch_optional(pool)
+        .await?;
+        return Ok(row.map(media_item_from_row));
+    }
+
+    let row = sqlx::query_as::<_, MediaItemRow>(
+        r#"
+        SELECT DISTINCT ON (library_id, title)
+               id, library_id, 'series' AS item_type, title,
+               NULL::int AS year,
+               metadata->'provider_data'->>'overview' AS overview,
+               NULL::int AS season,
+               NULL::int AS episode,
+               created_at
+        FROM media_items
+        WHERE item_type = 'episode' AND library_id = $1 AND title = $2
+        ORDER BY library_id, title, created_at DESC, id DESC
+        "#,
+    )
+    .bind(library_id)
+    .bind(title)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(media_item_from_row))
+}
+
+/// Looks up which `(item_type, library_id, title)` a `media_items` row
+/// belongs to — the shared first step behind [`get_media_item`]'s
+/// episode-to-series resolution and [`list_series_seasons`]'s own lookup,
+/// so both resolve a given id to "its show" the exact same way.
+async fn resolve_item_group(
+    pool: &PgPool,
+    item_id: Uuid,
+) -> Result<Option<(String, Uuid, String)>, DbError> {
+    let row: Option<(String, Uuid, String)> =
+        sqlx::query_as("SELECT item_type, library_id, title FROM media_items WHERE id = $1")
+            .bind(item_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row)
+}
+
+/// One season's episodes, as returned by [`list_series_seasons`].
+/// Deliberately thin: see that function's own doc comment for exactly
+/// what's real here and what a filename-only scan (no per-episode
+/// metadata call to any provider) simply has no way to know.
+pub struct SeriesSeason {
+    pub season: i32,
+    pub episodes: Vec<SeriesEpisode>,
+}
+
+pub struct SeriesEpisode {
+    pub id: Uuid,
+    pub episode: i32,
+    /// Set only for a multi-episode file recognized as a range at scan
+    /// time (e.g. `S01E01-E02`) — see `ScannedEpisode::end_episode`.
+    pub end_episode: Option<i32>,
+}
+
+/// Every season (and, within each, every episode) belonging to the same
+/// show `item_id` resolves to via [`resolve_item_group`] — the "Sezony"
+/// section of the Series Detail View. Returns an empty `Vec` rather than an
+/// error both when `item_id` doesn't exist and when it names a movie: a
+/// movie legitimately has no seasons, and the frontend only ever calls this
+/// for an item whose own `item_type` it already knows is `"series"`, so
+/// there's no case where an empty result here is a surprise worth a
+/// distinct error variant.
+///
+/// Deliberately NOT a per-season lazy-loaded endpoint (`Docelowo,
+/// kliknięcie w kartę Sezonu powinno rozwijać... listę odcinków` — one
+/// call, fetching every season's episodes up front, with the "expand on
+/// click" behavior asked for done client-side against data already in
+/// memory. A self-hosted personal library's shows run to tens of episodes,
+/// not thousands — the round trip this saves per season click was judged
+/// worth more than the (here, negligible) bytes saved by paging it.
+///
+/// Honest about what an episode "is" here: `id` (for a poster/backdrop/logo
+/// URL — see the comment above the `home_candidates` CTE on why every
+/// episode row already has its own valid cached images even though
+/// they're the show's, not this specific episode's) plus its
+/// `season`/`episode` numbers. NOT
+/// included, because none of it exists anywhere in this app yet: a real
+/// per-episode title (the scanner only ever parses `series_title` — see
+/// `lisek_library::ScannedEpisode` — never an episode's own name; that
+/// needs a provider's `/episodes` endpoint, never called), a still/
+/// thumbnail distinct from the show's own backdrop, a runtime (no video
+/// ever gets probed for its duration), or a synopsis (`overview` is
+/// series-level, from `EnrichTarget::Series`, identical for every episode
+/// of the show). Showing any of those would mean inventing them — the
+/// frontend labels each episode generically ("Odcinek {n}") instead.
+/// Raw row shape for [`list_series_seasons`]'s query: `(season, id,
+/// episode, end_episode)`, all nullable except `id` since every value here
+/// comes from the same possibly-sparse `metadata` JSONB extraction as
+/// [`MediaItemRow`] above.
+type SeriesEpisodeRow = (Option<i32>, Uuid, Option<i32>, Option<i32>);
+
+pub async fn list_series_seasons(
+    pool: &PgPool,
+    item_id: Uuid,
+) -> Result<Vec<SeriesSeason>, DbError> {
+    let Some((item_type, library_id, title)) = resolve_item_group(pool, item_id).await? else {
+        return Ok(Vec::new());
+    };
+    if item_type != "episode" {
+        return Ok(Vec::new());
+    }
+
+    let rows: Vec<SeriesEpisodeRow> = sqlx::query_as(
+        r#"
+        SELECT (metadata->>'season')::int AS season,
+               id,
+               (metadata->>'episode')::int AS episode,
+               (metadata->>'end_episode')::int AS end_episode
+        FROM media_items
+        WHERE item_type = 'episode' AND library_id = $1 AND title = $2
+        ORDER BY (metadata->>'season')::int NULLS LAST, (metadata->>'episode')::int NULLS LAST
+        "#,
+    )
+    .bind(library_id)
+    .bind(&title)
+    .fetch_all(pool)
+    .await?;
+
+    let mut seasons: Vec<SeriesSeason> = Vec::new();
+    for (season, id, episode, end_episode) in rows {
+        // `season`/`episode` are written unconditionally by
+        // `persist_scan_results` for every episode row — `None` here would
+        // mean a row this function has no business treating as an episode
+        // in the first place, so it's skipped rather than guessed at.
+        let (Some(season), Some(episode)) = (season, episode) else {
+            continue;
+        };
+        match seasons.last_mut() {
+            Some(s) if s.season == season => s.episodes.push(SeriesEpisode {
+                id,
+                episode,
+                end_episode,
+            }),
+            _ => seasons.push(SeriesSeason {
+                season,
+                episodes: vec![SeriesEpisode {
+                    id,
+                    episode,
+                    end_episode,
+                }],
+            }),
+        }
+    }
+    Ok(seasons)
+}
+
+/// The "new" badge shown on a series' home-feed card — see
+/// [`classify_series_badge`]'s own doc comment for exactly what each
+/// variant means and how it's decided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeriesBadge {
+    NewSeries,
+    NewSeason,
+    NewEpisodes,
+}
+
+impl SeriesBadge {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SeriesBadge::NewSeries => "new_series",
+            SeriesBadge::NewSeason => "new_season",
+            SeriesBadge::NewEpisodes => "new_episodes",
+        }
+    }
+}
+
+/// A fixed 7-day "just added" window — arbitrary but documented, the same
+/// kind of judgment call as `Carousel.svelte`'s `DRAG_THRESHOLD_PX`: there's
+/// no scan-batch id anywhere in this schema to say precisely which episodes
+/// arrived together, so recency by `created_at` is the honest proxy for it.
+const SERIES_BADGE_RECENT_DAYS: i64 = 7;
+
+/// Classifies what changed most recently for one show, for the "Nowy
+/// serial" / "Nowy sezon" / "Nowe odcinki" badge asked for on its home-feed
+/// card. Computed as its own small query per series-typed card actually
+/// being returned (at most 14 per home-feed row — `lisek-server`'s own
+/// `ROW_LIMIT`) rather than folded into the `home_candidates` CTE itself —
+/// that CTE is already duplicated in full at five call sites because of
+/// sqlx's literal-per-call-site rule; adding a nested-`EXISTS` `CASE` to
+/// all five, instead of one small function called after, would multiply
+/// that same duplication risk for a feature the request itself only asked
+/// for "if it can be pulled out" (`Jeśli z API/bazy można to wyciągnąć`).
+///
+///  - [`SeriesBadge::NewSeries`]: every episode of this show is within the
+///    recent window — this show didn't exist in the library at all before
+///    now, not even a season.
+///  - [`SeriesBadge::NewSeason`]: some episodes are older than the window,
+///    and at least one recent episode belongs to a season number no older
+///    episode has — a season new to the library, not just new files inside
+///    a season already there.
+///  - [`SeriesBadge::NewEpisodes`]: recent episodes exist, but only within
+///    season numbers already represented among the older ones.
+///  - `None`: nothing for this show was added within the window.
+pub async fn classify_series_badge(
+    pool: &PgPool,
+    library_id: Uuid,
+    title: &str,
+) -> Result<Option<SeriesBadge>, DbError> {
+    let rows: Vec<(bool, Option<i32>)> = sqlx::query_as(
+        r#"
+        SELECT created_at >= now() - make_interval(days => $3), (metadata->>'season')::int
+        FROM media_items
+        WHERE item_type = 'episode' AND library_id = $1 AND title = $2
+        "#,
+    )
+    .bind(library_id)
+    .bind(title)
+    .bind(SERIES_BADGE_RECENT_DAYS as i32)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(classify_badge_from_flags(&rows))
+}
+
+/// The pure classification logic behind [`classify_series_badge`], split
+/// out so it's testable without a database — each tuple is one episode
+/// row's `(is_recent, season)`.
+fn classify_badge_from_flags(rows: &[(bool, Option<i32>)]) -> Option<SeriesBadge> {
+    use std::collections::HashSet;
+
+    let mut old_seasons: HashSet<i32> = HashSet::new();
+    let mut new_seasons: HashSet<i32> = HashSet::new();
+    let mut has_old = false;
+    let mut has_new = false;
+
+    for &(is_recent, season) in rows {
+        if is_recent {
+            has_new = true;
+            if let Some(s) = season {
+                new_seasons.insert(s);
+            }
+        } else {
+            has_old = true;
+            if let Some(s) = season {
+                old_seasons.insert(s);
+            }
+        }
+    }
+
+    if !has_new {
+        return None;
+    }
+    if !has_old {
+        return Some(SeriesBadge::NewSeries);
+    }
+    if new_seasons.difference(&old_seasons).next().is_some() {
+        return Some(SeriesBadge::NewSeason);
+    }
+    Some(SeriesBadge::NewEpisodes)
+}
+
 /// The most recently scanned-or-rescanned items, newest first — the one row
-/// with a genuinely unambiguous, non-placeholder ordering.
+/// with a genuinely unambiguous, non-placeholder ordering. Reads from
+/// the `home_candidates` CTE above — a show's `created_at` here is its most
+/// recently-added episode's, so a new episode of a show already in the
+/// library bumps it back to the top exactly like a freshly-scanned movie.
 pub async fn list_recently_added(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>, DbError> {
     let rows = sqlx::query_as::<_, MediaItemRow>(
         r#"
-        SELECT id, library_id, item_type, title,
-               (metadata->>'year')::int AS year,
-               metadata->'provider_data'->>'overview' AS overview,
-               (metadata->>'season')::int AS season,
-               (metadata->>'episode')::int AS episode,
-               created_at
-        FROM media_items
+        WITH home_candidates AS (
+            SELECT id, library_id, item_type, title,
+                   (metadata->>'year')::int AS year,
+                   metadata->'provider_data'->>'overview' AS overview,
+                   NULL::int AS season,
+                   NULL::int AS episode,
+                   created_at
+            FROM media_items
+            WHERE item_type = 'movie'
+
+            UNION ALL
+
+            SELECT DISTINCT ON (library_id, title)
+                   id, library_id, 'series' AS item_type, title,
+                   NULL::int AS year,
+                   metadata->'provider_data'->>'overview' AS overview,
+                   NULL::int AS season,
+                   NULL::int AS episode,
+                   created_at
+            FROM media_items
+            WHERE item_type = 'episode'
+            ORDER BY library_id, title, created_at DESC, id DESC
+        )
+        SELECT id, library_id, item_type, title, year, overview, season, episode, created_at
+        FROM home_candidates
         ORDER BY created_at DESC
         LIMIT $1
         "#,
@@ -850,18 +1672,40 @@ pub async fn list_recently_added(pool: &PgPool, limit: i64) -> Result<Vec<MediaI
 /// ranking or just repeat `list_recently_added` under a second label, this
 /// orders by release year (then scan recency as a tiebreaker), which reads
 /// honestly as "the newest releases in your library" instead of claiming
-/// to be a trending chart it has no data to back up.
+/// to be a trending chart it has no data to back up. Reads from
+/// the `home_candidates` CTE above — a series row's `year` is always `NULL` (no
+/// single year describes a whole show, and `ScannedEpisode` never captures
+/// one anyway), so shows sort after every dated movie here rather than
+/// being given a made-up year just to rank them.
 pub async fn list_top_today(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>, DbError> {
     let rows = sqlx::query_as::<_, MediaItemRow>(
         r#"
-        SELECT id, library_id, item_type, title,
-               (metadata->>'year')::int AS year,
-               metadata->'provider_data'->>'overview' AS overview,
-               (metadata->>'season')::int AS season,
-               (metadata->>'episode')::int AS episode,
-               created_at
-        FROM media_items
-        ORDER BY (metadata->>'year')::int DESC NULLS LAST, created_at DESC
+        WITH home_candidates AS (
+            SELECT id, library_id, item_type, title,
+                   (metadata->>'year')::int AS year,
+                   metadata->'provider_data'->>'overview' AS overview,
+                   NULL::int AS season,
+                   NULL::int AS episode,
+                   created_at
+            FROM media_items
+            WHERE item_type = 'movie'
+
+            UNION ALL
+
+            SELECT DISTINCT ON (library_id, title)
+                   id, library_id, 'series' AS item_type, title,
+                   NULL::int AS year,
+                   metadata->'provider_data'->>'overview' AS overview,
+                   NULL::int AS season,
+                   NULL::int AS episode,
+                   created_at
+            FROM media_items
+            WHERE item_type = 'episode'
+            ORDER BY library_id, title, created_at DESC, id DESC
+        )
+        SELECT id, library_id, item_type, title, year, overview, season, episode, created_at
+        FROM home_candidates
+        ORDER BY year DESC NULLS LAST, created_at DESC
         LIMIT $1
         "#,
     )
@@ -877,17 +1721,35 @@ pub async fn list_top_today(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>,
 /// the library is the honest placeholder until real personalization is
 /// built, rather than dressing up `list_recently_added` again under a
 /// different heading. Each call reshuffles independently since Postgres
-/// evaluates `random()` fresh per query.
+/// evaluates `random()` fresh per query. Reads from the `home_candidates` CTE above.
 pub async fn list_recommended(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>, DbError> {
     let rows = sqlx::query_as::<_, MediaItemRow>(
         r#"
-        SELECT id, library_id, item_type, title,
-               (metadata->>'year')::int AS year,
-               metadata->'provider_data'->>'overview' AS overview,
-               (metadata->>'season')::int AS season,
-               (metadata->>'episode')::int AS episode,
-               created_at
-        FROM media_items
+        WITH home_candidates AS (
+            SELECT id, library_id, item_type, title,
+                   (metadata->>'year')::int AS year,
+                   metadata->'provider_data'->>'overview' AS overview,
+                   NULL::int AS season,
+                   NULL::int AS episode,
+                   created_at
+            FROM media_items
+            WHERE item_type = 'movie'
+
+            UNION ALL
+
+            SELECT DISTINCT ON (library_id, title)
+                   id, library_id, 'series' AS item_type, title,
+                   NULL::int AS year,
+                   metadata->'provider_data'->>'overview' AS overview,
+                   NULL::int AS season,
+                   NULL::int AS episode,
+                   created_at
+            FROM media_items
+            WHERE item_type = 'episode'
+            ORDER BY library_id, title, created_at DESC, id DESC
+        )
+        SELECT id, library_id, item_type, title, year, overview, season, episode, created_at
+        FROM home_candidates
         ORDER BY random()
         LIMIT $1
         "#,
@@ -901,17 +1763,36 @@ pub async fn list_recommended(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem
 
 /// "Popular Now"'s backing query — same caveat as [`list_recommended`]:
 /// no view/watch-count tracking exists yet either, so this is another
-/// honest random sample rather than a fabricated popularity rank.
+/// honest random sample rather than a fabricated popularity rank. Reads
+/// from the `home_candidates` CTE above.
 pub async fn list_popular(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>, DbError> {
     let rows = sqlx::query_as::<_, MediaItemRow>(
         r#"
-        SELECT id, library_id, item_type, title,
-               (metadata->>'year')::int AS year,
-               metadata->'provider_data'->>'overview' AS overview,
-               (metadata->>'season')::int AS season,
-               (metadata->>'episode')::int AS episode,
-               created_at
-        FROM media_items
+        WITH home_candidates AS (
+            SELECT id, library_id, item_type, title,
+                   (metadata->>'year')::int AS year,
+                   metadata->'provider_data'->>'overview' AS overview,
+                   NULL::int AS season,
+                   NULL::int AS episode,
+                   created_at
+            FROM media_items
+            WHERE item_type = 'movie'
+
+            UNION ALL
+
+            SELECT DISTINCT ON (library_id, title)
+                   id, library_id, 'series' AS item_type, title,
+                   NULL::int AS year,
+                   metadata->'provider_data'->>'overview' AS overview,
+                   NULL::int AS season,
+                   NULL::int AS episode,
+                   created_at
+            FROM media_items
+            WHERE item_type = 'episode'
+            ORDER BY library_id, title, created_at DESC, id DESC
+        )
+        SELECT id, library_id, item_type, title, year, overview, season, episode, created_at
+        FROM home_candidates
         ORDER BY random()
         LIMIT $1
         "#,
@@ -990,5 +1871,59 @@ mod tests {
             result,
             Err(DbError::ConnectionFailed(_)) | Err(DbError::ConnectionTimeout)
         ));
+    }
+
+    // Runda 8: `classify_badge_from_flags` is the pure decision logic
+    // behind `classify_series_badge` — split out specifically so it's
+    // testable without a live Postgres, same reasoning as
+    // `settings_has_api_key` above. `true`/`false` stands in for "this
+    // episode's `created_at` falls inside the recent window or not"; the
+    // `Option<i32>` is its season number.
+
+    #[test]
+    fn badge_is_new_series_when_every_episode_is_recent() {
+        let rows = [(true, Some(1)), (true, Some(1)), (true, Some(2))];
+        assert_eq!(
+            classify_badge_from_flags(&rows),
+            Some(SeriesBadge::NewSeries)
+        );
+    }
+
+    #[test]
+    fn badge_is_none_when_nothing_is_recent() {
+        let rows = [(false, Some(1)), (false, Some(1))];
+        assert_eq!(classify_badge_from_flags(&rows), None);
+    }
+
+    #[test]
+    fn badge_is_new_season_when_a_recent_episode_has_an_unseen_season_number() {
+        // Season 1 already existed; season 2 just arrived.
+        let rows = [(false, Some(1)), (false, Some(1)), (true, Some(2))];
+        assert_eq!(
+            classify_badge_from_flags(&rows),
+            Some(SeriesBadge::NewSeason)
+        );
+    }
+
+    #[test]
+    fn badge_is_new_episodes_when_recent_episodes_stay_within_a_known_season() {
+        // Season 1 already existed and gained two more recent episodes.
+        let rows = [(false, Some(1)), (true, Some(1)), (true, Some(1))];
+        assert_eq!(
+            classify_badge_from_flags(&rows),
+            Some(SeriesBadge::NewEpisodes)
+        );
+    }
+
+    #[test]
+    fn badge_ignores_a_missing_season_number_rather_than_panicking() {
+        // Defensive only — every real episode row always has a season
+        // (see `persist_scan_results`), but this must never crash on one
+        // that somehow doesn't.
+        let rows = [(true, None)];
+        assert_eq!(
+            classify_badge_from_flags(&rows),
+            Some(SeriesBadge::NewSeries)
+        );
     }
 }

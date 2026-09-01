@@ -8,6 +8,7 @@
 
 mod admin;
 mod auth;
+mod background_refresh;
 mod env_file;
 mod media;
 mod metadata_enrichment;
@@ -43,6 +44,15 @@ async fn main() {
     // the First-Run Wizard has ever completed.
     dotenvy::dotenv().ok();
 
+    // Resolved and logged here, up front, rather than lazily on whichever
+    // request happens to touch it first — an admin comparing this line
+    // against the folder they expect posters/backdrops to land in is the
+    // fastest way to catch a launch-directory mismatch (see
+    // `state::config_dir`'s own doc comment for exactly what that bug
+    // looked like) before it costs another round of "the image is 404ing
+    // and I don't know why."
+    let _ = state::config_dir();
+
     let mode = detect_initial_mode().await;
     match &mode {
         ServerMode::SetupRequired => {
@@ -62,6 +72,12 @@ async fn main() {
     let state = Arc::new(AppState {
         mode: RwLock::new(mode),
     });
+
+    // Faza 5 completion's "Zadanie w tle": one detached long-running task,
+    // started here so it can't delay the server's own startup or block a
+    // request — see background_refresh.rs's own doc comment for exactly
+    // what it does and how it stays safe around locked items/fields.
+    tokio::spawn(background_refresh::run(state.clone()));
 
     // Reachable with no session at all: health/status checks, the setup
     // wizard (which by definition runs before any account exists), and
@@ -107,10 +123,33 @@ async fn main() {
             "/api/admin/libraries/{library_id}/scan",
             post(admin::scan_library),
         )
+        .route(
+            "/api/admin/libraries/{library_id}/items",
+            get(admin::list_library_items),
+        )
+        .route(
+            "/api/admin/libraries/{library_id}/provider-order/{item_type}",
+            get(admin::get_provider_order).put(admin::set_provider_order),
+        )
+        .route("/api/admin/media/fallback", get(admin::list_fallback_items))
+        .route(
+            "/api/admin/media/{item_id}",
+            get(admin::get_media_item).put(admin::update_media_item),
+        )
+        .route(
+            "/api/admin/media/{item_id}/migrate-to-media-folder",
+            post(admin::migrate_fallback_item),
+        )
         // Not admin-only — see media.rs's own doc comment.
         .route("/api/home", get(media::home_feed))
+        .route("/api/media/{item_id}", get(media::media_item_detail))
+        .route(
+            "/api/media/{item_id}/seasons",
+            get(media::media_item_seasons),
+        )
         .route("/api/media/{item_id}/poster", get(media::poster_image))
-        .route("/api/media/{item_id}/backdrop", get(media::backdrop_image));
+        .route("/api/media/{item_id}/backdrop", get(media::backdrop_image))
+        .route("/api/media/{item_id}/logo", get(media::logo_image));
 
     // Permissive for now: same-origin in dev (via the frontend's Vite
     // proxy) and planned same-origin in production (one reverse proxy in

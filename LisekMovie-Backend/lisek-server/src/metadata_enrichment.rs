@@ -1,11 +1,14 @@
 //! Fills in a freshly-scanned `media_items` row with real metadata: tries
 //! every enabled, configured provider in the admin's priority order (see
 //! `lisek_db::list_enabled_provider_keys`) until one returns a match, merges
-//! its fields into the row, then saves its poster/backdrop image.
+//! its fields into the row, then saves its poster/backdrop/logo images —
+//! unless the item has its own `forced_provider` set (the metadata editor's
+//! per-item override) or individual `locked_fields`, in which case
+//! [`enrich_item`] narrows to just that provider or protects just that
+//! field respectively; see that function's own doc comment for both.
 //!
-//! As of Faza 5 round 2, "saves its poster/backdrop image" means writing
-//! directly next to the video file by default: `poster.jpg`/
-//! `backdrop.jpg` (see
+//! As of Faza 5 round 2, "saves its images" means writing directly next to
+//! the video file by default: `poster.jpg`/`backdrop.jpg`/`logo.png` (see
 //! [`media_folder_destination`]), with the app's own local `config_dir`
 //! cache used either as the library's deliberate choice (`save_in_media_folder
 //! == false`) or as an automatic fallback when the media-folder write itself
@@ -14,7 +17,10 @@
 //! Admin Panel warning view can list it. Which image a provider hands back
 //! (language-prioritized or not) is entirely that provider extension's own
 //! concern as of Faza 7 — this module just downloads and writes whatever
-//! `poster_url`/`backdrop_url` it's given, the same way for every provider.
+//! `poster_url`/`backdrop_url`/`logo_url` it's given, the same way for
+//! every provider. `banner_url` is deliberately never downloaded here: no
+//! provider extension currently populates it — see
+//! `lisek_plugin_api::ProviderMatch`'s own doc comment for why.
 //!
 //! Called once per item from `admin::scan_library`, right after
 //! `lisek_db::persist_scan_results`. A provider failing (network error,
@@ -26,7 +32,9 @@
 use std::path::{Path, PathBuf};
 
 use lisek_db::{EnrichTarget, PgPool};
-use lisek_metadata::image_cache::{backdrop_cache_path, poster_cache_path, save_image};
+use lisek_metadata::image_cache::{
+    backdrop_cache_path, logo_cache_path, poster_cache_path, save_image,
+};
 use lisek_plugin_api::{MovieQuery, ProviderMatch, SeriesQuery};
 use uuid::Uuid;
 
@@ -78,7 +86,34 @@ async fn try_provider(
     };
 
     match result {
-        Ok(matched) => matched,
+        Ok(Some(matched)) => Some(matched),
+        // A clean, successful lookup that simply found nothing — never
+        // logged before this, which made a run like "9/10 items matched"
+        // impossible to debug from the logs alone: nothing recorded which
+        // title actually went out over the wire for the one that didn't
+        // match, so the only way to find out was to re-derive it by hand
+        // from the filename and the parser's own rules. Logged with the
+        // *exact* query this provider was asked (post-parser, post any
+        // year the parser extracted) — a mismatch between this and the
+        // provider's own listing for the title is the single fastest way
+        // to tell "the parser mangled the title" apart from "this title
+        // genuinely isn't in this provider's catalog."
+        Ok(None) => {
+            match target {
+                EnrichTarget::Movie { title, year } => tracing::warn!(
+                    provider = provider_key,
+                    title,
+                    ?year,
+                    "provider returned no match for this title/year"
+                ),
+                EnrichTarget::Series { title } => tracing::warn!(
+                    provider = provider_key,
+                    title,
+                    "provider returned no match for this title"
+                ),
+            }
+            None
+        }
         Err(err) => {
             tracing::warn!(provider = provider_key, %err, "metadata lookup failed");
             None
@@ -103,9 +138,22 @@ fn media_folder_destination(
     file_path.parent().map(|dir| dir.join(filename))
 }
 
-/// Tries `providers` (an admin-priority-ordered `(provider_key, api_key)`
-/// list) in order for `target`, stopping at the first match; merges its
-/// fields into `item_id`'s `media_items` row and saves its poster/backdrop.
+/// Tries `providers` (an admin- or library-priority-ordered
+/// `(provider_key, api_key)` list — see `admin::scan_library` for where
+/// that ordering itself comes from) in order for `target`, stopping at the
+/// first match; merges its fields into `item_id`'s `media_items` row and
+/// saves its poster/backdrop.
+///
+/// `forced_provider`, when set (the metadata editor's per-item override —
+/// see `lisek_db::MediaItemDetail`), replaces the whole `providers` list
+/// with just that one provider's entry looked up out of it by key: a
+/// forced provider that isn't currently enabled/configured (missing from
+/// `providers` entirely) means this item is skipped this round rather than
+/// silently falling back to the normal priority order, which would defeat
+/// the point of forcing it in the first place. Individual `locked_fields`
+/// protection (`overview` specifically) needs no parameter here at all —
+/// `lisek_db::attach_provider_metadata` reads that column live off the row
+/// it's updating; see that function's own doc comment.
 ///
 /// `file_path` is the scanned video file's own on-disk path — used to
 /// derive the media-folder destination (`poster.jpg`/`backdrop.jpg` beside
@@ -140,7 +188,26 @@ pub async fn enrich_item(
     file_path: &Path,
     save_in_media_folder: bool,
     primary_language: &str,
+    forced_provider: Option<&str>,
 ) -> EnrichOutcome {
+    let forced;
+    let providers: &[(String, String)] = match forced_provider {
+        Some(key) => {
+            let Some(entry) = providers.iter().find(|(k, _)| k == key) else {
+                tracing::warn!(
+                    %item_id,
+                    forced_provider = key,
+                    "item has a forced provider that isn't currently enabled/configured — \
+                     skipping enrichment this round rather than falling back to the priority list"
+                );
+                return EnrichOutcome::default();
+            };
+            forced = [entry.clone()];
+            &forced
+        }
+        None => providers,
+    };
+
     for (provider_key, api_key) in providers {
         let Some(matched) = try_provider(provider_key, api_key, target, primary_language).await
         else {
@@ -178,6 +245,19 @@ pub async fn enrich_item(
                     image_saved = true;
                 }
                 Err(err) => tracing::warn!(%item_id, %err, "failed to save backdrop image"),
+            }
+        }
+        // `logo_url` is only ever populated by a provider that actually has
+        // one for this title (TMDB, when it has a PNG logo cataloged — see
+        // `LisekMovie-plugin-tmdb`) — most items simply won't have one, and
+        // that's not counted as a failed save the way a broken download
+        // would be, just an absent optional asset.
+        if let Some(url) = &matched.logo_url {
+            let media_dest = media_folder_destination(file_path, "logo.png", save_in_media_folder);
+            let fallback_dest = logo_cache_path(config_dir, item_id);
+            match save_image(http, url, media_dest.as_deref(), &fallback_dest).await {
+                Ok(fell_back_to_cache) => used_fallback |= fell_back_to_cache,
+                Err(err) => tracing::warn!(%item_id, %err, "failed to save logo image"),
             }
         }
 

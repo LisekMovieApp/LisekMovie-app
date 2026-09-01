@@ -293,4 +293,28 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn subtitled_title_with_a_mid_name_language_tag_keeps_its_full_subtitle() {
+        // End-to-end regression for the exact bug reported against this
+        // franchise's *subtitled* entry: a Polish dub tag sitting between
+        // the base title and a real subtitle used to truncate the parsed
+        // title down to just "Asterix i Obelix", silently dropping "W
+        // Sluzbie Jej Krolewskiej Mosci" — see `LANGUAGE_TAG_TOKENS` and
+        // `strip_trailing_junk` in `naming::clean` for the underlying fix.
+        // This test exercises the whole `parse_movie_name` pipeline (not
+        // just the `clean` helper in isolation) against a realistic
+        // dotted release filename for that title.
+        let result = parse_movie_name(
+            "Asterix.i.Obelix.Lektor.PL.W.Sluzbie.Jej.Krolewskiej.Mosci.2012.1080p",
+            YEAR,
+        );
+        assert_eq!(
+            result,
+            ParsedMovie {
+                title: "Asterix i Obelix W Sluzbie Jej Krolewskiej Mosci".into(),
+                year: Some(2012)
+            }
+        );
+    }
 }

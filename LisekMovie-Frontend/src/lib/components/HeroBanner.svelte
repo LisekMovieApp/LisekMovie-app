@@ -7,12 +7,29 @@
   yet (or the feed hasn't loaded), which keeps rendering the exact same
   skeleton as before rather than a broken or empty banner.
 
-  Play/More Info stay disabled either way: there's no playback pipeline
-  yet (a later phase) for Play to start, and no per-item detail page yet
-  for More Info to open — real data existing for the title/overview
-  doesn't mean those buttons have anywhere real to go yet.
+  Play stays disabled either way: there's no playback pipeline yet (a
+  later phase) for it to start. "More Info" is now a real link to this
+  item's Detail View (`/media/[id]`) once `item` exists — it only stays a
+  disabled placeholder button while `item` is still `null` (the skeleton
+  loading state has nowhere to link to yet).
+
+  The title is a logo image (`item.logo_url`) when the matched provider
+  actually had one, falling back to the plain-text `<h1>` otherwise — same
+  "try the image, fall back to text on load failure" idiom this component
+  already uses for the backdrop itself, tracked the same way (by item id,
+  not a plain flag, so a previous item's failure can't leak onto a new one).
+
+  Both branches share one `min-h-20 md:min-h-32` wrapper (`items-end`) so
+  swapping between them — a 404'd logo falling back to text, or a
+  home-feed reload changing which item is featured — never visibly jumps
+  the subtitle/button row underneath it. Without a shared reserved height,
+  the two branches' naturally different heights make that swap read as
+  "the layout just broke" for the instant it happens — the exact bug
+  reported against this same pattern in the Detail View (see that page's
+  own comment for the full story).
 -->
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { t } from '$lib/i18n';
 	import { imageUrl, type MediaItem } from '$lib/media/api';
 
@@ -31,13 +48,15 @@
 	let failedForId: string | null = $state(null);
 	let backdropFailed = $derived(item !== null && failedForId === item.id);
 
-	/** A movie shows its year; an episode shows "S{season}E{episode}" — more
-	 * useful here than a generic "TV Shows" label repeated on every card. */
+	// Same by-id tracking as `failedForId` above, for the logo image.
+	let logoFailedForId: string | null = $state(null);
+	let logoFailed = $derived(item !== null && logoFailedForId === item.id);
+
+	/** A movie shows its year; a series shows nothing here — there's no
+	 * single year for a whole show (see `lisek_db`'s `home_candidates` CTE
+	 * doc comment on why `year` is always `null` for a `'series'` item). */
 	let subtitle = $derived.by(() => {
 		if (!item) return '';
-		if (item.item_type === 'episode' && item.season !== null && item.episode !== null) {
-			return `S${String(item.season).padStart(2, '0')}E${String(item.episode).padStart(2, '0')}`;
-		}
 		return item.year ? String(item.year) : '';
 	});
 </script>
@@ -68,14 +87,44 @@
 
 	<div class="absolute bottom-0 left-0 flex w-full max-w-xl flex-col gap-4 p-4 md:p-8 lg:p-12">
 		{#if item}
-			<h1 class="text-3xl leading-tight font-bold text-white drop-shadow md:text-5xl">
-				{item.title}
-			</h1>
+			<div class="flex min-h-20 items-end md:min-h-32">
+				{#if item.logo_url && !logoFailed}
+					<img
+						src={imageUrl(item.logo_url, token)}
+						alt={item.title}
+						onerror={() => (logoFailedForId = item?.id ?? null)}
+						class="max-h-20 max-w-[85%] object-contain object-left drop-shadow-md md:max-h-32"
+					/>
+				{:else}
+					<h1 class="text-3xl leading-tight font-bold text-white drop-shadow md:text-5xl">
+						{item.title}
+					</h1>
+				{/if}
+			</div>
 			{#if subtitle}
 				<p class="text-sm text-neutral-300">{subtitle}</p>
 			{/if}
 			{#if item.overview}
-				<p class="line-clamp-3 max-w-lg text-sm text-white drop-shadow-md md:text-base">
+				<!--
+				  `md:text-[1rem]` on purpose, not `md:text-base`: this theme
+				  defines `--color-base` (our near-black bg token, layout.css),
+				  and Tailwind v4 resolves a bare `text-base` utility against
+				  that color-scale entry instead of the built-in font-size
+				  scale entry of the same name — so `md:text-base` compiled to
+				  `color: var(--color-base)` (near-black) at the md breakpoint
+				  only, with no font-size rule at all. Exactly why this text
+				  was white on mobile (text-sm, no md: override in play) and
+				  unreadable on desktop. The arbitrary value bypasses theme-key
+				  lookup entirely, so it can only ever mean font-size; paired
+				  with `md:leading-6` (1.5rem) to match text-base's own
+				  default line-height. Any other spot that ever needs the
+				  *size* "base" (not the color) needs the same arbitrary-value
+				  treatment — literally `text-base` is claimed by the color
+				  token project-wide.
+				-->
+				<p
+					class="line-clamp-3 max-w-lg text-sm text-white drop-shadow-md md:text-[1rem] md:leading-6"
+				>
 					{item.overview}
 				</p>
 			{/if}
@@ -95,13 +144,22 @@
 			>
 				{t('home.play')}
 			</button>
-			<button
-				type="button"
-				disabled
-				class="rounded-md bg-white/20 px-6 py-2.5 font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30 disabled:cursor-not-allowed disabled:opacity-50"
-			>
-				{t('home.more_info')}
-			</button>
+			{#if item}
+				<a
+					href={resolve('/media/[id]', { id: item.id })}
+					class="rounded-md bg-white/20 px-6 py-2.5 font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30"
+				>
+					{t('home.more_info')}
+				</a>
+			{:else}
+				<button
+					type="button"
+					disabled
+					class="rounded-md bg-white/20 px-6 py-2.5 font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30 disabled:cursor-not-allowed disabled:opacity-50"
+				>
+					{t('home.more_info')}
+				</button>
+			{/if}
 		</div>
 	</div>
 </section>
