@@ -11,6 +11,7 @@ mod auth;
 mod env_file;
 mod media;
 mod metadata_enrichment;
+mod provider_registry;
 mod setup;
 mod state;
 

@@ -175,7 +175,25 @@ async fn serve_item_image(
         // has no provider match yet, or no provider is configured at all.
         // A 404 is exactly right here: the frontend's `<img>` `onerror`
         // handler swaps in a placeholder, same as any other missing image.
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
+        // Logged at `warn!` (not silently) with both paths this request
+        // actually tried — a 404 on an item the admin knows was enriched
+        // (`ScanSummaryResponse::images_saved` counted it) is exactly the
+        // situation this line exists to make debuggable without adding
+        // print statements: the reported path is byte-for-byte what
+        // `lisek_metadata::image_cache::save_image` was given at scan
+        // time, so a mismatch here (missing file, wrong drive, stale
+        // `media_items.file_path`) is visible immediately instead of only
+        // as an opaque 404 in the browser's network tab.
+        Err(err) => {
+            tracing::warn!(
+                %item_id,
+                cache_path = %cache_path.display(),
+                %err,
+                "no image at the media-folder location or the local cache — see this item's \
+                 media_items.file_path and metadata_fallback if this is unexpected"
+            );
+            StatusCode::NOT_FOUND.into_response()
+        }
     }
 }
 
@@ -185,11 +203,34 @@ async fn read_media_folder_image(
     filename: &str,
 ) -> Option<Vec<u8>> {
     let pool = state.pool().await?;
-    let file_path = lisek_db::get_media_item_file_path(&pool, item_id)
-        .await
-        .ok()??;
-    let media_path = FsPath::new(&file_path).parent()?.join(filename);
-    tokio::fs::read(&media_path).await.ok()
+    let file_path = match lisek_db::get_media_item_file_path(&pool, item_id).await {
+        Ok(Some(file_path)) => file_path,
+        Ok(None) => {
+            tracing::debug!(%item_id, "no media_items row (or no file_path) for this id");
+            return None;
+        }
+        Err(err) => {
+            tracing::warn!(%item_id, %err, "failed to look up this item's file_path");
+            return None;
+        }
+    };
+    let Some(parent) = FsPath::new(&file_path).parent() else {
+        tracing::warn!(%item_id, %file_path, "stored file_path has no parent directory");
+        return None;
+    };
+    let media_path = parent.join(filename);
+    match tokio::fs::read(&media_path).await {
+        Ok(bytes) => Some(bytes),
+        Err(err) => {
+            tracing::debug!(
+                %item_id,
+                media_path = %media_path.display(),
+                %err,
+                "no media-folder image at this path — falling back to the local cache"
+            );
+            None
+        }
+    }
 }
 
 fn image_response(bytes: Vec<u8>) -> Response {

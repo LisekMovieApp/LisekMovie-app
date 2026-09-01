@@ -1,14 +1,20 @@
-//! Metadata provider registry: ordering, overrides, locks.
+//! Metadata provider registry: ordering, overrides, locks; and the
+//! generic (provider-agnostic) image cache every provider extension's
+//! download goes through.
 //!
-//! Faza 5 adds the admin-facing provider registry (`ProviderConfig`,
-//! `BUILTIN_PROVIDERS`) backing the Admin Panel's plugins tab, and the
-//! [`tmdb`] and [`tvdb`] client modules that call out to each provider's
-//! real API and map its response onto a match `lisek-server` can merge
-//! into a scanned `media_items` row.
+//! Faza 5 added the admin-facing provider registry (`ProviderConfig`,
+//! `BUILTIN_PROVIDERS`) backing the Admin Panel's plugins tab. The actual
+//! TMDB/TVDB API clients that used to live here as `tmdb`/`tvdb` modules
+//! moved out in Faza 7 into their own compile-time extension crates —
+//! `LisekMovie-plugin-tmdb` and `LisekMovie-plugin-thetvdb`, both
+//! implementing `lisek_plugin_api::MetadataProvider` — since a specific
+//! provider's HTTP client is exactly the kind of "external, swappable data
+//! source" the documented rdzeń/rozszerzenie boundary draws around an
+//! extension, while [`image_cache`] (downloading and writing whatever
+//! image URL a provider hands back) is generic infrastructure every
+//! provider extension shares, so it stays here.
 
 pub mod image_cache;
-pub mod tmdb;
-pub mod tvdb;
 
 use serde::Serialize;
 

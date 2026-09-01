@@ -49,6 +49,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-trait"
+version = "0.1.92"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.4",
+]
+
+[[package]]
 name = "atoi"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1202,7 +1213,6 @@ dependencies = [
 name = "lisek-metadata"
 version = "0.1.0"
 dependencies = [
- "regex",
  "reqwest",
  "serde",
  "serde_json",
@@ -1225,6 +1235,39 @@ version = "0.1.0"
 [[package]]
 name = "lisek-plugin-api"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "lisek-plugin-thetvdb"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "lisek-plugin-api",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "lisek-plugin-tmdb"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "lisek-plugin-api",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+]
 
 [[package]]
 name = "lisek-server"
@@ -1242,6 +1285,8 @@ dependencies = [
  "lisek-notifications",
  "lisek-playback",
  "lisek-plugin-api",
+ "lisek-plugin-thetvdb",
+ "lisek-plugin-tmdb",
  "lisek-telemetry",
  "reqwest",
  "serde",

@@ -17,6 +17,13 @@ lisek-telemetry = { path = "../lisek-telemetry" }
 lisek-notifications = { path = "../lisek-notifications" }
 lisek-games = { path = "../lisek-games" }
 lisek-plugin-api = { path = "../lisek-plugin-api" }
+# Faza 7 provider extensions — separate repos/crates per the project's
+# directory layout, compiled in as ordinary Cargo path dependencies (see
+# lisek-plugin-api's doc comment for why: no safe dynamic .dll/.so loading
+# in Rust). Only provider_registry.rs ever names these two crates directly
+# — that's the "one line" a new extension adds.
+lisek-plugin-tmdb = { path = "../../../LisekMovie-plugin-tmdb" }
+lisek-plugin-thetvdb = { path = "../../../LisekMovie-plugin-thetvdb" }
 tokio = { version = "1.53.1", features = ["full"] }
 axum = "0.8.9"
 tracing = "0.1.44"

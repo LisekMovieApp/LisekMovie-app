@@ -11,12 +11,10 @@
 //! == false`) or as an automatic fallback when the media-folder write itself
 //! is denied (see `lisek_metadata::image_cache::save_image`) — the latter
 //! case gets persisted onto the item's `metadata_fallback` flag so a future
-//! Admin Panel warning view can list it. For a TMDB match, the image itself
-//! is picked via the primary-language → English → untagged → any-available
-//! chain (see `lisek_metadata::tmdb::TmdbClient::movie_images`/
-//! `series_images`) rather than TMDB's own single "default" search-result
-//! image, which is what a bare `/search/movie` response returns and is not
-//! language-prioritized at all.
+//! Admin Panel warning view can list it. Which image a provider hands back
+//! (language-prioritized or not) is entirely that provider extension's own
+//! concern as of Faza 7 — this module just downloads and writes whatever
+//! `poster_url`/`backdrop_url` it's given, the same way for every provider.
 //!
 //! Called once per item from `admin::scan_library`, right after
 //! `lisek_db::persist_scan_results`. A provider failing (network error,
@@ -29,152 +27,60 @@ use std::path::{Path, PathBuf};
 
 use lisek_db::{EnrichTarget, PgPool};
 use lisek_metadata::image_cache::{backdrop_cache_path, poster_cache_path, save_image};
-use lisek_metadata::tmdb::{self, TmdbImages};
-use lisek_metadata::tvdb;
+use lisek_plugin_api::{MovieQuery, ProviderMatch, SeriesQuery};
 use uuid::Uuid;
 
-/// One provider match's fields, plus optional ready-to-download poster/
-/// backdrop URLs — [`tmdb`]'s bare image *paths* and [`tvdb`]'s one
-/// ready-made image URL both get normalized to this same shape here, so
-/// the rest of this module doesn't need to know which provider produced
-/// them.
-struct MatchedMetadata {
-    fields: serde_json::Value,
-    poster_url: Option<String>,
-    backdrop_url: Option<String>,
-}
+use crate::provider_registry;
 
-/// Fetches a TMDB match's language-prioritized images and falls back to the
-/// search result's own (non-prioritized) `poster_path`/`backdrop_path` when
-/// the extra `/images` request itself fails — a title match is still worth
-/// keeping even if this one follow-up call didn't succeed, and TMDB's
-/// search-result image is still a real (if not language-optimal) picture
-/// rather than nothing at all.
-fn tmdb_images_or_fallback(
-    result: Result<TmdbImages, tmdb::TmdbError>,
-    title: &str,
-    fallback_poster: Option<&str>,
-    fallback_backdrop: Option<&str>,
-) -> (Option<String>, Option<String>) {
-    let images = match result {
-        Ok(images) => images,
-        Err(err) => {
-            tracing::warn!(
-                provider = "tmdb",
-                %err,
-                title,
-                "language-prioritized image lookup failed — using the search result's default image instead"
-            );
-            TmdbImages::default()
-        }
-    };
-    (
-        images
-            .poster_path
-            .or_else(|| fallback_poster.map(str::to_string)),
-        images
-            .backdrop_path
-            .or_else(|| fallback_backdrop.map(str::to_string)),
-    )
-}
-
+/// Builds `provider_key`'s extension (see [`provider_registry`]) and asks
+/// it for `target`, dispatching to `find_movie`/`find_series` depending on
+/// which variant `target` is. `None` covers an unregistered `provider_key`,
+/// no match, and a failed lookup alike — all three are "try the next
+/// provider in the admin's priority list" as far as [`enrich_item`] is
+/// concerned; which one actually happened is only ever visible in the
+/// `tracing::warn!` line this function emits.
 async fn try_provider(
     provider_key: &str,
     api_key: &str,
     target: &EnrichTarget,
     primary_language: &str,
-) -> Option<MatchedMetadata> {
-    match (provider_key, target) {
-        ("tmdb", EnrichTarget::Movie { title, year }) => {
-            let client = tmdb::TmdbClient::new(api_key);
-            match client.search_movie(title, *year).await {
-                Ok(Some(m)) => {
-                    let images_result = client.movie_images(m.tmdb_id, primary_language).await;
-                    let (poster_path, backdrop_path) = tmdb_images_or_fallback(
-                        images_result,
-                        title,
-                        m.poster_path.as_deref(),
-                        m.backdrop_path.as_deref(),
-                    );
-                    Some(MatchedMetadata {
-                        poster_url: poster_path.as_deref().map(|p| tmdb::image_url(p, "w500")),
-                        backdrop_url: backdrop_path
-                            .as_deref()
-                            .map(|p| tmdb::image_url(p, "w1280")),
-                        fields: serde_json::json!({
-                            "tmdb_id": m.tmdb_id,
-                            "overview": m.overview,
-                        }),
-                    })
-                }
-                Ok(None) => None,
-                Err(err) => {
-                    tracing::warn!(provider = "tmdb", %err, title, "movie metadata lookup failed");
-                    None
-                }
-            }
+) -> Option<ProviderMatch> {
+    let Some(provider) = provider_registry::build_provider(provider_key, api_key) else {
+        tracing::warn!(
+            provider = provider_key,
+            "no metadata client for this provider key"
+        );
+        return None;
+    };
+
+    let result = match target {
+        EnrichTarget::Movie { title, year } => {
+            provider
+                .find_movie(
+                    &MovieQuery {
+                        title: title.as_str(),
+                        year: *year,
+                    },
+                    primary_language,
+                )
+                .await
         }
-        ("tmdb", EnrichTarget::Series { title }) => {
-            let client = tmdb::TmdbClient::new(api_key);
-            match client.search_series(title).await {
-                Ok(Some(m)) => {
-                    let images_result = client.series_images(m.tmdb_id, primary_language).await;
-                    let (poster_path, backdrop_path) = tmdb_images_or_fallback(
-                        images_result,
-                        title,
-                        m.poster_path.as_deref(),
-                        m.backdrop_path.as_deref(),
-                    );
-                    Some(MatchedMetadata {
-                        poster_url: poster_path.as_deref().map(|p| tmdb::image_url(p, "w500")),
-                        backdrop_url: backdrop_path
-                            .as_deref()
-                            .map(|p| tmdb::image_url(p, "w1280")),
-                        fields: serde_json::json!({
-                            "tmdb_id": m.tmdb_id,
-                            "overview": m.overview,
-                        }),
-                    })
-                }
-                Ok(None) => None,
-                Err(err) => {
-                    tracing::warn!(provider = "tmdb", %err, title, "series metadata lookup failed");
-                    None
-                }
-            }
+        EnrichTarget::Series { title } => {
+            provider
+                .find_series(
+                    &SeriesQuery {
+                        title: title.as_str(),
+                    },
+                    primary_language,
+                )
+                .await
         }
-        ("tvdb", EnrichTarget::Series { title }) => {
-            let client = tvdb::TvdbClient::new(api_key);
-            match client.search_series(title).await {
-                // TVDB's search response carries one thumbnail URL, not a
-                // separate poster/backdrop pair — used as the poster; no
-                // backdrop is cached for a TVDB-only match. TVDB has no
-                // per-language `/images` endpoint equivalent to TMDB's in
-                // this client, so no language-priority chain applies here.
-                Ok(Some(m)) => Some(MatchedMetadata {
-                    poster_url: m.image_url.clone(),
-                    backdrop_url: None,
-                    fields: serde_json::json!({
-                        "tvdb_id": m.tvdb_id,
-                        "overview": m.overview,
-                    }),
-                }),
-                Ok(None) => None,
-                Err(err) => {
-                    tracing::warn!(provider = "tvdb", %err, title, "series metadata lookup failed");
-                    None
-                }
-            }
-        }
-        // TVDB's v4 movie search exists but isn't wired up in this pass —
-        // TMDB alone covers movies for now (see the crate doc comment on
-        // `lisek-metadata` for the built-in-provider scope).
-        ("tvdb", EnrichTarget::Movie { .. }) => None,
-        (unknown, _) => {
-            tracing::warn!(
-                provider = unknown,
-                "no metadata client for this provider key"
-            );
+    };
+
+    match result {
+        Ok(matched) => matched,
+        Err(err) => {
+            tracing::warn!(provider = provider_key, %err, "metadata lookup failed");
             None
         }
     }
@@ -211,10 +117,10 @@ fn media_folder_destination(
 /// (not simply "the setting was off") is persisted onto the item's
 /// `metadata_fallback` flag via `lisek_db::set_metadata_fallback` — see that
 /// function's own doc comment for why this is safe to call unconditionally
-/// on every scan. `primary_language` is the TMDB image-language chain's
-/// first choice (see `lisek_metadata::tmdb::TmdbClient::movie_images`) —
-/// currently the scanning admin's own UI language, pending a dedicated
-/// server-wide metadata-language setting (see the roadmap).
+/// on every scan. `primary_language` is passed straight through to
+/// whichever provider matches, as its own image-language priority (if it
+/// has one) — currently the scanning admin's own UI language, pending a
+/// dedicated server-wide metadata-language setting (see the roadmap).
 ///
 /// A failed image download/write is logged and otherwise ignored — the
 /// text metadata it's paired with is still worth keeping even if the
@@ -302,7 +208,7 @@ pub struct EnrichOutcome {
     pub matched: bool,
     /// At least one of poster/backdrop was actually written to disk —
     /// media folder or local cache, either counts. `false` while `matched`
-    /// is `true` means a real title match with no usable TMDB/TVDB image,
+    /// is `true` means a real title match with no usable provider image,
     /// or every image download/write failing; see the per-item
     /// `tracing::warn!` lines this function emits for which one happened.
     pub image_saved: bool,
