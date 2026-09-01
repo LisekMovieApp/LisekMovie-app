@@ -140,14 +140,10 @@ impl axum::extract::FromRequestParts<SharedState> for AuthUser {
         parts: &mut Parts,
         state: &SharedState,
     ) -> Result<Self, Self::Rejection> {
-        let header_value = parts
-            .headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
+        let token = token_from_header(parts)
+            .or_else(|| token_from_query(parts.uri.query()))
             .ok_or(AuthError::MissingToken)?;
-
-        let token = parse_token(header_value).ok_or(AuthError::MissingToken)?;
-        let token_hash = lisek_auth::hash_session_token(token);
+        let token_hash = lisek_auth::hash_session_token(&token);
 
         let pool = state.pool().await.ok_or(AuthError::ServerNotReady)?;
         let user = lisek_db::find_user_by_session_token_hash(&pool, &token_hash)
@@ -170,6 +166,31 @@ fn parse_token(header_value: &str) -> Option<&str> {
         key.trim()
             .eq_ignore_ascii_case("token")
             .then(|| value.trim().trim_matches('"'))
+    })
+}
+
+/// The normal path: every JSON API call sends the token in `Authorization`
+/// (see this module's own doc comment for why a header, not a cookie).
+fn token_from_header(parts: &Parts) -> Option<String> {
+    let header_value = parts
+        .headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())?;
+    parse_token(header_value).map(str::to_owned)
+}
+
+/// The one exception: an `<img src>` (or any other browser-native resource
+/// fetch) can't attach a custom header, so the two image-serving routes in
+/// `media.rs` are reachable this way too — `?token=...`, checked only once
+/// the header above is absent, so every JSON endpoint's behavior is
+/// unchanged. Safe to parse with a plain `&`/`=` split and no percent-
+/// decoding: `lisek_auth::generate_session_token` only ever produces
+/// URL-safe-base64 characters (`[A-Za-z0-9_-]`), none of which a query
+/// string would ever need to escape.
+fn token_from_query(query: Option<&str>) -> Option<String> {
+    query?.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key == "token" && !value.is_empty()).then(|| value.to_owned())
     })
 }
 
@@ -259,5 +280,29 @@ mod tests {
         assert_eq!(parse_token("LisekMovie Client=web"), None);
         assert_eq!(parse_token("Bearer abc123"), None);
         assert_eq!(parse_token(""), None);
+    }
+
+    #[test]
+    fn query_token_reads_the_token_param() {
+        assert_eq!(
+            token_from_query(Some("token=abc123")),
+            Some("abc123".to_string())
+        );
+    }
+
+    #[test]
+    fn query_token_finds_it_among_other_params_in_any_order() {
+        assert_eq!(
+            token_from_query(Some("size=w500&token=abc123&v=2")),
+            Some("abc123".to_string())
+        );
+    }
+
+    #[test]
+    fn query_token_rejects_missing_or_empty() {
+        assert_eq!(token_from_query(None), None);
+        assert_eq!(token_from_query(Some("")), None);
+        assert_eq!(token_from_query(Some("size=w500")), None);
+        assert_eq!(token_from_query(Some("token=")), None);
     }
 }

@@ -12,9 +12,10 @@
 
 	interface Props {
 		username: string;
+		isAdmin: boolean;
 	}
 
-	let { username }: Props = $props();
+	let { username, isAdmin }: Props = $props();
 
 	let open = $state(false);
 	let loggingOut = $state(false);
@@ -72,6 +73,14 @@
 			<p class="truncate px-1 pb-2 text-sm text-neutral-300">
 				{t('auth.logged_in_as', { username })}
 			</p>
+			{#if isAdmin}
+				<a
+					href={resolve('/admin/plugins')}
+					class="mb-1.5 block w-full rounded-md border border-neutral-700 px-3 py-1.5 text-left text-sm text-neutral-200 transition-colors hover:border-gold-dim"
+				>
+					{t('nav.admin_panel')}
+				</a>
+			{/if}
 			<button
 				type="button"
 				disabled={loggingOut}

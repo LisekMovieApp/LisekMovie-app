@@ -1,9 +1,24 @@
 //! Shared server state and the three-way "what can we serve right now" mode.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use lisek_db::PgPool;
 use tokio::sync::RwLock;
+
+/// Where the app keeps everything that isn't in Postgres: right now, just
+/// `metadata/{posters,backdrops}/{item_id}.jpg` (see
+/// `lisek_metadata::image_cache`). Override with `LISEK_CONFIG_DIR`;
+/// defaults to `./config`, relative to wherever the server process runs —
+/// consistent with `.env` and every other path this app resolves so far
+/// (see `env_file.rs`), and a plain relative default rather than something
+/// like an XDG directory since `lisek-server` doesn't yet have any other
+/// notion of a "real" install location to anchor one against.
+pub fn config_dir() -> PathBuf {
+    std::env::var("LISEK_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("./config"))
+}
 
 /// What the server can currently do, decided once at startup and updated
 /// in place the moment the First-Run Wizard finishes — no restart needed.

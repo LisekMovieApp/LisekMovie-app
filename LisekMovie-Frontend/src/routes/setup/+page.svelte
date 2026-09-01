@@ -8,6 +8,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { t, setLocale, getLocale, setLocaleCookie, type Locale } from '$lib/i18n';
+	import { setSessionCookie } from '$lib/auth';
 	import logoText from '$lib/assets/logo_text.svg';
 
 	interface DatabaseConfig {
@@ -71,9 +72,10 @@
 		setLocale(locale);
 		// Persisted immediately, not just held at `finishSetup` time — this is
 		// the only record of the choice that survives a full page load, and
-		// it's what lets the *next* page (the login screen `finishSetup`
-		// redirects to, since finishing setup doesn't sign anyone in) render
-		// in the right language too, not just the rest of this wizard.
+		// it's what lets the *next* page `finishSetup` sends the browser to
+		// (normally "/", or "/login" on the rare case its own follow-up
+		// sign-in fails) render in the right language too, not just the rest
+		// of this wizard.
 		setLocaleCookie(locale);
 	}
 
@@ -138,22 +140,45 @@
 			ui_language: uiLanguage
 		});
 
+		if (!result.ok) {
+			finishing = false;
+			finishErrorCode = result.errorCode;
+			return;
+		}
+
+		// `/api/setup/finish` only creates the admin account — it doesn't sign
+		// anyone in. Sending the browser straight to "/" without a session
+		// used to mean `+layout.ts`'s auth guard tried `/api/auth/me`, got a
+		// 401 (there was never a session to check, not a timing race), and
+		// only then redirected to /login — a confusing console error plus an
+		// extra login screen for credentials the admin just typed. Logging in
+		// immediately with those same credentials avoids both.
+		const loginResult = await postJson<{ token: string }>('/api/auth/login', {
+			username: adminUsername,
+			password: adminPassword,
+			client: 'web',
+			device: 'Browser'
+		});
+
 		finishing = false;
 
-		if (result.ok) {
-			// `invalidateAll` matters here, not just style: without it this is a
-			// plain client-side navigation, and SvelteKit reuses the root
-			// layout's already-cached load result rather than re-running
-			// `+layout.server.ts` — so it would still be reading the request
-			// that rendered /setup, before the language cookie
-			// `selectLanguage` just set even existed. That cached result is
-			// also what sends this browser on to /login in the first place
-			// (setup finishing doesn't sign anyone in) — the same page that
-			// needs the fresh cookie to render in the chosen language at all.
-			await goto(resolve('/'), { invalidateAll: true });
-		} else {
-			finishErrorCode = result.errorCode;
+		if (!loginResult.ok) {
+			// The admin account was still created successfully even though
+			// this follow-up sign-in failed (e.g. a dropped request) — send
+			// the admin to the normal login page rather than showing a
+			// setup-step error there's nothing left on this screen to retry.
+			await goto(resolve('/login'), { invalidateAll: true });
+			return;
 		}
+
+		setSessionCookie(loginResult.data.token);
+		// `invalidateAll` matters here, not just style: without it this is a
+		// plain client-side navigation, and SvelteKit reuses the root
+		// layout's already-cached load result rather than re-running
+		// `+layout.server.ts` — so it would still be reading the request that
+		// rendered /setup, before both the language cookie `selectLanguage`
+		// set and the session cookie set just above existed.
+		await goto(resolve('/'), { invalidateAll: true });
 	}
 </script>
 

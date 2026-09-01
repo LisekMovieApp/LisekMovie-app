@@ -24,3 +24,4 @@ Thumbs.db
 # Local dev data (DB dumps, thumbnail/poster cache)
 *.sql.gz
 /thumbnail-cache/
+/LisekMovie-Backend/config/metadata/

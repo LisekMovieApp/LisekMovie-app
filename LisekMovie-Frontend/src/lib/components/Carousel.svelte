@@ -1,0 +1,165 @@
+<!--
+  Shared carousel shell for MediaRow and Top10Row: a horizontally-sliding
+  track plus edge arrow buttons. Takes its items via a snippet so each row
+  keeps its own card markup — this component only owns the sliding
+  mechanics.
+
+  Replaces an earlier version driven entirely by the native scroll APIs
+  (`scrollLeft`/`scrollTo`/`scroll-snap`). That approach went through three
+  attempts and never became reliably smooth on a real desktop browser (see
+  project memory's "Faza 4 refinement round 2" for the full story — the
+  short version: native scroll-behavior interacts with scroll-snap in ways
+  that differ across browsers/machines, and even a manual rAF loop kept
+  getting entangled with it). This version sidesteps all of that: the arrow
+  buttons move a plain `offset` number, and a CSS `transition: transform`
+  animates the track's `translateX` — no scroll container, no scroll-snap,
+  no native smooth-scroll API involved at all. `transition: transform` is
+  about as battle-tested as CSS gets (it's how most JS carousel libraries
+  animate), so there's no browser-specific smooth-scroll behavior left to
+  fight.
+
+  Trackpad/mouse-wheel horizontal panning (`deltaX`) still nudges the
+  offset directly, and touch/pointer dragging repositions the track
+  1:1 with the finger (transition disabled while dragging, so it doesn't
+  lag behind). Vertical wheel scrolling (`deltaY`) is deliberately left
+  alone here — it already reaches the page correctly (see MediaRow's and
+  Top10Row's own `overflow-y-hidden` note from the previous round); this
+  component doesn't re-implement or repeat that fix, it just doesn't
+  interfere with it since there's no `overflow-x-auto` container to
+  implicitly gain `overflow-y: auto` from anymore.
+-->
+<script lang="ts">
+	import { t } from '$lib/i18n';
+	import { clampOffset, computeMaxOffset, pageOffset } from '$lib/carouselMath';
+	import type { Snippet } from 'svelte';
+
+	interface Props {
+		children: Snippet;
+	}
+
+	let { children }: Props = $props();
+
+	/** How long the arrow-button slide animates — 0.3s-0.5s reads as a real
+	 * glide without feeling sluggish; 380ms sits in the middle of that. */
+	const SLIDE_DURATION_MS = 380;
+
+	let viewportEl: HTMLDivElement | undefined = $state();
+	let trackEl: HTMLDivElement | undefined = $state();
+	let offset = $state(0);
+	let maxOffset = $state(0);
+	let dragging = $state(false);
+
+	let atStart = $derived(offset <= 0);
+	let atEnd = $derived(offset >= maxOffset);
+
+	function recomputeMaxOffset() {
+		if (!viewportEl || !trackEl) return;
+		maxOffset = computeMaxOffset(trackEl.scrollWidth, viewportEl.clientWidth);
+		offset = clampOffset(offset, maxOffset);
+	}
+
+	function scrollByPage(direction: 1 | -1) {
+		offset = pageOffset(offset, direction, viewportEl?.clientWidth ?? 0, maxOffset);
+	}
+
+	function onWheel(event: WheelEvent) {
+		// Only horizontal wheel/trackpad input is ours to handle — vertical
+		// wheel scrolling must keep reaching the page untouched.
+		if (event.deltaX === 0) return;
+		const next = clampOffset(offset + event.deltaX, maxOffset);
+		if (next === offset) return; // already at this edge — let it bubble
+		event.preventDefault();
+		offset = next;
+	}
+
+	let dragPointerId: number | null = null;
+	let dragStartX = 0;
+	let dragStartOffset = 0;
+
+	function onPointerDown(event: PointerEvent) {
+		if (event.pointerType === 'mouse' && event.button !== 0) return;
+		if (maxOffset <= 0) return;
+		dragging = true;
+		dragPointerId = event.pointerId;
+		dragStartX = event.clientX;
+		dragStartOffset = offset;
+		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+	}
+
+	function onPointerMove(event: PointerEvent) {
+		if (!dragging || event.pointerId !== dragPointerId) return;
+		offset = clampOffset(dragStartOffset - (event.clientX - dragStartX), maxOffset);
+	}
+
+	function endDrag(event: PointerEvent) {
+		if (event.pointerId !== dragPointerId) return;
+		dragging = false;
+		dragPointerId = null;
+	}
+
+	$effect(() => {
+		recomputeMaxOffset();
+		if (!viewportEl || !trackEl) return;
+		const observer = new ResizeObserver(() => recomputeMaxOffset());
+		observer.observe(viewportEl);
+		observer.observe(trackEl);
+		return () => observer.disconnect();
+	});
+</script>
+
+<div class="relative">
+	<!--
+	  role="presentation": the pointer handlers below are a drag-to-scroll
+	  convenience layered on top of the fully keyboard-accessible arrow
+	  buttons, not this element's own interactive semantics — there's
+	  nothing here for a screen reader or keyboard user to interact with
+	  directly, so this isn't an accessibility regression to route around,
+	  just a deliberate "no role of its own" declaration.
+	-->
+	<div
+		bind:this={viewportEl}
+		role="presentation"
+		class="touch-pan-y overflow-hidden px-4 md:px-8"
+		onwheel={onWheel}
+		onpointerdown={onPointerDown}
+		onpointermove={onPointerMove}
+		onpointerup={endDrag}
+		onpointercancel={endDrag}
+	>
+		<div
+			bind:this={trackEl}
+			class="flex w-max gap-2 {dragging ? '' : 'transition-transform ease-out'}"
+			style="transform: translateX(-{offset}px); {dragging
+				? ''
+				: `transition-duration: ${SLIDE_DURATION_MS}ms;`}"
+		>
+			{@render children()}
+		</div>
+	</div>
+
+	<button
+		type="button"
+		aria-label={t('home.scroll_left')}
+		onclick={() => scrollByPage(-1)}
+		class="absolute inset-y-0 left-0 hidden w-10 items-center justify-center bg-gradient-to-r from-base/80 to-transparent text-neutral-100 transition-opacity hover:text-gold md:flex md:w-14 {atStart
+			? 'invisible'
+			: 'opacity-0 group-hover/row:opacity-100'}"
+	>
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="size-6">
+			<path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round" />
+		</svg>
+	</button>
+
+	<button
+		type="button"
+		aria-label={t('home.scroll_right')}
+		onclick={() => scrollByPage(1)}
+		class="absolute inset-y-0 right-0 hidden w-10 items-center justify-center bg-gradient-to-l from-base/80 to-transparent text-neutral-100 transition-opacity hover:text-gold md:flex md:w-14 {atEnd
+			? 'invisible'
+			: 'opacity-0 group-hover/row:opacity-100'}"
+	>
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="size-6">
+			<path d="M9 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round" />
+		</svg>
+	</button>
+</div>

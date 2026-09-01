@@ -6,8 +6,11 @@
 //! group — see `auth.rs` for what "protected" means here. The OpenAPI
 //! surface (utoipa) is still open for a later phase.
 
+mod admin;
 mod auth;
 mod env_file;
+mod media;
+mod metadata_enrichment;
 mod setup;
 mod state;
 
@@ -15,7 +18,7 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    routing::{get, post},
+    routing::{delete, get, post, put},
 };
 use serde_json::{Value, json};
 use tokio::sync::RwLock;
@@ -76,7 +79,37 @@ async fn main() {
     // to this group, not `public_routes`.
     let protected_routes = Router::new()
         .route("/api/auth/me", get(auth::me))
-        .route("/api/auth/logout", post(auth::logout));
+        .route("/api/auth/logout", post(auth::logout))
+        // Admin-only in practice, not in routing: every handler in
+        // admin.rs re-checks `user.is_admin` itself (see that module's doc
+        // comment) rather than this router having a separate admin-only
+        // sub-group, matching how AuthUser itself is the whole enforcement
+        // for "protected" above.
+        .route("/api/admin/providers", get(admin::list_providers))
+        .route(
+            "/api/admin/providers/{provider_key}",
+            put(admin::update_provider),
+        )
+        .route(
+            "/api/admin/providers/{provider_key}/key",
+            put(admin::set_provider_key).delete(admin::clear_provider_key),
+        )
+        .route(
+            "/api/admin/libraries",
+            get(admin::list_libraries).post(admin::create_library),
+        )
+        .route(
+            "/api/admin/libraries/{library_id}",
+            delete(admin::delete_library),
+        )
+        .route(
+            "/api/admin/libraries/{library_id}/scan",
+            post(admin::scan_library),
+        )
+        // Not admin-only — see media.rs's own doc comment.
+        .route("/api/home", get(media::home_feed))
+        .route("/api/media/{item_id}/poster", get(media::poster_image))
+        .route("/api/media/{item_id}/backdrop", get(media::backdrop_image));
 
     // Permissive for now: same-origin in dev (via the frontend's Vite
     // proxy) and planned same-origin in production (one reverse proxy in

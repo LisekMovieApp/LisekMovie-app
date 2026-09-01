@@ -23,17 +23,3 @@
 		@apply rounded-sm outline-2 outline-offset-2 outline-gold;
 	}
 }
-
-@layer utilities {
-	/* Hides the scrollbar on horizontally-scrolling rows (media carousels)
-	   while keeping the element natively scrollable — mouse wheel, touch
-	   swipe, and keyboard all still work, only the visible track is gone. */
-	.no-scrollbar {
-		scrollbar-width: none;
-		-ms-overflow-style: none;
-	}
-
-	.no-scrollbar::-webkit-scrollbar {
-		display: none;
-	}
-}

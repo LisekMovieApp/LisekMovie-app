@@ -43,6 +43,6 @@
   /login, with no route-based check needed here.
 -->
 {#if data.user}
-	<Navbar username={data.user.username} />
+	<Navbar username={data.user.username} isAdmin={data.user.is_admin} />
 {/if}
 {@render children()}

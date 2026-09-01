@@ -174,6 +174,11 @@ fn db_error_to_setup_error(err: DbError) -> SetupError {
             format!("Database migrations failed: {details}"),
         ),
         DbError::UsernameTaken => setup_error("username_taken", "That username is already taken."),
-        DbError::Other(details) => setup_error("database_error", details),
+        // Every other variant (provider-config errors, Faza 5's library
+        // errors, ...) is never actually produced by anything the wizard
+        // calls — a genuine wildcard here, rather than matching each one by
+        // name, is what lets a future variant get added to `DbError`
+        // without this match needing an update too.
+        _ => setup_error("database_error", err.to_string()),
     }
 }

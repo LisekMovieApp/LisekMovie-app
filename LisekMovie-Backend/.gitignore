@@ -1,0 +1,5 @@
+# Duplicate of the root .gitignore's matching entry, relative to this
+# folder — in case this backend is ever cloned or worked on standalone
+# rather than through the LisekMovie-app monorepo root. See the root
+# .gitignore for why this path is never committed.
+config/metadata/

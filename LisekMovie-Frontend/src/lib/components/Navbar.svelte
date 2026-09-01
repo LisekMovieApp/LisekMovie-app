@@ -5,6 +5,16 @@
   show through it) with a slightly smaller logo, both animated so neither
   change is a hard cut.
 
+  Deliberately no border here, even a hairline one: toggling `border-b` on
+  and off animates `border-bottom-width` from 0, and for the brief instant
+  it's above 0 but the `border-white/5` color utility hasn't "caught up" in
+  the same transition, the element renders Tailwind preflight's default
+  border color (`currentColor` — white, on this light-text header) instead
+  — a bright white flash right at the seam. Keeping the border out
+  entirely, rather than trying to keep its width constant and animate only
+  its color, is the simpler fix and matches what was actually asked for:
+  only the background and the logo size are meant to animate here.
+
   "Moja Lista" and "Gry" are real, translated labels but not yet real
   routes: My List needs the library scanner's data (Faza 5+) and Gry is a
   native core feature planned for a later phase (see the roadmap). Shown
@@ -19,9 +29,10 @@
 
 	interface Props {
 		username: string;
+		isAdmin: boolean;
 	}
 
-	let { username }: Props = $props();
+	let { username, isAdmin }: Props = $props();
 
 	let scrolled = $state(false);
 
@@ -37,7 +48,7 @@
 
 <header
 	class="fixed inset-x-0 top-0 z-50 flex items-center justify-between px-4 py-3 transition-all duration-300 md:px-8 {scrolled
-		? 'border-b border-white/5 bg-base'
+		? 'bg-base'
 		: 'bg-transparent'}"
 >
 	<div class="flex items-center gap-6">
@@ -45,7 +56,7 @@
 			<img
 				src={logoText}
 				alt="LisekMovie"
-				class="transition-all duration-300 {scrolled ? 'h-6 md:h-8' : 'h-8 md:h-10'}"
+				class="transition-all duration-300 {scrolled ? 'h-13' : 'h-16'}"
 			/>
 		</a>
 
@@ -62,5 +73,5 @@
 		</nav>
 	</div>
 
-	<UserMenu {username} />
+	<UserMenu {username} {isAdmin} />
 </header>
