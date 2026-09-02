@@ -30,6 +30,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 use serde_json::json;
 use uuid::Uuid;
@@ -64,13 +65,17 @@ pub struct MediaItemResponse {
     pub poster_url: String,
     pub backdrop_url: String,
     pub logo_url: String,
-    /// `"new_series"` / `"new_season"` / `"new_episodes"`, or `None` — see
-    /// `lisek_db::classify_series_badge`'s doc comment. Only ever set by
-    /// [`to_response`] for a `item_type: "series"` row coming back from a
-    /// home-feed query; the plain [`From`] impl below always leaves it
-    /// `None`, which is what [`media_item_detail`] (the single-item Detail
-    /// View endpoint) returns as-is — the badge is a home-feed-card
-    /// affordance, not something the Detail View itself was asked to show.
+    /// `"new_series"` / `"new_season"` / `"new_episodes"` for a `"series"`
+    /// row (see `lisek_db::classify_series_badge`'s doc comment), or
+    /// `"new_movie"` for a `"movie"` row added within
+    /// `lisek_db::RECENT_BADGE_DAYS` (Runda 9 — see [`is_recently_added`]),
+    /// or `None`. Only ever set by [`to_response`], for whichever row it's
+    /// given; the plain [`From`] impl below always leaves it `None`, which
+    /// is what [`media_item_detail`] (the single-item Detail View endpoint)
+    /// returns as-is — the badge is a browse-card affordance (home feed,
+    /// and as of Runda 9 the `/library/[id]` grid too — both go through
+    /// [`to_response`]/[`to_responses`]), not something the Detail View
+    /// itself was ever asked to show.
     pub badge: Option<String>,
 }
 
@@ -92,27 +97,42 @@ impl From<lisek_core::MediaItem> for MediaItemResponse {
     }
 }
 
-/// [`MediaItemResponse::from`] plus, for a `"series"` item, its "new"
-/// badge — a separate async step because computing the badge needs its own
+/// [`MediaItemResponse::from`] plus this item's "new" badge, if any — a
+/// separate async step because a `"series"` row's badge needs its own
 /// database round trip (see `lisek_db::classify_series_badge`), which a
-/// plain `From` impl can't do. Used for every item the home feed hands
-/// back; [`media_item_detail`] deliberately skips this and uses the plain
-/// `From` conversion instead (see [`MediaItemResponse::badge`]'s own doc
-/// comment for why).
+/// plain `From` impl can't do; a `"movie"` row's badge is decided purely
+/// from data already in hand ([`is_recently_added`]), but is computed here
+/// too rather than in the `From` impl, so both badge kinds live in exactly
+/// one place instead of splitting "when does a card get a badge" across two
+/// call sites. Used for every item the home feed hands back, and (Runda 9)
+/// every item a `/library/[id]` grid hands back; [`media_item_detail`]
+/// deliberately skips this and uses the plain `From` conversion instead
+/// (see [`MediaItemResponse::badge`]'s own doc comment for why).
 async fn to_response(pool: &lisek_db::PgPool, item: lisek_core::MediaItem) -> MediaItemResponse {
-    let badge = if item.item_type == "series" {
-        lisek_db::classify_series_badge(pool, item.library_id, &item.title)
+    let badge = match item.item_type.as_str() {
+        "series" => lisek_db::classify_series_badge(pool, item.library_id, &item.title)
             .await
             .ok()
             .flatten()
-            .map(|badge| badge.as_str().to_string())
-    } else {
-        None
+            .map(|badge| badge.as_str().to_string()),
+        "movie" if is_recently_added(item.created_at, Utc::now()) => Some("new_movie".to_string()),
+        _ => None,
     };
 
     let mut response = MediaItemResponse::from(item);
     response.badge = badge;
     response
+}
+
+/// Whether `created_at` falls within the shared "just added" badge window
+/// (`lisek_db::RECENT_BADGE_DAYS`) as of `now` — a movie's own "Nowość"
+/// badge (Runda 9), the plain-data counterpart to a series' database-backed
+/// `classify_series_badge`. A pure function taking `now` as a parameter
+/// rather than calling `Utc::now()` internally, so it's unit-testable
+/// without depending on the wall clock — same reasoning as
+/// `lisek_db::classify_badge_from_flags`.
+fn is_recently_added(created_at: DateTime<Utc>, now: DateTime<Utc>) -> bool {
+    now - created_at <= Duration::days(lisek_db::RECENT_BADGE_DAYS)
 }
 
 async fn to_responses(
@@ -181,6 +201,94 @@ pub async fn home_feed(
         top10: to_responses(&pool, top10).await,
         recommended: to_responses(&pool, recommended).await,
         popular: to_responses(&pool, popular).await,
+    }))
+}
+
+/// One library as the Navbar/`/library/[id]` grid consume it — deliberately
+/// thinner than `admin::LibraryResponse`: `root_paths` are absolute
+/// filesystem paths on the machine the server runs on, and have no business
+/// reaching a non-admin browser tab (Runda 9). Every signed-in account gets
+/// to see *that* a library exists and what the admin named it, never where
+/// its files actually live.
+#[derive(Serialize)]
+pub struct PublicLibraryResponse {
+    pub id: Uuid,
+    pub name: String,
+    pub library_type: String,
+}
+
+impl From<lisek_core::Library> for PublicLibraryResponse {
+    fn from(library: lisek_core::Library) -> Self {
+        Self {
+            id: library.id,
+            name: library.name,
+            library_type: library.library_type,
+        }
+    }
+}
+
+/// Every configured library, in the admin's shared display order — the
+/// Navbar's data source (Runda 9), and how the `/library/[id]` grid's own
+/// "which library is this" title/name gets resolved. Public, same as every
+/// other route in this module; reads through the exact same
+/// `lisek_db::list_libraries` (`ORDER BY sort_order, name`) that
+/// `admin::list_libraries` already used for the Admin Panel — one query,
+/// two response shapes, so the Navbar can never disagree with the admin's
+/// own reorder buttons about which library comes first.
+pub async fn list_libraries(
+    _auth: AuthUser,
+    State(state): State<SharedState>,
+) -> Result<Json<Vec<PublicLibraryResponse>>, MediaError> {
+    let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
+    let libraries = lisek_db::list_libraries(&pool)
+        .await
+        .map_err(|_| MediaError::Internal)?;
+    Ok(Json(libraries.into_iter().map(Into::into).collect()))
+}
+
+/// How many items the `/library/[id]` grid fetches in one go — a generous
+/// but bounded cap, not real pagination (see `lisek_db::
+/// list_items_by_library`'s own doc comment); the same honest stopgap
+/// `ROW_LIMIT` already is for the home feed's five curated rows, just sized
+/// for "show the whole library" rather than "show a handful per row".
+const LIBRARY_ITEMS_LIMIT: i64 = 500;
+
+#[derive(Serialize)]
+pub struct LibraryItemsResponse {
+    pub library: PublicLibraryResponse,
+    pub items: Vec<MediaItemResponse>,
+}
+
+/// One library's whole browsable contents — the `/library/[id]` grid's data
+/// source (Runda 9): the admin asked for "a basic skeleton (grid) showing
+/// media filtered to just this library" once a Navbar category is clicked.
+/// Bundles the library's own name/type alongside its items in one response
+/// so the page can render its title without a second round trip. A library
+/// id that doesn't exist (deleted, or simply wrong) is a real 404
+/// ([`MediaError::LibraryNotFound`]) — unlike [`media_item_seasons`]'s
+/// empty-array contract, there's a meaningful difference here between "this
+/// library exists and has nothing in it yet" and "this library doesn't
+/// exist", and the frontend needs to tell those apart to show the right
+/// message.
+pub async fn library_items(
+    _auth: AuthUser,
+    State(state): State<SharedState>,
+    Path(library_id): Path<Uuid>,
+) -> Result<Json<LibraryItemsResponse>, MediaError> {
+    let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
+
+    let library = lisek_db::get_library(&pool, library_id)
+        .await
+        .map_err(|_| MediaError::Internal)?
+        .ok_or(MediaError::LibraryNotFound)?;
+
+    let items = lisek_db::list_items_by_library(&pool, library_id, LIBRARY_ITEMS_LIMIT)
+        .await
+        .map_err(|_| MediaError::Internal)?;
+
+    Ok(Json(LibraryItemsResponse {
+        library: library.into(),
+        items: to_responses(&pool, items).await,
     }))
 }
 
@@ -439,6 +547,11 @@ pub enum MediaError {
     /// [`MediaError::Internal`] so the frontend can show a real "not
     /// found" state instead of a generic error banner.
     NotFound,
+    /// No `libraries` row with this id — [`library_items`]'s own "not
+    /// found" case (Runda 9), kept distinct from [`MediaError::NotFound`]
+    /// so the `/library/[id]` page can tell "this library doesn't exist"
+    /// apart from "this media item doesn't exist" if it ever needs to.
+    LibraryNotFound,
     Internal,
 }
 
@@ -455,6 +568,11 @@ impl IntoResponse for MediaError {
                 "not_found",
                 "No such media item exists.",
             ),
+            MediaError::LibraryNotFound => (
+                StatusCode::NOT_FOUND,
+                "library_not_found",
+                "No such library is configured.",
+            ),
             MediaError::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -467,5 +585,37 @@ impl IntoResponse for MediaError {
             Json(json!({ "error_code": error_code, "message": message })),
         )
             .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_movie_added_this_instant_is_recent() {
+        let now = Utc::now();
+        assert!(is_recently_added(now, now));
+    }
+
+    #[test]
+    fn a_movie_added_exactly_at_the_window_boundary_is_still_recent() {
+        let now = Utc::now();
+        let created_at = now - Duration::days(lisek_db::RECENT_BADGE_DAYS);
+        assert!(is_recently_added(created_at, now));
+    }
+
+    #[test]
+    fn a_movie_added_one_second_past_the_window_is_no_longer_recent() {
+        let now = Utc::now();
+        let created_at = now - Duration::days(lisek_db::RECENT_BADGE_DAYS) - Duration::seconds(1);
+        assert!(!is_recently_added(created_at, now));
+    }
+
+    #[test]
+    fn a_movie_added_long_ago_is_not_recent() {
+        let now = Utc::now();
+        let created_at = now - Duration::days(365);
+        assert!(!is_recently_added(created_at, now));
     }
 }

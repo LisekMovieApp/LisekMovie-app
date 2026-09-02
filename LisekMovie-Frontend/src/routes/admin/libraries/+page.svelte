@@ -9,6 +9,19 @@
   confirm rather than either a native `confirm()` dialog or a whole extra
   modal component: click once to arm it, click the now-red "confirm" state
   to actually delete, or click anywhere else on the card list to disarm it.
+
+  Runda 9: "W górę"/"W dół" buttons on each card call the new
+  `moveLibrary` — see `lisek_db::move_library`'s doc comment for exactly
+  what it does server-side (a swap with the immediate neighbor's
+  `sort_order`, inside one transaction). This is the ONE ordering every
+  signed-in account's Navbar shares (`lisek-server::media::
+  list_libraries`), not a per-admin preference, which is also why a
+  successful move re-fetches the whole list from `load()` rather than
+  reordering the local `libraries` array by hand — trusting the server's
+  own `ORDER BY sort_order, name` to be the single source of truth is
+  simpler and can't drift from what actually got written, at the cost of
+  one extra round trip per click (this list is never large enough for that
+  to matter).
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -19,6 +32,7 @@
 		fetchLibraries,
 		deleteLibrary,
 		scanLibrary,
+		moveLibrary,
 		type Library,
 		type ScanSummary
 	} from '$lib/admin/libraries';
@@ -34,6 +48,7 @@
 	let scanResults: Record<string, ScanSummary> = $state({});
 	let deleteFailedFor: string | null = $state(null);
 	let confirmingDeleteId: string | null = $state(null);
+	let reorderFailedFor: string | null = $state(null);
 
 	async function load() {
 		const token = getSessionCookieClientSide();
@@ -97,6 +112,22 @@
 			busyLibraryId = null;
 		}
 	}
+
+	async function handleMove(library: Library, direction: 'up' | 'down') {
+		const token = getSessionCookieClientSide();
+		if (!token) return;
+
+		busyLibraryId = library.id;
+		reorderFailedFor = null;
+		try {
+			await moveLibrary(token, library.id, direction);
+			await load();
+		} catch {
+			reorderFailedFor = library.id;
+		} finally {
+			busyLibraryId = null;
+		}
+	}
 </script>
 
 <main class="min-h-screen bg-base px-4 py-12 md:px-8">
@@ -123,7 +154,7 @@
 			<p class="mt-8 text-sm text-neutral-400">{t('admin.no_libraries')}</p>
 		{:else}
 			<ul class="mt-8 flex flex-col gap-3">
-				{#each libraries as library (library.id)}
+				{#each libraries as library, i (library.id)}
 					<li class="rounded-lg border border-white/10 bg-surface/60 p-4">
 						<div class="flex flex-wrap items-center justify-between gap-4">
 							<div class="min-w-0">
@@ -141,6 +172,38 @@
 							</div>
 
 							<div class="flex items-center gap-2">
+								<!--
+								  Runda 9: shown as a pair of arrow buttons rather than
+								  drag&drop — a two-value swap-with-neighbor (see
+								  `lisek_db::move_library`'s doc comment) doesn't need a
+								  drop target to compute, unlike `ProviderOrderList`'s own
+								  native HTML5 drag&drop, which reorders a whole list at
+								  once. Disabled at each end of `libraries` (already sorted
+								  by `sort_order` — this is the exact order `list_libraries`
+								  returns) rather than relying on the backend's own no-op
+								  boundary behavior to hide the buttons — a disabled button
+								  reads immediately as "already first/last", not just inert.
+								-->
+								<button
+									type="button"
+									disabled={busyLibraryId === library.id || i === 0}
+									onclick={() => handleMove(library, 'up')}
+									aria-label={t('admin.move_up')}
+									title={t('admin.move_up')}
+									class="rounded-md border border-neutral-700 px-2 py-1.5 text-sm text-neutral-200 transition-colors hover:border-gold-dim disabled:cursor-not-allowed disabled:opacity-30"
+								>
+									↑
+								</button>
+								<button
+									type="button"
+									disabled={busyLibraryId === library.id || i === libraries.length - 1}
+									onclick={() => handleMove(library, 'down')}
+									aria-label={t('admin.move_down')}
+									title={t('admin.move_down')}
+									class="rounded-md border border-neutral-700 px-2 py-1.5 text-sm text-neutral-200 transition-colors hover:border-gold-dim disabled:cursor-not-allowed disabled:opacity-30"
+								>
+									↓
+								</button>
 								<a
 									href={resolve('/admin/libraries/[id]/items', { id: library.id })}
 									class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-gold-dim"
@@ -203,6 +266,9 @@
 						{/if}
 						{#if deleteFailedFor === library.id}
 							<p class="mt-2 text-sm text-red-400">{t('admin.delete_failed')}</p>
+						{/if}
+						{#if reorderFailedFor === library.id}
+							<p class="mt-2 text-sm text-red-400">{t('admin.reorder_failed')}</p>
 						{/if}
 					</li>
 				{/each}

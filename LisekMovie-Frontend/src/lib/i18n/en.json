@@ -70,7 +70,8 @@
 		"empty_go_to_libraries": "Go to Libraries",
 		"badge_new_series": "New Series",
 		"badge_new_season": "New Season",
-		"badge_new_episodes": "New Episodes"
+		"badge_new_episodes": "New Episodes",
+		"badge_new_movie": "New"
 	},
 	"detail": {
 		"load_failed": "Couldn't load this title. Please try again.",
@@ -80,6 +81,11 @@
 		"season_label": "Season {number}",
 		"episode_label": "Episode {number}",
 		"episode_label_range": "Episode {number}–{end}"
+	},
+	"library": {
+		"load_failed": "Couldn't load this library. Please try again.",
+		"not_found": "This library couldn't be found.",
+		"empty": "This library doesn't have anything in it yet."
 	},
 	"admin": {
 		"tab_plugins": "Plugins",
@@ -136,6 +142,9 @@
 		"confirm_delete": "Confirm delete?",
 		"deleting": "Deleting…",
 		"delete_failed": "Couldn't delete the library. Please try again.",
+		"move_up": "Move up",
+		"move_down": "Move down",
+		"reorder_failed": "Couldn't change the order. Please try again.",
 		"tab_fallback": "Warnings",
 		"browse_items": "Browse",
 		"back_to_libraries": "← Libraries",

@@ -16,14 +16,32 @@
   only the background and the logo size are meant to animate here.
 
   "Moja Lista" and "Gry" are real, translated labels but not yet real
-  routes: My List needs the library scanner's data (Faza 5+) and Gry is a
-  native core feature planned for a later phase (see the roadmap). Shown
-  dimmed and inert rather than linking to a page that doesn't exist yet.
+  routes: My List needs a per-account watch-history/favorites model that
+  doesn't exist in the schema yet, and Gry is a native core feature planned
+  for a later phase (see the roadmap). Shown dimmed and inert rather than
+  linking to a page that doesn't exist yet.
+
+  Runda 9: the admin's own Libraries (e.g. "Filmy", "Seriale") now render
+  as real links between "Strona główna" and "Moja Lista" — fetched once,
+  client-side, from `GET /api/libraries` (see `$lib/media/api`'s
+  `fetchLibraries` doc comment: same shared `sort_order` the Admin Panel's
+  reorder buttons control, so every signed-in account sees the identical
+  order). `libraries` starts `[]` and a failed fetch just leaves it `[]` —
+  deliberately non-fatal: a category list that never loaded shouldn't take
+  the rest of the navbar (Home, the user menu) down with it, the same
+  "degrade, don't break" idiom the Detail View's provider-order fetch
+  already uses. Each link fades in with `svelte/transition`'s `fade` as it
+  is added to the `{#each}` (the "menu appears smoothly once data has
+  loaded" the request asked for) rather than the whole bar jumping the
+  instant the response lands.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import { resolve } from '$app/paths';
 	import { t } from '$lib/i18n';
+	import { getSessionCookieClientSide } from '$lib/auth';
+	import { fetchLibraries, type LibrarySummary } from '$lib/media/api';
 	import logoText from '$lib/assets/logo_text.svg';
 	import UserMenu from './UserMenu.svelte';
 
@@ -35,6 +53,7 @@
 	let { username, isAdmin }: Props = $props();
 
 	let scrolled = $state(false);
+	let libraries: LibrarySummary[] = $state([]);
 
 	onMount(() => {
 		const onScroll = () => {
@@ -42,6 +61,16 @@
 		};
 		onScroll();
 		window.addEventListener('scroll', onScroll, { passive: true });
+
+		const token = getSessionCookieClientSide();
+		if (token) {
+			fetchLibraries(token)
+				.then((fetched) => (libraries = fetched))
+				.catch(() => {
+					// Non-fatal — see this component's own top comment.
+				});
+		}
+
 		return () => window.removeEventListener('scroll', onScroll);
 	});
 </script>
@@ -64,6 +93,15 @@
 			<a href={resolve('/')} class="rounded-full bg-white/15 px-3 py-1 font-medium text-white">
 				{t('nav.home')}
 			</a>
+			{#each libraries as library (library.id)}
+				<a
+					href={resolve('/library/[id]', { id: library.id })}
+					class="px-1 text-neutral-300 transition-colors hover:text-white"
+					transition:fade={{ duration: 200 }}
+				>
+					{library.name}
+				</a>
+			{/each}
 			<span class="cursor-not-allowed px-1 text-neutral-500" title={t('nav.coming_soon')}>
 				{t('nav.my_list')}
 			</span>

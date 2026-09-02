@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { fetchLibraries, createLibrary, deleteLibrary, scanLibrary } from './libraries';
+import {
+	fetchLibraries,
+	createLibrary,
+	deleteLibrary,
+	scanLibrary,
+	moveLibrary
+} from './libraries';
 import { AdminApiError } from './api';
 
 function stubFetch(response: { ok: boolean; status?: number; json?: () => unknown }) {
@@ -135,5 +141,33 @@ describe('scanLibrary', () => {
 		const [url, options] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/admin/libraries/lib-1/scan');
 		expect(options.method).toBe('POST');
+	});
+});
+
+describe('moveLibrary', () => {
+	it('PUTs the direction as JSON to the /reorder sub-path, URL-encoded', async () => {
+		const fetchMock = stubFetch({ ok: true });
+
+		await moveLibrary('tok123', 'lib id/x', 'up');
+
+		const [url, options] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/admin/libraries/lib%20id%2Fx/reorder');
+		expect(options.method).toBe('PUT');
+		expect(JSON.parse(options.body)).toEqual({ direction: 'up' });
+	});
+
+	it('sends "down" as-is for the other direction', async () => {
+		const fetchMock = stubFetch({ ok: true });
+
+		await moveLibrary('tok123', 'lib-1', 'down');
+
+		const [, options] = fetchMock.mock.calls[0];
+		expect(JSON.parse(options.body)).toEqual({ direction: 'down' });
+	});
+
+	it('throws AdminApiError on a non-ok response', async () => {
+		stubFetch({ ok: false, status: 404 });
+
+		await expect(moveLibrary('tok123', 'lib-1', 'up')).rejects.toBeInstanceOf(AdminApiError);
 	});
 });

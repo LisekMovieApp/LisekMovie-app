@@ -79,3 +79,22 @@ export async function scanLibrary(token: string, libraryId: string): Promise<Sca
 	await assertOk(response);
 	return (await response.json()) as ScanSummary;
 }
+
+/** Nudges one library up or down in the shared `sort_order` — the "W
+ * górę"/"W dół" buttons on the libraries tab (Runda 9). Swaps with the
+ * immediate neighbor server-side (see `lisek_db::move_library`'s doc
+ * comment); the caller re-fetches the list afterwards rather than trying to
+ * reorder its local copy, so it can never drift from what the backend
+ * actually did. */
+export async function moveLibrary(
+	token: string,
+	libraryId: string,
+	direction: 'up' | 'down'
+): Promise<void> {
+	const response = await fetch(`/api/admin/libraries/${encodeURIComponent(libraryId)}/reorder`, {
+		method: 'PUT',
+		headers: { ...buildAuthHeader(token), 'Content-Type': 'application/json' },
+		body: JSON.stringify({ direction })
+	});
+	await assertOk(response);
+}

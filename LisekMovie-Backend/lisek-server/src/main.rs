@@ -120,6 +120,10 @@ async fn main() {
             delete(admin::delete_library),
         )
         .route(
+            "/api/admin/libraries/{library_id}/reorder",
+            put(admin::move_library),
+        )
+        .route(
             "/api/admin/libraries/{library_id}/scan",
             post(admin::scan_library),
         )
@@ -142,6 +146,11 @@ async fn main() {
         )
         // Not admin-only — see media.rs's own doc comment.
         .route("/api/home", get(media::home_feed))
+        .route("/api/libraries", get(media::list_libraries))
+        .route(
+            "/api/libraries/{library_id}/items",
+            get(media::library_items),
+        )
         .route("/api/media/{item_id}", get(media::media_item_detail))
         .route(
             "/api/media/{item_id}/seasons",

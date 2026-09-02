@@ -534,6 +534,79 @@ pub async fn delete_library(pool: &PgPool, library_id: Uuid) -> Result<(), DbErr
     Ok(())
 }
 
+/// Which way to nudge a library in the admin's shared display order — see
+/// [`move_library`]. A plain swap with the immediate neighbor (not a full
+/// reorder-to-index) is all the Admin Panel's "W górę"/"W dół" button pair
+/// (Runda 9) actually needs — no drag target to compute, no partial-list
+/// ordering to reconcile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LibraryMoveDirection {
+    Up,
+    Down,
+}
+
+/// Swaps `library_id`'s `sort_order` with its immediate neighbor in that
+/// direction — the Admin Panel's "W górę"/"W dół" buttons (Runda 9). This
+/// `sort_order` column has actually been in the schema since migration
+/// 0001 (see its own comment: "sort_order is set and reordered globally by
+/// the admin, not per-user") and [`list_libraries`] already reads it — this
+/// function is the first thing that ever *writes* to it after creation, and
+/// [`lisek_server::media::list_libraries`]'s Navbar-facing endpoint is what
+/// makes every signed-in account see the result identically, matching the
+/// single shared ordering the schema comment always intended (not a
+/// per-user preference).
+///
+/// A no-op (not an error) when `library_id` is already at that end of the
+/// list — a real up/down button pair needs the boundary to be simply inert,
+/// not a failure the frontend has to catch; disabling the button
+/// client-side is a nicety on top, not something this function should have
+/// to trust it happened. The two `UPDATE`s run inside one transaction so a
+/// crash between them can never leave two libraries sharing a `sort_order`
+/// — harmless for display (`list_libraries`'s `ORDER BY sort_order, name`
+/// still resolves the tie) but not a state either query intends to produce.
+pub async fn move_library(
+    pool: &PgPool,
+    library_id: Uuid,
+    direction: LibraryMoveDirection,
+) -> Result<(), DbError> {
+    let rows: Vec<(Uuid, i32)> =
+        sqlx::query_as("SELECT id, sort_order FROM libraries ORDER BY sort_order ASC, name ASC")
+            .fetch_all(pool)
+            .await?;
+
+    let Some(pos) = rows.iter().position(|(id, _)| *id == library_id) else {
+        return Err(DbError::LibraryNotFound);
+    };
+
+    let neighbor_pos = match direction {
+        LibraryMoveDirection::Up => pos.checked_sub(1),
+        LibraryMoveDirection::Down if pos + 1 < rows.len() => Some(pos + 1),
+        LibraryMoveDirection::Down => None,
+    };
+
+    let Some(neighbor_pos) = neighbor_pos else {
+        return Ok(());
+    };
+
+    let (this_id, this_order) = rows[pos];
+    let (neighbor_id, neighbor_order) = rows[neighbor_pos];
+
+    let mut tx = pool.begin().await?;
+    sqlx::query("UPDATE libraries SET sort_order = $1 WHERE id = $2")
+        .bind(neighbor_order)
+        .bind(this_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE libraries SET sort_order = $1 WHERE id = $2")
+        .bind(this_order)
+        .bind(neighbor_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+
+    Ok(())
+}
+
 /// How many of each outcome a scan produced — enough for the admin-facing
 /// "scan complete" summary without reporting on every single file.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -1541,7 +1614,10 @@ impl SeriesBadge {
 /// kind of judgment call as `Carousel.svelte`'s `DRAG_THRESHOLD_PX`: there's
 /// no scan-batch id anywhere in this schema to say precisely which episodes
 /// arrived together, so recency by `created_at` is the honest proxy for it.
-const SERIES_BADGE_RECENT_DAYS: i64 = 7;
+/// `pub` as of Runda 9: `lisek-server::media::is_recently_added` reuses this
+/// exact same window for a movie's own "Nowość" badge, so both badge kinds
+/// agree on what "just added" means instead of each picking its own number.
+pub const RECENT_BADGE_DAYS: i64 = 7;
 
 /// Classifies what changed most recently for one show, for the "Nowy
 /// serial" / "Nowy sezon" / "Nowe odcinki" badge asked for on its home-feed
@@ -1578,7 +1654,7 @@ pub async fn classify_series_badge(
     )
     .bind(library_id)
     .bind(title)
-    .bind(SERIES_BADGE_RECENT_DAYS as i32)
+    .bind(RECENT_BADGE_DAYS as i32)
     .fetch_all(pool)
     .await?;
 
@@ -1797,6 +1873,61 @@ pub async fn list_popular(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>, D
         LIMIT $1
         "#,
     )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.into_iter().map(media_item_from_row).collect())
+}
+
+/// Every browsable item in one library — movies and series, grouped exactly
+/// like the `home_candidates` CTE above (same episode→series collapsing,
+/// this time scoped to a single `library_id`), alphabetically by title. The
+/// `/library/[id]` grid's data source (Runda 9): unlike the home feed's five
+/// curated rows, this is meant to be the library's *whole* contents, so it
+/// sorts for browsability rather than recency or a placeholder ranking.
+///
+/// No real pagination yet — `limit` is a generous but bounded cap (see
+/// `lisek-server`'s own `LIBRARY_ITEMS_LIMIT`), the same honest stopgap the
+/// home feed's `ROW_LIMIT` already is, good enough for the library sizes
+/// this app has actually been tested against so far.
+pub async fn list_items_by_library(
+    pool: &PgPool,
+    library_id: Uuid,
+    limit: i64,
+) -> Result<Vec<MediaItem>, DbError> {
+    let rows = sqlx::query_as::<_, MediaItemRow>(
+        r#"
+        WITH home_candidates AS (
+            SELECT id, library_id, item_type, title,
+                   (metadata->>'year')::int AS year,
+                   metadata->'provider_data'->>'overview' AS overview,
+                   NULL::int AS season,
+                   NULL::int AS episode,
+                   created_at
+            FROM media_items
+            WHERE item_type = 'movie' AND library_id = $1
+
+            UNION ALL
+
+            SELECT DISTINCT ON (library_id, title)
+                   id, library_id, 'series' AS item_type, title,
+                   NULL::int AS year,
+                   metadata->'provider_data'->>'overview' AS overview,
+                   NULL::int AS season,
+                   NULL::int AS episode,
+                   created_at
+            FROM media_items
+            WHERE item_type = 'episode' AND library_id = $1
+            ORDER BY library_id, title, created_at DESC, id DESC
+        )
+        SELECT id, library_id, item_type, title, year, overview, season, episode, created_at
+        FROM home_candidates
+        ORDER BY title ASC
+        LIMIT $2
+        "#,
+    )
+    .bind(library_id)
     .bind(limit)
     .fetch_all(pool)
     .await?;

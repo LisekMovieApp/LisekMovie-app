@@ -70,7 +70,8 @@
 		"empty_go_to_libraries": "Przejdź do bibliotek",
 		"badge_new_series": "Nowy serial",
 		"badge_new_season": "Nowy sezon",
-		"badge_new_episodes": "Nowe odcinki"
+		"badge_new_episodes": "Nowe odcinki",
+		"badge_new_movie": "Nowość"
 	},
 	"detail": {
 		"load_failed": "Nie udało się wczytać tego tytułu. Spróbuj ponownie.",
@@ -80,6 +81,11 @@
 		"season_label": "Sezon {number}",
 		"episode_label": "Odcinek {number}",
 		"episode_label_range": "Odcinek {number}–{end}"
+	},
+	"library": {
+		"load_failed": "Nie udało się wczytać tej biblioteki. Spróbuj ponownie.",
+		"not_found": "Nie znaleziono tej biblioteki.",
+		"empty": "Ta biblioteka jest jeszcze pusta."
 	},
 	"admin": {
 		"tab_plugins": "Wtyczki",
@@ -136,6 +142,9 @@
 		"confirm_delete": "Na pewno usunąć?",
 		"deleting": "Usuwanie…",
 		"delete_failed": "Nie udało się usunąć biblioteki. Spróbuj ponownie.",
+		"move_up": "Przesuń w górę",
+		"move_down": "Przesuń w dół",
+		"reorder_failed": "Nie udało się zmienić kolejności. Spróbuj ponownie.",
 		"tab_fallback": "Ostrzeżenia",
 		"browse_items": "Przeglądaj",
 		"back_to_libraries": "← Biblioteki",

@@ -37,14 +37,16 @@ export interface MediaItem {
 	 * falling back to the plain text title, the same `<img onerror>` idiom
 	 * `HeroBanner` already uses for a missing backdrop. */
 	logo_url: string;
-	/** Set only for a `'series'` card on the home feed — see
-	 * `lisek_db::classify_series_badge`'s doc comment for exactly what each
-	 * value means and the (documented, arbitrary) 7-day window it's based
-	 * on. `null` for a movie always, and for a series with nothing recently
-	 * added, and for anything the Detail View's own `fetchMediaDetail`
-	 * returns (the backend only computes it for home-feed rows — see
+	/** Set for a `'series'` card (see `lisek_db::classify_series_badge`'s doc
+	 * comment for what each `new_*` value means and the documented,
+	 * arbitrary 7-day window it's based on), or for a `'movie'` card added
+	 * within that same window (`'new_movie'`, Runda 9 — see
+	 * `lisek-server::media::is_recently_added`). `null` for anything the
+	 * Detail View's own `fetchMediaDetail` returns — the backend only
+	 * computes a badge for browse-card rows (the home feed, and as of
+	 * Runda 9 `fetchLibraryItems`'s grid too — see
 	 * `MediaItemResponse::badge`'s own doc comment). */
-	badge: 'new_series' | 'new_season' | 'new_episodes' | null;
+	badge: 'new_series' | 'new_season' | 'new_episodes' | 'new_movie' | null;
 }
 
 /** One season of a `'series'` item, as `fetchSeriesSeasons` returns it —
@@ -82,6 +84,63 @@ export async function fetchHomeFeed(token: string): Promise<HomeFeed> {
 		throw new Error(`GET /api/home failed with status ${response.status}`);
 	}
 	return (await response.json()) as HomeFeed;
+}
+
+/** One library as the Navbar/`/library/[id]` grid see it — deliberately
+ * thinner than `$lib/admin/libraries`' own `Library`: no `root_paths` or
+ * `save_metadata_in_media_folder`, since those are admin-only concerns the
+ * public `GET /api/libraries` never sends to begin with (Runda 9 — see
+ * `lisek-server::media::PublicLibraryResponse`'s doc comment). */
+export interface LibrarySummary {
+	id: string;
+	name: string;
+	library_type: 'movies' | 'tv_shows';
+}
+
+/** The Navbar's own data source (Runda 9): every configured library, in the
+ * admin's shared display order — same `ORDER BY sort_order, name` the
+ * Admin Panel's own library list already uses, so the two can never
+ * disagree about which library comes first. Called once, client-side, from
+ * `Navbar.svelte`'s own `onMount` — see that component's top comment for
+ * why a failed fetch here just leaves the static nav items showing rather
+ * than breaking the whole bar. */
+export async function fetchLibraries(token: string): Promise<LibrarySummary[]> {
+	const response = await fetch('/api/libraries', { headers: buildAuthHeader(token) });
+	if (!response.ok) {
+		throw new Error(`GET /api/libraries failed with status ${response.status}`);
+	}
+	return (await response.json()) as LibrarySummary[];
+}
+
+export interface LibraryItems {
+	library: LibrarySummary;
+	items: MediaItem[];
+}
+
+/** Thrown by `fetchLibraryItems` specifically for a 404 — the `/library/[id]`
+ * page's own "this library doesn't exist" case, same
+ * `MediaNotFoundError`-style split as `fetchMediaDetail`'s below: a real
+ * network error is worth a retry button, a deleted/never-existed library
+ * id never will be. */
+export class LibraryNotFoundError extends Error {}
+
+/** One library's whole browsable grid (Runda 9) — movies and series (never
+ * bare episodes, same `home_candidates`-style grouping the home feed
+ * already uses), alphabetically by title. See
+ * `lisek-server::media::library_items`'s doc comment for the response
+ * shape and why the library's own name/type rides along instead of a
+ * second round trip. */
+export async function fetchLibraryItems(token: string, libraryId: string): Promise<LibraryItems> {
+	const response = await fetch(`/api/libraries/${encodeURIComponent(libraryId)}/items`, {
+		headers: buildAuthHeader(token)
+	});
+	if (response.status === 404) {
+		throw new LibraryNotFoundError();
+	}
+	if (!response.ok) {
+		throw new Error(`GET /api/libraries/${libraryId}/items failed with status ${response.status}`);
+	}
+	return (await response.json()) as LibraryItems;
 }
 
 /** Thrown by `fetchMediaDetail` specifically for a 404 — so the Detail View

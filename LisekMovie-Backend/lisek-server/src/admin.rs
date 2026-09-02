@@ -245,6 +245,52 @@ pub async fn delete_library(
     Ok(Json(json!({ "ok": true })))
 }
 
+#[derive(Deserialize)]
+pub struct MoveLibraryRequest {
+    /// `"up"` or `"down"` — anything else is [`AdminError::InvalidInput`],
+    /// same validate-before-any-query discipline as [`create_library`]'s
+    /// own `library_type` check.
+    pub direction: String,
+}
+
+/// Nudges one library up or down in the shared display order — the "W
+/// górę"/"W dół" buttons the libraries tab asked for (Runda 9). See
+/// `lisek_db::move_library`'s own doc comment for exactly what "up"/"down"
+/// do (a swap with the immediate neighbor, not a full reorder) and why this
+/// ordering is global rather than per-account.
+pub async fn move_library(
+    auth: AuthUser,
+    State(state): State<SharedState>,
+    Path(library_id): Path<Uuid>,
+    Json(req): Json<MoveLibraryRequest>,
+) -> Result<Json<Value>, AdminError> {
+    require_admin(&auth)?;
+    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+
+    let direction = match req.direction.as_str() {
+        "up" => lisek_db::LibraryMoveDirection::Up,
+        "down" => lisek_db::LibraryMoveDirection::Down,
+        other => {
+            return Err(AdminError::InvalidInput(format!(
+                "'{other}' is not a valid direction (expected \"up\" or \"down\")"
+            )));
+        }
+    };
+
+    lisek_db::move_library(&pool, library_id, direction)
+        .await
+        .map_err(map_db_error)?;
+
+    tracing::info!(
+        %library_id,
+        direction = %req.direction,
+        admin = %auth.user.username,
+        "library reordered"
+    );
+
+    Ok(Json(json!({ "ok": true })))
+}
+
 #[derive(Serialize)]
 pub struct ScanSummaryResponse {
     pub movies_found: usize,
