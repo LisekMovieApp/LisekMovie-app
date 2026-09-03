@@ -12,19 +12,16 @@
 
 use lisek_plugin_api::MetadataProvider;
 
-// # TODO: Make dynamic loading of provider plugins, so we don't have to
-// rebuild the server every time we want to add a new provider.
-
 /// Builds the provider named `provider_key`, ready to call, from its
 /// currently-configured `api_key`. `None` for a `provider_key` no
 /// registered extension claims — `metadata_enrichment::try_provider` logs
 /// that case and moves on to the next provider in the admin's priority
 /// list, the same way a real "no match" from a known provider already
 /// works.
-pub fn build_provider(provider_key: &str, _api_key: &str) -> Option<Box<dyn MetadataProvider>> {
+pub fn build_provider(provider_key: &str, api_key: &str) -> Option<Box<dyn MetadataProvider>> {
     match provider_key {
-        // "tmdb" => Some(Box::new(lisek_plugin_tmdb::TmdbProvider::new(_api_key))),
-        // "tvdb" => Some(Box::new(lisek_plugin_thetvdb::TvdbProvider::new(_api_key))),
+        "tmdb" => Some(Box::new(lisek_plugin_tmdb::TmdbProvider::new(api_key))),
+        "tvdb" => Some(Box::new(lisek_plugin_thetvdb::TvdbProvider::new(api_key))),
         _ => None,
     }
 }
@@ -35,14 +32,14 @@ mod tests {
 
     #[test]
     fn builds_the_tmdb_provider() {
-        // let provider = build_provider("tmdb", "key").expect("tmdb should be registered");
-        // assert_eq!(provider.provider_key(), "tmdb");
+        let provider = build_provider("tmdb", "key").expect("tmdb should be registered");
+        assert_eq!(provider.provider_key(), "tmdb");
     }
 
     #[test]
     fn builds_the_tvdb_provider() {
-        // let provider = build_provider("tvdb", "key").expect("tvdb should be registered");
-        // assert_eq!(provider.provider_key(), "tvdb");
+        let provider = build_provider("tvdb", "key").expect("tvdb should be registered");
+        assert_eq!(provider.provider_key(), "tvdb");
     }
 
     #[test]
