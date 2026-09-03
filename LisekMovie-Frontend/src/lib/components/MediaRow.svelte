@@ -18,6 +18,14 @@
 	interface Props {
 		/** i18n key for the row's heading, e.g. "home.row_recently_added". */
 		titleKey: string;
+		/** Runda 10: optional interpolation params for `titleKey` (e.g.
+		 * `{ name: library.name }` for `/library/[id]`'s dynamic
+		 * "Ostatnio dodane — {name}" style headings) — `t()` already
+		 * supports this (see `admin.scan_result`'s usage elsewhere), this
+		 * component just wasn't threading it through yet. Omitted by every
+		 * existing Home call site, so their plain, param-free `titleKey`
+		 * lookups are unaffected. */
+		titleParams?: Record<string, string | number>;
 		/** `null` = still loading (renders skeletons); `[]` = loaded and empty (renders nothing). */
 		items: MediaItem[] | null;
 		token: string;
@@ -25,12 +33,14 @@
 		skeletonCount?: number;
 	}
 
-	let { titleKey, items, token, skeletonCount = 10 }: Props = $props();
+	let { titleKey, titleParams, items, token, skeletonCount = 10 }: Props = $props();
 </script>
 
 {#if items === null || items.length > 0}
 	<section class="group/row relative">
-		<h2 class="mb-2 px-4 text-lg font-semibold text-neutral-100 md:px-8">{t(titleKey)}</h2>
+		<h2 class="mb-2 px-4 text-lg font-semibold text-neutral-100 md:px-8">
+			{t(titleKey, titleParams)}
+		</h2>
 
 		<Carousel>
 			{#if items === null}

@@ -1703,7 +1703,18 @@ fn classify_badge_from_flags(rows: &[(bool, Option<i32>)]) -> Option<SeriesBadge
 /// the `home_candidates` CTE above — a show's `created_at` here is its most
 /// recently-added episode's, so a new episode of a show already in the
 /// library bumps it back to the top exactly like a freshly-scanned movie.
-pub async fn list_recently_added(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>, DbError> {
+///
+/// `library_id: None` is the home feed's original catalog-wide query
+/// (`$1::uuid IS NULL` short-circuits both `WHERE` arms below to their old,
+/// unfiltered form); `Some(id)` is the exact same query scoped to one
+/// library, reused by `/library/[id]`'s "recently added" row (Runda 10) —
+/// one shared query, one shared `home_candidates` shape, instead of a
+/// second near-duplicate function.
+pub async fn list_recently_added(
+    pool: &PgPool,
+    library_id: Option<Uuid>,
+    limit: i64,
+) -> Result<Vec<MediaItem>, DbError> {
     let rows = sqlx::query_as::<_, MediaItemRow>(
         r#"
         WITH home_candidates AS (
@@ -1715,6 +1726,7 @@ pub async fn list_recently_added(pool: &PgPool, limit: i64) -> Result<Vec<MediaI
                    created_at
             FROM media_items
             WHERE item_type = 'movie'
+              AND ($1::uuid IS NULL OR library_id = $1)
 
             UNION ALL
 
@@ -1727,14 +1739,16 @@ pub async fn list_recently_added(pool: &PgPool, limit: i64) -> Result<Vec<MediaI
                    created_at
             FROM media_items
             WHERE item_type = 'episode'
+              AND ($1::uuid IS NULL OR library_id = $1)
             ORDER BY library_id, title, created_at DESC, id DESC
         )
         SELECT id, library_id, item_type, title, year, overview, season, episode, created_at
         FROM home_candidates
         ORDER BY created_at DESC
-        LIMIT $1
+        LIMIT $2
         "#,
     )
+    .bind(library_id)
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -1798,7 +1812,16 @@ pub async fn list_top_today(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>,
 /// built, rather than dressing up `list_recently_added` again under a
 /// different heading. Each call reshuffles independently since Postgres
 /// evaluates `random()` fresh per query. Reads from the `home_candidates` CTE above.
-pub async fn list_recommended(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>, DbError> {
+///
+/// `library_id`: see [`list_recently_added`]'s doc comment — same
+/// `None`-is-global / `Some(id)`-is-scoped nullable-bind shape, reused here
+/// for `/library/[id]`'s "recommended for you" row (Runda 10) so a Filmy
+/// library never recommends a series and vice versa.
+pub async fn list_recommended(
+    pool: &PgPool,
+    library_id: Option<Uuid>,
+    limit: i64,
+) -> Result<Vec<MediaItem>, DbError> {
     let rows = sqlx::query_as::<_, MediaItemRow>(
         r#"
         WITH home_candidates AS (
@@ -1810,6 +1833,7 @@ pub async fn list_recommended(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem
                    created_at
             FROM media_items
             WHERE item_type = 'movie'
+              AND ($1::uuid IS NULL OR library_id = $1)
 
             UNION ALL
 
@@ -1822,14 +1846,16 @@ pub async fn list_recommended(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem
                    created_at
             FROM media_items
             WHERE item_type = 'episode'
+              AND ($1::uuid IS NULL OR library_id = $1)
             ORDER BY library_id, title, created_at DESC, id DESC
         )
         SELECT id, library_id, item_type, title, year, overview, season, episode, created_at
         FROM home_candidates
         ORDER BY random()
-        LIMIT $1
+        LIMIT $2
         "#,
     )
+    .bind(library_id)
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -1841,7 +1867,15 @@ pub async fn list_recommended(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem
 /// no view/watch-count tracking exists yet either, so this is another
 /// honest random sample rather than a fabricated popularity rank. Reads
 /// from the `home_candidates` CTE above.
-pub async fn list_popular(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>, DbError> {
+///
+/// `library_id`: same nullable-bind shape as [`list_recently_added`] and
+/// [`list_recommended`] — `Some(id)` backs `/library/[id]`'s "popular now"
+/// row (Runda 10).
+pub async fn list_popular(
+    pool: &PgPool,
+    library_id: Option<Uuid>,
+    limit: i64,
+) -> Result<Vec<MediaItem>, DbError> {
     let rows = sqlx::query_as::<_, MediaItemRow>(
         r#"
         WITH home_candidates AS (
@@ -1853,6 +1887,7 @@ pub async fn list_popular(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>, D
                    created_at
             FROM media_items
             WHERE item_type = 'movie'
+              AND ($1::uuid IS NULL OR library_id = $1)
 
             UNION ALL
 
@@ -1865,14 +1900,16 @@ pub async fn list_popular(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>, D
                    created_at
             FROM media_items
             WHERE item_type = 'episode'
+              AND ($1::uuid IS NULL OR library_id = $1)
             ORDER BY library_id, title, created_at DESC, id DESC
         )
         SELECT id, library_id, item_type, title, year, overview, season, episode, created_at
         FROM home_candidates
         ORDER BY random()
-        LIMIT $1
+        LIMIT $2
         "#,
     )
+    .bind(library_id)
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -1880,23 +1917,184 @@ pub async fn list_popular(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>, D
     Ok(rows.into_iter().map(media_item_from_row).collect())
 }
 
+/// Sort order for [`list_items_by_library_page`] — the small, fixed set of
+/// ways the `/library/[id]` "all items" grid can be browsed (Runda 10).
+/// Each variant needs its own query literal (sqlx 0.9's `query_as` only
+/// accepts a genuine `&'static str` per call site, so the `ORDER BY` can't
+/// be parameterized), matching this file's existing precedent of
+/// duplicating the `home_candidates` CTE per call site rather than sharing
+/// it through `format!`/`concat!`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LibrarySort {
+    TitleAsc,
+    TitleDesc,
+    RecentlyAdded,
+}
+
 /// Every browsable item in one library — movies and series, grouped exactly
 /// like the `home_candidates` CTE above (same episode→series collapsing,
-/// this time scoped to a single `library_id`), alphabetically by title. The
-/// `/library/[id]` grid's data source (Runda 9): unlike the home feed's five
-/// curated rows, this is meant to be the library's *whole* contents, so it
-/// sorts for browsability rather than recency or a placeholder ranking.
+/// this time scoped to a single `library_id`), one page at a time. The
+/// `/library/[id]` "all items" grid's data source (Runda 9 introduced the
+/// unpaginated version of this; Runda 10 adds real pagination, sorting and
+/// an optional starts-with-letter filter — see [`count_items_by_library`]
+/// for the matching total-count query used to render "1–100 z 765").
 ///
-/// No real pagination yet — `limit` is a generous but bounded cap (see
-/// `lisek-server`'s own `LIBRARY_ITEMS_LIMIT`), the same honest stopgap the
-/// home feed's `ROW_LIMIT` already is, good enough for the library sizes
-/// this app has actually been tested against so far.
-pub async fn list_items_by_library(
+/// `letter`: an optional single uppercase ASCII letter; titles are matched
+/// with `title ILIKE letter || '%'`. Non-Latin-starting titles simply won't
+/// match any letter button in the UI (an honest, documented scope limit —
+/// see the Runda 10 plan) — they remain reachable via the unfiltered view.
+pub async fn list_items_by_library_page(
     pool: &PgPool,
     library_id: Uuid,
+    sort: LibrarySort,
+    letter: Option<char>,
     limit: i64,
+    offset: i64,
 ) -> Result<Vec<MediaItem>, DbError> {
-    let rows = sqlx::query_as::<_, MediaItemRow>(
+    let letter_param: Option<String> = letter.map(|c| c.to_string());
+
+    let rows = match sort {
+        LibrarySort::TitleAsc => {
+            sqlx::query_as::<_, MediaItemRow>(
+                r#"
+                WITH home_candidates AS (
+                    SELECT id, library_id, item_type, title,
+                           (metadata->>'year')::int AS year,
+                           metadata->'provider_data'->>'overview' AS overview,
+                           NULL::int AS season,
+                           NULL::int AS episode,
+                           created_at
+                    FROM media_items
+                    WHERE item_type = 'movie' AND library_id = $1
+
+                    UNION ALL
+
+                    SELECT DISTINCT ON (library_id, title)
+                           id, library_id, 'series' AS item_type, title,
+                           NULL::int AS year,
+                           metadata->'provider_data'->>'overview' AS overview,
+                           NULL::int AS season,
+                           NULL::int AS episode,
+                           created_at
+                    FROM media_items
+                    WHERE item_type = 'episode' AND library_id = $1
+                    ORDER BY library_id, title, created_at DESC, id DESC
+                )
+                SELECT id, library_id, item_type, title, year, overview, season, episode, created_at
+                FROM home_candidates
+                WHERE ($2::text IS NULL OR title ILIKE $2 || '%')
+                ORDER BY title ASC
+                LIMIT $3 OFFSET $4
+                "#,
+            )
+            .bind(library_id)
+            .bind(&letter_param)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(pool)
+            .await?
+        }
+        LibrarySort::TitleDesc => {
+            sqlx::query_as::<_, MediaItemRow>(
+                r#"
+                WITH home_candidates AS (
+                    SELECT id, library_id, item_type, title,
+                           (metadata->>'year')::int AS year,
+                           metadata->'provider_data'->>'overview' AS overview,
+                           NULL::int AS season,
+                           NULL::int AS episode,
+                           created_at
+                    FROM media_items
+                    WHERE item_type = 'movie' AND library_id = $1
+
+                    UNION ALL
+
+                    SELECT DISTINCT ON (library_id, title)
+                           id, library_id, 'series' AS item_type, title,
+                           NULL::int AS year,
+                           metadata->'provider_data'->>'overview' AS overview,
+                           NULL::int AS season,
+                           NULL::int AS episode,
+                           created_at
+                    FROM media_items
+                    WHERE item_type = 'episode' AND library_id = $1
+                    ORDER BY library_id, title, created_at DESC, id DESC
+                )
+                SELECT id, library_id, item_type, title, year, overview, season, episode, created_at
+                FROM home_candidates
+                WHERE ($2::text IS NULL OR title ILIKE $2 || '%')
+                ORDER BY title DESC
+                LIMIT $3 OFFSET $4
+                "#,
+            )
+            .bind(library_id)
+            .bind(&letter_param)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(pool)
+            .await?
+        }
+        LibrarySort::RecentlyAdded => {
+            sqlx::query_as::<_, MediaItemRow>(
+                r#"
+                WITH home_candidates AS (
+                    SELECT id, library_id, item_type, title,
+                           (metadata->>'year')::int AS year,
+                           metadata->'provider_data'->>'overview' AS overview,
+                           NULL::int AS season,
+                           NULL::int AS episode,
+                           created_at
+                    FROM media_items
+                    WHERE item_type = 'movie' AND library_id = $1
+
+                    UNION ALL
+
+                    SELECT DISTINCT ON (library_id, title)
+                           id, library_id, 'series' AS item_type, title,
+                           NULL::int AS year,
+                           metadata->'provider_data'->>'overview' AS overview,
+                           NULL::int AS season,
+                           NULL::int AS episode,
+                           created_at
+                    FROM media_items
+                    WHERE item_type = 'episode' AND library_id = $1
+                    ORDER BY library_id, title, created_at DESC, id DESC
+                )
+                SELECT id, library_id, item_type, title, year, overview, season, episode, created_at
+                FROM home_candidates
+                WHERE ($2::text IS NULL OR title ILIKE $2 || '%')
+                ORDER BY created_at DESC
+                LIMIT $3 OFFSET $4
+                "#,
+            )
+            .bind(library_id)
+            .bind(&letter_param)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(pool)
+            .await?
+        }
+    };
+
+    Ok(rows.into_iter().map(media_item_from_row).collect())
+}
+
+/// Total count of items [`list_items_by_library_page`] would page through
+/// for the same `library_id`/`letter` (ignoring `sort`/`limit`/`offset`,
+/// which don't change how many rows exist) — backs the "1–100 z 765" style
+/// counter on `/library/[id]`'s "all items" grid. Deliberately reuses the
+/// exact same `home_candidates` CTE text (not a hand-simplified `COUNT`)
+/// so a series is counted once as a group, never once per episode — the
+/// same grouping guarantee every other library-scoped query in this file
+/// makes.
+pub async fn count_items_by_library(
+    pool: &PgPool,
+    library_id: Uuid,
+    letter: Option<char>,
+) -> Result<i64, DbError> {
+    let letter_param: Option<String> = letter.map(|c| c.to_string());
+
+    let total: i64 = sqlx::query_scalar(
         r#"
         WITH home_candidates AS (
             SELECT id, library_id, item_type, title,
@@ -1921,18 +2119,16 @@ pub async fn list_items_by_library(
             WHERE item_type = 'episode' AND library_id = $1
             ORDER BY library_id, title, created_at DESC, id DESC
         )
-        SELECT id, library_id, item_type, title, year, overview, season, episode, created_at
-        FROM home_candidates
-        ORDER BY title ASC
-        LIMIT $2
+        SELECT COUNT(*) FROM home_candidates
+        WHERE ($2::text IS NULL OR title ILIKE $2 || '%')
         "#,
     )
     .bind(library_id)
-    .bind(limit)
-    .fetch_all(pool)
+    .bind(&letter_param)
+    .fetch_one(pool)
     .await?;
 
-    Ok(rows.into_iter().map(media_item_from_row).collect())
+    Ok(total)
 }
 
 #[cfg(test)]

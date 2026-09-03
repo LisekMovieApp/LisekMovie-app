@@ -72,12 +72,23 @@
   same `MediaItemEditorModal` the library items browse page already uses,
   wired the same way (`providers`/`editingItemId` pattern).
 
-  Same client-side `onMount` fetch shape as Home and every Admin Panel
-  page — see `/+page.svelte` (home)'s own comment for why this codebase
-  prefers that over a `+page.ts` load function here.
+  Same client-side fetch-from-a-cookie-token shape as Home and every Admin
+  Panel page — see `/+page.svelte` (home)'s own comment for why this
+  codebase prefers that over a `+page.ts` load function here.
+
+  Runda 10: was `onMount(load)`, which only ever fires once per component
+  instance. SvelteKit reuses this exact component instance across a
+  client-side navigation between two `/media/[id]` URLs that differ only in
+  `id` (e.g. a future "similar titles" link), so `onMount` never re-fired
+  and the page kept showing the previous item under the new URL — the same
+  bug reported against `/library/[id]`, found here during that round's audit
+  and fixed the same way: a `$effect` that reads the reactive `itemId`
+  synchronously re-runs on every id change, including the first mount, so it
+  fully replaces `onMount` here. `loadSeq` guards against an older
+  navigation's fetch (primary or either non-fatal secondary one) resolving
+  after a newer one already landed and clobbering its state.
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { t } from '$lib/i18n';
@@ -113,23 +124,22 @@
 	 * the end of `load()`), so the section never opens empty. */
 	let selectedSeason = $state<number | null>(null);
 
-	async function load() {
+	/** Bumped once per load attempt; guards every state write below (the
+	 * primary fetch and both non-fatal secondary ones) against an older
+	 * navigation's response landing after a newer one already has — see
+	 * this file's own top comment. */
+	let loadSeq = 0;
+
+	async function loadForId(id: string, mySeq: number) {
 		const sessionToken = getSessionCookieClientSide();
 		if (!sessionToken) return;
 		token = sessionToken;
 
-		loading = true;
-		notFound = false;
-		loadFailed = false;
-		backdropFailed = false;
-		logoFailed = false;
-		posterFailed = false;
-		seasons = [];
-		selectedSeason = null;
-
+		let loadedItem: MediaItem;
 		try {
-			item = await fetchMediaDetail(sessionToken, itemId);
+			loadedItem = await fetchMediaDetail(sessionToken, id);
 		} catch (err) {
+			if (mySeq !== loadSeq) return; // superseded — discard
 			if (err instanceof MediaNotFoundError) {
 				notFound = true;
 			} else {
@@ -138,11 +148,14 @@
 			loading = false;
 			return;
 		}
+		if (mySeq !== loadSeq) return; // superseded — discard
+		item = loadedItem;
 		loading = false;
 
 		if (page.data.user?.is_admin) {
 			try {
-				providers = await fetchProviders(sessionToken);
+				const loadedProviders = await fetchProviders(sessionToken);
+				if (mySeq === loadSeq) providers = loadedProviders;
 			} catch {
 				// Non-fatal: "Edytuj metadane" would just open with an empty
 				// forced-provider dropdown (every other field still works)
@@ -151,10 +164,13 @@
 			}
 		}
 
-		if (item.item_type === 'series') {
+		if (loadedItem.item_type === 'series') {
 			try {
-				seasons = await fetchSeriesSeasons(sessionToken, item.id);
-				selectedSeason = seasons[0]?.season ?? null;
+				const loadedSeasons = await fetchSeriesSeasons(sessionToken, loadedItem.id);
+				if (mySeq === loadSeq) {
+					seasons = loadedSeasons;
+					selectedSeason = loadedSeasons[0]?.season ?? null;
+				}
 			} catch {
 				// Non-fatal, same reasoning as the provider fetch above: the
 				// rest of the page (backdrop, title, overview, Play/Edytuj)
@@ -165,7 +181,27 @@
 		}
 	}
 
-	onMount(load);
+	function triggerLoad(id: string) {
+		const mySeq = ++loadSeq;
+		// Reset SYNCHRONOUSLY, before the async fetch starts, so the
+		// previous item's content is never visible under the new URL, even
+		// for one frame.
+		loading = true;
+		notFound = false;
+		loadFailed = false;
+		backdropFailed = false;
+		logoFailed = false;
+		posterFailed = false;
+		item = null;
+		seasons = [];
+		selectedSeason = null;
+		loadForId(id, mySeq);
+	}
+
+	$effect(() => {
+		const id = itemId; // read synchronously — this is what Svelte tracks
+		triggerLoad(id);
+	});
 
 	/** A movie shows its year; a series shows nothing here (there's no
 	 * single year for a whole show — see `lisek_db`'s `home_candidates`
@@ -203,7 +239,7 @@
 			<p class="text-sm text-red-400">{t('detail.load_failed')}</p>
 			<button
 				type="button"
-				onclick={load}
+				onclick={() => triggerLoad(itemId)}
 				class="rounded-md border border-neutral-700 px-4 py-2 text-sm text-neutral-200 transition-colors hover:border-gold-dim"
 			>
 				{t('home.retry')}
@@ -434,6 +470,6 @@
 		itemId={item.id}
 		{providers}
 		onClose={() => (editing = false)}
-		onSaved={load}
+		onSaved={() => triggerLoad(itemId)}
 	/>
 {/if}

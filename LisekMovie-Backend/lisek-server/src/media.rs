@@ -27,11 +27,11 @@
 use std::path::{Path as FsPath, PathBuf};
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Duration, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -177,16 +177,16 @@ pub async fn home_feed(
     let hero = lisek_db::get_hero_item(&pool)
         .await
         .map_err(|_| MediaError::Internal)?;
-    let recently_added = lisek_db::list_recently_added(&pool, ROW_LIMIT)
+    let recently_added = lisek_db::list_recently_added(&pool, None, ROW_LIMIT)
         .await
         .map_err(|_| MediaError::Internal)?;
     let top10 = lisek_db::list_top_today(&pool, TOP10_LIMIT)
         .await
         .map_err(|_| MediaError::Internal)?;
-    let recommended = lisek_db::list_recommended(&pool, ROW_LIMIT)
+    let recommended = lisek_db::list_recommended(&pool, None, ROW_LIMIT)
         .await
         .map_err(|_| MediaError::Internal)?;
-    let popular = lisek_db::list_popular(&pool, ROW_LIMIT)
+    let popular = lisek_db::list_popular(&pool, None, ROW_LIMIT)
         .await
         .map_err(|_| MediaError::Internal)?;
 
@@ -246,22 +246,80 @@ pub async fn list_libraries(
     Ok(Json(libraries.into_iter().map(Into::into).collect()))
 }
 
-/// How many items the `/library/[id]` grid fetches in one go — a generous
-/// but bounded cap, not real pagination (see `lisek_db::
-/// list_items_by_library`'s own doc comment); the same honest stopgap
-/// `ROW_LIMIT` already is for the home feed's five curated rows, just sized
-/// for "show the whole library" rather than "show a handful per row".
-const LIBRARY_ITEMS_LIMIT: i64 = 500;
+/// How many rows [`library_recent`]/[`library_recommended`]/
+/// [`library_popular`] each fetch — reuses the exact same `ROW_LIMIT` the
+/// home feed's own five curated rows use, so a library's rows are sized
+/// consistently with the home page's (Runda 10).
+const LIBRARY_ROW_LIMIT: i64 = ROW_LIMIT;
+
+/// Default/maximum page size for [`library_items`]'s "all items" grid
+/// (Runda 10). `DEFAULT` matches the "1–100 z …" counter shown in the
+/// Runda 10 plan; `MAX` is defense-in-depth against an oversized
+/// `page_size` query param — the shipped UI never sends one itself, there's
+/// no page-size picker.
+const DEFAULT_LIBRARY_PAGE_SIZE: i64 = 100;
+const MAX_LIBRARY_PAGE_SIZE: i64 = 200;
+
+/// Query parameters accepted by [`library_items`] — all optional, all
+/// lenient on bad/missing input (see [`parse_library_sort`]/
+/// [`parse_letter_filter`]): a malformed value here is a stale link or a
+/// bug in this app's own UI, not something worth failing the whole request
+/// over.
+#[derive(Debug, Deserialize)]
+pub struct LibraryItemsQuery {
+    pub page: Option<i64>,
+    pub page_size: Option<i64>,
+    pub sort: Option<String>,
+    pub letter: Option<String>,
+}
+
+/// Parses `?sort=`'s raw value into a [`lisek_db::LibrarySort`]. Unknown or
+/// missing values default to `TitleAsc` — the same ordering
+/// `list_items_by_library` (Runda 9) always used, so a plain, unparameterized
+/// call to this endpoint sorts exactly as it always has.
+fn parse_library_sort(raw: Option<&str>) -> lisek_db::LibrarySort {
+    match raw {
+        Some("title_desc") => lisek_db::LibrarySort::TitleDesc,
+        Some("recent") => lisek_db::LibrarySort::RecentlyAdded,
+        _ => lisek_db::LibrarySort::TitleAsc,
+    }
+}
+
+/// Parses `?letter=`'s raw value into a single uppercase ASCII letter, or
+/// `None` if it's missing, empty, longer than one character, or not a
+/// letter at all (e.g. a stray `#`/digit) — `None` means "no filter", the
+/// same as the param being absent.
+fn parse_letter_filter(raw: Option<&str>) -> Option<char> {
+    let value = raw?;
+    let mut chars = value.chars();
+    let first = chars.next()?;
+    if chars.next().is_some() || !first.is_ascii_alphabetic() {
+        return None;
+    }
+    Some(first.to_ascii_uppercase())
+}
 
 #[derive(Serialize)]
 pub struct LibraryItemsResponse {
     pub library: PublicLibraryResponse,
     pub items: Vec<MediaItemResponse>,
+    pub total: i64,
+    pub page: i64,
+    pub page_size: i64,
 }
 
-/// One library's whole browsable contents — the `/library/[id]` grid's data
-/// source (Runda 9): the admin asked for "a basic skeleton (grid) showing
-/// media filtered to just this library" once a Navbar category is clicked.
+/// One page of one library's browsable contents — the `/library/[id]`
+/// page's "all items" grid data source. Runda 9 introduced this endpoint as
+/// a flat, unpaginated, 500-item-capped fetch; Runda 10 adds real
+/// pagination, sorting and an optional starts-with-letter filter (see
+/// `lisek_db::list_items_by_library_page`/`count_items_by_library`), and
+/// changes the response shape to carry `total`/`page`/`page_size` alongside
+/// `items` so the frontend can render a "1–100 z 765"-style counter and
+/// prev/next controls without a second request. This is a breaking change
+/// to last round's response shape; `library_items` had no other known
+/// caller besides this exact page, so changing it in place (rather than
+/// versioning the route) is safe.
+///
 /// Bundles the library's own name/type alongside its items in one response
 /// so the page can render its title without a second round trip. A library
 /// id that doesn't exist (deleted, or simply wrong) is a real 404
@@ -274,6 +332,7 @@ pub async fn library_items(
     _auth: AuthUser,
     State(state): State<SharedState>,
     Path(library_id): Path<Uuid>,
+    Query(query): Query<LibraryItemsQuery>,
 ) -> Result<Json<LibraryItemsResponse>, MediaError> {
     let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
 
@@ -282,11 +341,118 @@ pub async fn library_items(
         .map_err(|_| MediaError::Internal)?
         .ok_or(MediaError::LibraryNotFound)?;
 
-    let items = lisek_db::list_items_by_library(&pool, library_id, LIBRARY_ITEMS_LIMIT)
+    let sort = parse_library_sort(query.sort.as_deref());
+    let letter = parse_letter_filter(query.letter.as_deref());
+    let page = query.page.unwrap_or(1).max(1);
+    let page_size = query
+        .page_size
+        .unwrap_or(DEFAULT_LIBRARY_PAGE_SIZE)
+        .clamp(1, MAX_LIBRARY_PAGE_SIZE);
+    let offset = (page - 1) * page_size;
+
+    let total = lisek_db::count_items_by_library(&pool, library_id, letter)
+        .await
+        .map_err(|_| MediaError::Internal)?;
+    let items =
+        lisek_db::list_items_by_library_page(&pool, library_id, sort, letter, page_size, offset)
+            .await
+            .map_err(|_| MediaError::Internal)?;
+
+    Ok(Json(LibraryItemsResponse {
+        library: library.into(),
+        items: to_responses(&pool, items).await,
+        total,
+        page,
+        page_size,
+    }))
+}
+
+/// Response shape shared by [`library_recent`]/[`library_recommended`]/
+/// [`library_popular`] (Runda 10) — deliberately identical to
+/// [`LibraryItemsResponse`]'s `library`+`items` fields minus the pagination
+/// ones, since these three are small curated rows, not a paginated grid.
+/// Each of the three handlers independently looks up the library (rather
+/// than sharing one earlier lookup) so a failure in one section's request
+/// can never take another section down with it — see the Runda 10 plan's
+/// reasoning for three separate endpoints instead of one bundled response.
+#[derive(Serialize)]
+pub struct LibraryRowResponse {
+    pub library: PublicLibraryResponse,
+    pub items: Vec<MediaItemResponse>,
+}
+
+/// `/library/[id]`'s "Ostatnio dodane" row — `lisek_db::list_recently_added`
+/// scoped to this library, reusing the exact same query (and therefore the
+/// exact same `home_candidates` grouping and `created_at DESC` ordering) the
+/// home feed's own "recently added" row already uses.
+pub async fn library_recent(
+    _auth: AuthUser,
+    State(state): State<SharedState>,
+    Path(library_id): Path<Uuid>,
+) -> Result<Json<LibraryRowResponse>, MediaError> {
+    let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
+
+    let library = lisek_db::get_library(&pool, library_id)
+        .await
+        .map_err(|_| MediaError::Internal)?
+        .ok_or(MediaError::LibraryNotFound)?;
+
+    let items = lisek_db::list_recently_added(&pool, Some(library_id), LIBRARY_ROW_LIMIT)
         .await
         .map_err(|_| MediaError::Internal)?;
 
-    Ok(Json(LibraryItemsResponse {
+    Ok(Json(LibraryRowResponse {
+        library: library.into(),
+        items: to_responses(&pool, items).await,
+    }))
+}
+
+/// `/library/[id]`'s "Polecane dla Ciebie" row — `lisek_db::list_recommended`
+/// scoped to this library, so a Filmy library never recommends a series and
+/// vice versa. Same honest "no real taste model yet" caveat as the home
+/// feed's own recommended row.
+pub async fn library_recommended(
+    _auth: AuthUser,
+    State(state): State<SharedState>,
+    Path(library_id): Path<Uuid>,
+) -> Result<Json<LibraryRowResponse>, MediaError> {
+    let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
+
+    let library = lisek_db::get_library(&pool, library_id)
+        .await
+        .map_err(|_| MediaError::Internal)?
+        .ok_or(MediaError::LibraryNotFound)?;
+
+    let items = lisek_db::list_recommended(&pool, Some(library_id), LIBRARY_ROW_LIMIT)
+        .await
+        .map_err(|_| MediaError::Internal)?;
+
+    Ok(Json(LibraryRowResponse {
+        library: library.into(),
+        items: to_responses(&pool, items).await,
+    }))
+}
+
+/// `/library/[id]`'s "Popularne teraz" row — `lisek_db::list_popular` scoped
+/// to this library. Same honest "no real popularity tracking yet" caveat as
+/// the home feed's own popular row.
+pub async fn library_popular(
+    _auth: AuthUser,
+    State(state): State<SharedState>,
+    Path(library_id): Path<Uuid>,
+) -> Result<Json<LibraryRowResponse>, MediaError> {
+    let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
+
+    let library = lisek_db::get_library(&pool, library_id)
+        .await
+        .map_err(|_| MediaError::Internal)?
+        .ok_or(MediaError::LibraryNotFound)?;
+
+    let items = lisek_db::list_popular(&pool, Some(library_id), LIBRARY_ROW_LIMIT)
+        .await
+        .map_err(|_| MediaError::Internal)?;
+
+    Ok(Json(LibraryRowResponse {
         library: library.into(),
         items: to_responses(&pool, items).await,
     }))
@@ -617,5 +783,45 @@ mod tests {
         let now = Utc::now();
         let created_at = now - Duration::days(365);
         assert!(!is_recently_added(created_at, now));
+    }
+
+    #[test]
+    fn library_sort_defaults_to_title_asc_for_missing_or_unknown_values() {
+        assert_eq!(parse_library_sort(None), lisek_db::LibrarySort::TitleAsc);
+        assert_eq!(
+            parse_library_sort(Some("nonsense")),
+            lisek_db::LibrarySort::TitleAsc
+        );
+        assert_eq!(
+            parse_library_sort(Some("")),
+            lisek_db::LibrarySort::TitleAsc
+        );
+    }
+
+    #[test]
+    fn library_sort_recognizes_title_desc_and_recent() {
+        assert_eq!(
+            parse_library_sort(Some("title_desc")),
+            lisek_db::LibrarySort::TitleDesc
+        );
+        assert_eq!(
+            parse_library_sort(Some("recent")),
+            lisek_db::LibrarySort::RecentlyAdded
+        );
+    }
+
+    #[test]
+    fn letter_filter_uppercases_a_single_letter() {
+        assert_eq!(parse_letter_filter(Some("a")), Some('A'));
+        assert_eq!(parse_letter_filter(Some("Z")), Some('Z'));
+    }
+
+    #[test]
+    fn letter_filter_rejects_missing_empty_multi_char_or_non_letter_values() {
+        assert_eq!(parse_letter_filter(None), None);
+        assert_eq!(parse_letter_filter(Some("")), None);
+        assert_eq!(parse_letter_filter(Some("ab")), None);
+        assert_eq!(parse_letter_filter(Some("1")), None);
+        assert_eq!(parse_letter_filter(Some("#")), None);
     }
 }

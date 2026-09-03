@@ -151,6 +151,18 @@ async fn main() {
             "/api/libraries/{library_id}/items",
             get(media::library_items),
         )
+        .route(
+            "/api/libraries/{library_id}/recent",
+            get(media::library_recent),
+        )
+        .route(
+            "/api/libraries/{library_id}/recommended",
+            get(media::library_recommended),
+        )
+        .route(
+            "/api/libraries/{library_id}/popular",
+            get(media::library_popular),
+        )
         .route("/api/media/{item_id}", get(media::media_item_detail))
         .route(
             "/api/media/{item_id}/seasons",

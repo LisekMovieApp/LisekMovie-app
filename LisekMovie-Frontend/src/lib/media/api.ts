@@ -112,35 +112,112 @@ export async function fetchLibraries(token: string): Promise<LibrarySummary[]> {
 	return (await response.json()) as LibrarySummary[];
 }
 
+/** How `LibraryAllSection`'s "all items" grid can be ordered (Runda 10) —
+ * mirrors `lisek_db::LibrarySort`'s three variants one-for-one; the raw
+ * strings are exactly what `?sort=` expects (see
+ * `lisek-server::media::parse_library_sort`). */
+export type LibrarySort = 'title_asc' | 'title_desc' | 'recent';
+
+export interface FetchLibraryItemsOptions {
+	/** 1-based; omitted defaults to page 1 on the backend. */
+	page?: number;
+	sort?: LibrarySort;
+	/** A single letter (any case — the backend uppercases it); omitted or
+	 * invalid means "no filter". */
+	letter?: string;
+}
+
 export interface LibraryItems {
 	library: LibrarySummary;
 	items: MediaItem[];
+	/** Total matching items across every page (already grouped — a series
+	 * counts once, not once per episode) — Runda 10, backs the "1–100 z
+	 * 765" counter. */
+	total: number;
+	page: number;
+	page_size: number;
 }
 
-/** Thrown by `fetchLibraryItems` specifically for a 404 — the `/library/[id]`
- * page's own "this library doesn't exist" case, same
- * `MediaNotFoundError`-style split as `fetchMediaDetail`'s below: a real
- * network error is worth a retry button, a deleted/never-existed library
- * id never will be. */
+/** Thrown by `fetchLibraryItems`/`fetchLibraryRecent`/`fetchLibraryRecommended`/
+ * `fetchLibraryPopular` specifically for a 404 — the `/library/[id]` page's
+ * own "this library doesn't exist" case, same `MediaNotFoundError`-style
+ * split as `fetchMediaDetail`'s below: a real network error is worth a
+ * retry button, a deleted/never-existed library id never will be. */
 export class LibraryNotFoundError extends Error {}
 
-/** One library's whole browsable grid (Runda 9) — movies and series (never
+/** One page of one library's whole browsable grid (Runda 9; paginated,
+ * sorted and letter-filterable as of Runda 10) — movies and series (never
  * bare episodes, same `home_candidates`-style grouping the home feed
- * already uses), alphabetically by title. See
- * `lisek-server::media::library_items`'s doc comment for the response
- * shape and why the library's own name/type rides along instead of a
- * second round trip. */
-export async function fetchLibraryItems(token: string, libraryId: string): Promise<LibraryItems> {
-	const response = await fetch(`/api/libraries/${encodeURIComponent(libraryId)}/items`, {
-		headers: buildAuthHeader(token)
-	});
+ * already uses). See `lisek-server::media::library_items`'s doc comment for
+ * the response shape and why the library's own name/type rides along
+ * instead of a second round trip. */
+export async function fetchLibraryItems(
+	token: string,
+	libraryId: string,
+	options: FetchLibraryItemsOptions = {}
+): Promise<LibraryItems> {
+	const params = new URLSearchParams();
+	if (options.page !== undefined) params.set('page', String(options.page));
+	if (options.sort !== undefined) params.set('sort', options.sort);
+	if (options.letter !== undefined) params.set('letter', options.letter);
+	const query = params.toString();
+	const url = `/api/libraries/${encodeURIComponent(libraryId)}/items${query ? `?${query}` : ''}`;
+
+	const response = await fetch(url, { headers: buildAuthHeader(token) });
 	if (response.status === 404) {
 		throw new LibraryNotFoundError();
 	}
 	if (!response.ok) {
-		throw new Error(`GET /api/libraries/${libraryId}/items failed with status ${response.status}`);
+		throw new Error(`GET ${url} failed with status ${response.status}`);
 	}
 	return (await response.json()) as LibraryItems;
+}
+
+/** One library's "Ostatnio dodane"/"Polecane dla Ciebie"/"Popularne teraz"
+ * row (Runda 10) — the shape `fetchLibraryRecent`/`fetchLibraryRecommended`/
+ * `fetchLibraryPopular` all return: no pagination fields, since these are
+ * small curated rows, not the paginated "all items" grid. */
+export interface LibraryRowItems {
+	library: LibrarySummary;
+	items: MediaItem[];
+}
+
+async function fetchLibraryRow(
+	token: string,
+	libraryId: string,
+	segment: 'recent' | 'recommended' | 'popular'
+): Promise<LibraryRowItems> {
+	const url = `/api/libraries/${encodeURIComponent(libraryId)}/${segment}`;
+	const response = await fetch(url, { headers: buildAuthHeader(token) });
+	if (response.status === 404) {
+		throw new LibraryNotFoundError();
+	}
+	if (!response.ok) {
+		throw new Error(`GET ${url} failed with status ${response.status}`);
+	}
+	return (await response.json()) as LibraryRowItems;
+}
+
+/** `/library/[id]`'s "Ostatnio dodane" row — the home feed's own
+ * `list_recently_added` logic, scoped to this library (Runda 10). */
+export function fetchLibraryRecent(token: string, libraryId: string): Promise<LibraryRowItems> {
+	return fetchLibraryRow(token, libraryId, 'recent');
+}
+
+/** `/library/[id]`'s "Polecane dla Ciebie" row — the home feed's own
+ * `list_recommended` logic, scoped to this library (Runda 10); never mixes
+ * in another library's items. */
+export function fetchLibraryRecommended(
+	token: string,
+	libraryId: string
+): Promise<LibraryRowItems> {
+	return fetchLibraryRow(token, libraryId, 'recommended');
+}
+
+/** `/library/[id]`'s "Popularne teraz" row — the home feed's own
+ * `list_popular` logic, scoped to this library (Runda 10). */
+export function fetchLibraryPopular(token: string, libraryId: string): Promise<LibraryRowItems> {
+	return fetchLibraryRow(token, libraryId, 'popular');
 }
 
 /** Thrown by `fetchMediaDetail` specifically for a 404 — so the Detail View

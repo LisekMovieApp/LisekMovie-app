@@ -27,16 +27,26 @@
 	interface Props {
 		item: MediaItem;
 		token: string;
+		/** Runda 10: `LibraryAllSection`'s view-density toggle. Defaults to
+		 * `'comfortable'`, which is the exact width classes this card has
+		 * always used — every existing call site (every `MediaRow`
+		 * carousel, and the old `/library/[id]` grid) omits this prop and
+		 * is visually unaffected. `'compact'` is a smaller preset used only
+		 * by the "all items" grid's density switch. */
+		size?: 'comfortable' | 'compact';
 	}
 
-	let { item, token }: Props = $props();
+	let { item, token, size = 'comfortable' }: Props = $props();
 
 	let imageFailed = $state(false);
 </script>
 
 <a
 	href={resolve('/media/[id]', { id: item.id })}
-	class="group relative block aspect-video w-[160px] shrink-0 overflow-hidden rounded-md bg-surface sm:w-[200px] md:w-[240px]"
+	class="group relative block aspect-video shrink-0 overflow-hidden rounded-md bg-surface {size ===
+	'compact'
+		? 'w-[110px] sm:w-[130px] md:w-[150px]'
+		: 'w-[185px] sm:w-[240px] md:w-[288px]'}"
 >
 	{#if !imageFailed}
 		<img

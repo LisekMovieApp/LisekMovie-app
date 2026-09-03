@@ -34,10 +34,29 @@
   is added to the `{#each}` (the "menu appears smoothly once data has
   loaded" the request asked for) rather than the whole bar jumping the
   instant the response lands.
+
+  Runda 11: active-item highlighting. Reuses the exact comparison idiom
+  `src/routes/admin/+layout.svelte` already established for its own tab bar
+  (`page.url.pathname`, from `$app/state`, compared against each item's own
+  resolved `href`) — but with equality, not `startsWith`: the admin tabs are
+  prefix routes, while Home vs. any one Library are distinct, single pages,
+  and comparing by substring/prefix (e.g. `pathname.includes('library')`)
+  would light up every library at once the moment any one of them is
+  current. Comparing the fully-`resolve()`d path is also what keeps this
+  correct by library `id`, never by name — two libraries can't both read as
+  active, and a library is never confused with Home. This read is plain and
+  reactive (no `onMount` involved) — the Navbar itself is mounted once by
+  the root `+layout.svelte` and never recreated across client-side
+  navigations, so the highlighted item updates on every navigation,
+  including Filmy→Seriale→Anime→Filmy without a reload, the same way
+  `page.url` itself does. "Moja Lista"/"Gry" stay exactly as they are
+  (dimmed, inert `<span>`s, no `href`) — see the paragraph above: they're
+  not real routes yet, so there's no page for either to "be active" on.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
+	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { t } from '$lib/i18n';
 	import { getSessionCookieClientSide } from '$lib/auth';
@@ -54,6 +73,22 @@
 
 	let scrolled = $state(false);
 	let libraries: LibrarySummary[] = $state([]);
+
+	/** Shared by both Home and every Library link below — active and
+	 * inactive share the same `rounded-full px-3 py-1 font-medium` sizing
+	 * so the pill doesn't change shape/width when it turns on or off, only
+	 * `bg`/`text` do. The active half is bit-identical to this navbar's
+	 * original, hardcoded Home style. */
+	const NAV_ITEM_BASE = 'rounded-full px-3 py-1 font-medium transition-colors';
+	const NAV_ITEM_ACTIVE = 'bg-white/15 text-white';
+	const NAV_ITEM_INACTIVE = 'text-neutral-300 hover:text-white';
+
+	/** Home is the one nav item that isn't inside an `{#each}` — `{@const}`
+	 * is only legal as the direct child of a block (`{#each}`, `{#if}`,
+	 * etc.), not of a plain element like `<nav>`, so its own active check
+	 * lives here as a `$derived` instead. */
+	const homeHref = resolve('/');
+	let homeActive = $derived(page.url.pathname === homeHref);
 
 	onMount(() => {
 		const onScroll = () => {
@@ -90,13 +125,15 @@
 		</a>
 
 		<nav class="hidden items-center gap-4 text-sm sm:flex">
-			<a href={resolve('/')} class="rounded-full bg-white/15 px-3 py-1 font-medium text-white">
+			<a href={homeHref} class="{NAV_ITEM_BASE} {homeActive ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE}">
 				{t('nav.home')}
 			</a>
 			{#each libraries as library (library.id)}
+				{@const libraryHref = resolve('/library/[id]', { id: library.id })}
+				{@const libraryActive = page.url.pathname === libraryHref}
 				<a
-					href={resolve('/library/[id]', { id: library.id })}
-					class="px-1 text-neutral-300 transition-colors hover:text-white"
+					href={libraryHref}
+					class="{NAV_ITEM_BASE} {libraryActive ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE}"
 					transition:fade={{ duration: 200 }}
 				>
 					{library.name}

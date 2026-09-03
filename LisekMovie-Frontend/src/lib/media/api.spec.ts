@@ -3,6 +3,9 @@ import {
 	fetchHomeFeed,
 	fetchLibraries,
 	fetchLibraryItems,
+	fetchLibraryRecent,
+	fetchLibraryRecommended,
+	fetchLibraryPopular,
 	LibraryNotFoundError,
 	imageUrl
 } from './api';
@@ -94,10 +97,13 @@ describe('fetchLibraryItems', () => {
 		vi.unstubAllGlobals();
 	});
 
-	it('URL-encodes the library id and returns the parsed library+items', async () => {
+	it('URL-encodes the library id and returns the parsed page (no options -> no query string)', async () => {
 		const body = {
 			library: { id: 'lib-1', name: 'Filmy', library_type: 'movies' },
-			items: []
+			items: [],
+			total: 0,
+			page: 1,
+			page_size: 100
 		};
 		const fetchMock = vi.fn().mockResolvedValue({
 			ok: true,
@@ -112,6 +118,27 @@ describe('fetchLibraryItems', () => {
 		const [url, options] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/libraries/lib%20id%2Fx/items');
 		expect(options.headers.Authorization).toBe('LisekMovie Token=tok123');
+	});
+
+	it('builds a query string from page/sort/letter when given', async () => {
+		const fetchMock = vi.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			json: () =>
+				Promise.resolve({
+					library: { id: 'lib-1', name: 'Filmy', library_type: 'movies' },
+					items: [],
+					total: 0,
+					page: 2,
+					page_size: 100
+				})
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		await fetchLibraryItems('tok123', 'lib-1', { page: 2, sort: 'title_desc', letter: 'a' });
+
+		const [url] = fetchMock.mock.calls[0];
+		expect(url).toBe('/api/libraries/lib-1/items?page=2&sort=title_desc&letter=a');
 	});
 
 	it('throws LibraryNotFoundError specifically for a 404', async () => {
@@ -133,4 +160,60 @@ describe('fetchLibraryItems', () => {
 			LibraryNotFoundError
 		);
 	});
+});
+
+describe('fetchLibraryRecent / fetchLibraryRecommended / fetchLibraryPopular', () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	const cases: [
+		name: string,
+		fn: typeof fetchLibraryRecent,
+		segment: 'recent' | 'recommended' | 'popular'
+	][] = [
+		['fetchLibraryRecent', fetchLibraryRecent, 'recent'],
+		['fetchLibraryRecommended', fetchLibraryRecommended, 'recommended'],
+		['fetchLibraryPopular', fetchLibraryPopular, 'popular']
+	];
+
+	for (const [name, fn, segment] of cases) {
+		it(`${name} URL-encodes the library id and hits /${segment}`, async () => {
+			const body = {
+				library: { id: 'lib-1', name: 'Filmy', library_type: 'movies' },
+				items: []
+			};
+			const fetchMock = vi.fn().mockResolvedValue({
+				ok: true,
+				status: 200,
+				json: () => Promise.resolve(body)
+			});
+			vi.stubGlobal('fetch', fetchMock);
+
+			const result = await fn('tok123', 'lib id/x');
+
+			expect(result).toEqual(body);
+			const [url, options] = fetchMock.mock.calls[0];
+			expect(url).toBe(`/api/libraries/lib%20id%2Fx/${segment}`);
+			expect(options.headers.Authorization).toBe('LisekMovie Token=tok123');
+		});
+
+		it(`${name} throws LibraryNotFoundError specifically for a 404`, async () => {
+			vi.stubGlobal(
+				'fetch',
+				vi.fn().mockResolvedValue({ ok: false, status: 404, json: () => Promise.resolve({}) })
+			);
+
+			await expect(fn('tok123', 'lib-1')).rejects.toBeInstanceOf(LibraryNotFoundError);
+		});
+
+		it(`${name} throws a plain Error for any other non-ok response`, async () => {
+			vi.stubGlobal(
+				'fetch',
+				vi.fn().mockResolvedValue({ ok: false, status: 500, json: () => Promise.resolve({}) })
+			);
+
+			await expect(fn('tok123', 'lib-1')).rejects.not.toBeInstanceOf(LibraryNotFoundError);
+		});
+	}
 });

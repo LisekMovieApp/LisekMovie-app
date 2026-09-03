@@ -6,5 +6,5 @@
   behavior) renders correctly, not inventing fake titles to fill it with.
 -->
 <div
-	class="aspect-video w-[160px] shrink-0 animate-pulse rounded-md bg-surface sm:w-[200px] md:w-[240px]"
+	class="aspect-video w-[185px] shrink-0 animate-pulse rounded-md bg-surface sm:w-[240px] md:w-[288px]"
 ></div>

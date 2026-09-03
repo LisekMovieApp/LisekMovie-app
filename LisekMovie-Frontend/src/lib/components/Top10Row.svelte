@@ -70,7 +70,7 @@
 							{rank}
 						</span>
 						<div
-							class="aspect-[2/3] w-[110px] shrink-0 animate-pulse rounded-md bg-surface sm:w-[140px] md:w-[160px]"
+							class="aspect-[2/3] w-[127px] shrink-0 animate-pulse rounded-md bg-surface sm:w-[168px] md:w-[192px]"
 						></div>
 					</div>
 				{/each}
@@ -84,7 +84,7 @@
 							{i + 1}
 						</span>
 						<div
-							class="relative aspect-[2/3] w-[110px] shrink-0 overflow-hidden rounded-md bg-surface sm:w-[140px] md:w-[160px]"
+							class="relative aspect-[2/3] w-[127px] shrink-0 overflow-hidden rounded-md bg-surface sm:w-[168px] md:w-[192px]"
 						>
 							{#if !failedIds.has(item.id)}
 								<img
