@@ -25,3 +25,4 @@ Thumbs.db
 *.sql.gz
 /thumbnail-cache/
 /LisekMovie-Backend/config/metadata/
++ .turbo
