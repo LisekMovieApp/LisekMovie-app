@@ -1,33 +1,3 @@
-<!--
-  The big banner at the top of Home. Faza 4 proved the layout with a
-  skeleton (background gradient, bottom vignette, title/metadata/button
-  placement); Faza 5 wires in `item` — the backend's pick for "the one
-  thing to feature" (see `lisek-db::get_hero_item`'s doc comment for how
-  it's chosen). `item` stays `null` for as long as nothing has been scanned
-  yet (or the feed hasn't loaded), which keeps rendering the exact same
-  skeleton as before rather than a broken or empty banner.
-
-  Play stays disabled either way: there's no playback pipeline yet (a
-  later phase) for it to start. "More Info" is now a real link to this
-  item's Detail View (`/media/[id]`) once `item` exists — it only stays a
-  disabled placeholder button while `item` is still `null` (the skeleton
-  loading state has nowhere to link to yet).
-
-  The title is a logo image (`item.logo_url`) when the matched provider
-  actually had one, falling back to the plain-text `<h1>` otherwise — same
-  "try the image, fall back to text on load failure" idiom this component
-  already uses for the backdrop itself, tracked the same way (by item id,
-  not a plain flag, so a previous item's failure can't leak onto a new one).
-
-  Both branches share one `min-h-20 md:min-h-32` wrapper (`items-end`) so
-  swapping between them — a 404'd logo falling back to text, or a
-  home-feed reload changing which item is featured — never visibly jumps
-  the subtitle/button row underneath it. Without a shared reserved height,
-  the two branches' naturally different heights make that swap read as
-  "the layout just broke" for the instant it happens — the exact bug
-  reported against this same pattern in the Detail View (see that page's
-  own comment for the full story).
--->
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { t } from '$lib/i18n';
@@ -137,13 +107,13 @@
 		{/if}
 
 		<div class="mt-2 flex gap-3">
-			<button
-				type="button"
-				disabled
+			<a
+				href={item ? resolve(item.item_type === 'series' ? '/media/[id]' : '/watch/[id]', { id: item.id }) : undefined}
+				aria-disabled={!item}
 				class="rounded-md bg-gold px-6 py-2.5 font-medium text-black transition-colors hover:bg-gold-dim disabled:cursor-not-allowed disabled:opacity-50"
 			>
 				{t('home.play')}
-			</button>
+			</a>
 			{#if item}
 				<a
 					href={resolve('/media/[id]', { id: item.id })}

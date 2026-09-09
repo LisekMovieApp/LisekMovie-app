@@ -20,7 +20,7 @@ use crate::auth::AuthUser;
 use crate::metadata_enrichment;
 use crate::state::SharedState;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ProviderConfigResponse {
     pub provider_key: String,
     pub display_name: String,
@@ -41,6 +41,7 @@ impl From<lisek_metadata::ProviderConfig> for ProviderConfigResponse {
     }
 }
 
+#[utoipa::path(get,path="/api/admin/providers",tag="admin",responses((status=200,body=Vec<ProviderConfigResponse>),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn list_providers(
     auth: AuthUser,
     State(state): State<SharedState>,
@@ -55,12 +56,13 @@ pub async fn list_providers(
     Ok(Json(providers.into_iter().map(Into::into).collect()))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct UpdateProviderRequest {
     pub enabled: bool,
     pub priority: i32,
 }
 
+#[utoipa::path(put,path="/api/admin/providers/{provider_key}",tag="admin",params(("provider_key"=String,Path)),request_body=UpdateProviderRequest,responses((status=200,body=Value),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn update_provider(
     auth: AuthUser,
     State(state): State<SharedState>,
@@ -85,7 +87,7 @@ pub async fn update_provider(
     Ok(Json(json!({ "ok": true })))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct SetProviderKeyRequest {
     pub api_key: String,
 }
@@ -93,6 +95,7 @@ pub struct SetProviderKeyRequest {
 /// Sets a provider's API key. Deliberately has no matching "get the current
 /// key" endpoint — [`list_providers`]'s `is_configured` flag is the only
 /// thing a client ever learns about a stored key without setting a new one.
+#[utoipa::path(put,path="/api/admin/providers/{provider_key}/key",tag="admin",params(("provider_key"=String,Path)),request_body=SetProviderKeyRequest,responses((status=200,body=Value),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn set_provider_key(
     auth: AuthUser,
     State(state): State<SharedState>,
@@ -135,7 +138,7 @@ pub async fn clear_provider_key(
     Ok(Json(json!({ "ok": true })))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct LibraryResponse {
     pub id: Uuid,
     pub name: String,
@@ -158,6 +161,7 @@ impl From<lisek_core::Library> for LibraryResponse {
     }
 }
 
+#[utoipa::path(get,path="/api/admin/libraries",tag="admin",responses((status=200,body=Vec<LibraryResponse>),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn list_libraries(
     auth: AuthUser,
     State(state): State<SharedState>,
@@ -181,7 +185,7 @@ fn default_save_metadata_in_media_folder() -> bool {
     true
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct CreateLibraryRequest {
     pub name: String,
     pub library_type: String,
@@ -228,6 +232,7 @@ pub async fn create_library(
     Ok(Json(library.into()))
 }
 
+#[utoipa::path(delete,path="/api/admin/libraries/{library_id}",tag="admin",params(("library_id"=uuid::Uuid,Path)),responses((status=200,body=Value),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn delete_library(
     auth: AuthUser,
     State(state): State<SharedState>,
@@ -245,7 +250,7 @@ pub async fn delete_library(
     Ok(Json(json!({ "ok": true })))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct MoveLibraryRequest {
     /// `"up"` or `"down"` — anything else is [`AdminError::InvalidInput`],
     /// same validate-before-any-query discipline as [`create_library`]'s
@@ -258,6 +263,7 @@ pub struct MoveLibraryRequest {
 /// `lisek_db::move_library`'s own doc comment for exactly what "up"/"down"
 /// do (a swap with the immediate neighbor, not a full reorder) and why this
 /// ordering is global rather than per-account.
+#[utoipa::path(put,path="/api/admin/libraries/{library_id}/reorder",tag="admin",params(("library_id"=uuid::Uuid,Path)),request_body=MoveLibraryRequest,responses((status=200,body=Value),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn move_library(
     auth: AuthUser,
     State(state): State<SharedState>,
@@ -291,7 +297,7 @@ pub async fn move_library(
     Ok(Json(json!({ "ok": true })))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ScanSummaryResponse {
     pub movies_found: usize,
     pub episodes_found: usize,
@@ -320,6 +326,7 @@ pub struct ScanSummaryResponse {
 /// library can make this take a while, which is an acceptable Faza 5
 /// simplification (see the roadmap notes on a future background job queue)
 /// rather than something this endpoint tries to solve.
+#[utoipa::path(post,path="/api/admin/libraries/{library_id}/scan",tag="admin",params(("library_id"=uuid::Uuid,Path)),responses((status=200,body=ScanSummaryResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn scan_library(
     auth: AuthUser,
     State(state): State<SharedState>,
@@ -431,6 +438,7 @@ pub async fn scan_library(
 /// Every item in one library, for the Admin Panel's browse view that opens
 /// the metadata editor (see `lisek_db::MediaItemSummary`'s own doc comment
 /// for exactly what rides along).
+#[utoipa::path(get,path="/api/admin/libraries/{library_id}/items",tag="admin",params(("library_id"=uuid::Uuid,Path)),responses((status=200,body=Vec<lisek_db::MediaItemSummary>),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn list_library_items(
     auth: AuthUser,
     State(state): State<SharedState>,
@@ -447,6 +455,7 @@ pub async fn list_library_items(
 
 /// One item's full editable shape, for the metadata editor to load when
 /// it opens.
+#[utoipa::path(get,path="/api/admin/media/{item_id}",tag="admin",params(("item_id"=uuid::Uuid,Path)),responses((status=200,body=lisek_db::MediaItemDetail),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn get_media_item(
     auth: AuthUser,
     State(state): State<SharedState>,
@@ -462,7 +471,7 @@ pub async fn get_media_item(
     Ok(Json(item))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct UpdateMediaItemRequest {
     pub title: String,
     pub original_title: Option<String>,
@@ -525,6 +534,7 @@ pub async fn update_media_item(
 
 /// Every item currently flagged `metadata_fallback` — the Admin Panel's
 /// warning view.
+#[utoipa::path(get,path="/api/admin/media/fallback",tag="admin",responses((status=200,body=Vec<lisek_db::FallbackItem>),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn list_fallback_items(
     auth: AuthUser,
     State(state): State<SharedState>,
@@ -538,7 +548,7 @@ pub async fn list_fallback_items(
     Ok(Json(items))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct MigrateFallbackResponse {
     pub poster_migrated: bool,
     pub backdrop_migrated: bool,
@@ -553,6 +563,7 @@ pub struct MigrateFallbackResponse {
 /// a partial success (say, the destination folder only just got its write
 /// permission fixed for one of the two files) still counts as real
 /// progress worth reflecting in the flag.
+#[utoipa::path(post,path="/api/admin/media/{item_id}/migrate-to-media-folder",tag="admin",params(("item_id"=uuid::Uuid,Path)),responses((status=200,body=MigrateFallbackResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn migrate_fallback_item(
     auth: AuthUser,
     State(state): State<SharedState>,
@@ -628,7 +639,7 @@ async fn copy_cached_image(cache_path: &std::path::Path, dest_path: &std::path::
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ProviderOrderPayload {
     pub provider_order: Vec<String>,
 }
@@ -637,6 +648,7 @@ pub struct ProviderOrderPayload {
 /// (`"movie"`/`"episode"`) — the Admin Panel's drag-and-drop reordering UI.
 /// An empty `provider_order` (never saved, or explicitly cleared) means
 /// "use the admin's global priority order" — see `apply_provider_order`.
+#[utoipa::path(get,path="/api/admin/libraries/{library_id}/provider-order/{item_type}",tag="admin",params(("library_id"=uuid::Uuid,Path),("item_type"=String,Path)),responses((status=200,body=ProviderOrderPayload),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn get_provider_order(
     auth: AuthUser,
     State(state): State<SharedState>,

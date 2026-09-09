@@ -6,6 +6,9 @@
 //! persisting `lisek-library` scan results into `media_items`.
 
 use std::path::{Path, PathBuf};
+pub mod playback;
+pub mod games;
+pub mod notifications;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -78,7 +81,7 @@ impl From<sqlx::Error> for DbError {
 /// Discrete connection fields, as collected by the First-Run Wizard form.
 /// Kept separate from a raw connection-string type so the wizard never has
 /// to build (or the frontend parse) a `postgres://` URL by hand.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, utoipa::ToSchema)]
 pub struct DatabaseConfig {
     pub host: String,
     pub port: u16,
@@ -154,6 +157,11 @@ pub async fn insert_admin_user(
     password_hash: &str,
     ui_language: &str,
 ) -> Result<User, DbError> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(710019)").execute(&mut *tx).await?;
+    let (exists,): (bool,) = sqlx::query_as("SELECT EXISTS(SELECT 1 FROM users WHERE is_admin)")
+        .fetch_one(&mut *tx).await?;
+    if exists { return Err(DbError::Other("Initial administrator already exists".into())); }
     let row = sqlx::query_as::<_, UserRow>(
         r#"
         INSERT INTO users (username, password_hash, is_admin, ui_language)
@@ -164,8 +172,10 @@ pub async fn insert_admin_user(
     .bind(username)
     .bind(password_hash)
     .bind(ui_language)
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await?;
+
+    tx.commit().await?;
 
     Ok(user_from_row(row))
 }
@@ -609,7 +619,7 @@ pub async fn move_library(
 
 /// How many of each outcome a scan produced — enough for the admin-facing
 /// "scan complete" summary without reporting on every single file.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 pub struct ScanSummary {
     pub movies_found: usize,
     pub episodes_found: usize,
@@ -893,7 +903,7 @@ pub async fn get_media_item_file_path(
 /// of `"title"`/`"original_title"`/`"year"`/`"overview"` the admin has
 /// individually protected — the same identifiers the editor's own
 /// checkboxes use, so the frontend never needs a translation table.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct MediaItemDetail {
     pub id: Uuid,
     pub library_id: Uuid,
@@ -1035,7 +1045,7 @@ pub async fn update_media_item(
 /// that stops being true). `metadata_locked`/`metadata_fallback` ride
 /// along so the browse list itself can show a lock/warning badge without a
 /// second request per row.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct MediaItemSummary {
     pub id: Uuid,
     pub item_type: String,
@@ -1105,7 +1115,7 @@ pub async fn list_media_items_for_library(
 /// the caller (`lisek-server`) can derive the exact media-folder
 /// destination the same way `metadata_enrichment::media_folder_destination`
 /// already does, without a second lookup.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct FallbackItem {
     pub id: Uuid,
     pub library_id: Uuid,

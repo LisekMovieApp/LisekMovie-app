@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+utoipa = { version = "5.5", features = ["uuid", "chrono"] }
 chrono = { version = "0.4.45", features = ["serde"] }
 serde = { version = "1.0.229", features = ["derive"] }
 uuid = { version = "1.26.0", features = ["v4", "serde"] }

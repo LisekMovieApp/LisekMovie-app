@@ -33,7 +33,7 @@ use crate::state::SharedState;
 /// handing an attacker a free username-enumeration oracle.
 const DUMMY_PASSWORD_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$/UJVqBKwAWpTqgeSjR05eg$DsvDwwPBraS50WB4uPz6ap96Q1M+ougojjJZvHCnRLY";
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
@@ -45,12 +45,13 @@ pub struct LoginRequest {
     pub device_id: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct LoginResponse {
     pub token: String,
     pub user: User,
 }
 
+#[utoipa::path(post,path="/api/auth/login",tag="auth",request_body=LoginRequest,responses((status=200,body=LoginResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)))]
 pub async fn login(
     State(state): State<SharedState>,
     Json(req): Json<LoginRequest>,
@@ -99,15 +100,17 @@ pub async fn login(
     Ok(Json(LoginResponse { token, user }))
 }
 
+#[utoipa::path(get,path="/api/auth/me",tag="auth",responses((status=200,body=User),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn me(AuthUser { user, .. }: AuthUser) -> Json<User> {
     Json(user)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct LogoutResponse {
     pub ok: bool,
 }
 
+#[utoipa::path(post,path="/api/auth/logout",tag="auth",responses((status=200,body=LogoutResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn logout(
     AuthUser { token_hash, .. }: AuthUser,
     State(state): State<SharedState>,
@@ -130,7 +133,7 @@ pub async fn logout(
 /// its first parameter, the same way `me`/`logout` above do it.
 pub struct AuthUser {
     pub user: User,
-    token_hash: String,
+    pub(crate) token_hash: String,
 }
 
 impl axum::extract::FromRequestParts<SharedState> for AuthUser {
@@ -141,7 +144,7 @@ impl axum::extract::FromRequestParts<SharedState> for AuthUser {
         state: &SharedState,
     ) -> Result<Self, Self::Rejection> {
         let token = token_from_header(parts)
-            .or_else(|| token_from_query(parts.uri.query()))
+            .or_else(|| is_image_path(parts.uri.path()).then(|| token_from_query(parts.uri.query())).flatten())
             .ok_or(AuthError::MissingToken)?;
         let token_hash = lisek_auth::hash_session_token(&token);
 
@@ -160,12 +163,12 @@ impl axum::extract::FromRequestParts<SharedState> for AuthUser {
 /// a value, case-insensitive key names — real clients (and header-editing
 /// humans debugging with curl) shouldn't have to match one exact layout.
 fn parse_token(header_value: &str) -> Option<&str> {
-    let rest = header_value.strip_prefix("LisekMovie")?.trim_start();
+    let rest = header_value.strip_prefix("LisekMovie ")?.trim_start();
     rest.split(',').find_map(|pair| {
         let (key, value) = pair.split_once('=')?;
         key.trim()
             .eq_ignore_ascii_case("token")
-            .then(|| value.trim().trim_matches('"'))
+            .then(|| value.trim().trim_matches('"')).filter(|value| !value.is_empty())
     })
 }
 
@@ -194,6 +197,12 @@ fn token_from_query(query: Option<&str>) -> Option<String> {
     })
 }
 
+fn is_image_path(path: &str) -> bool {
+    let segments: Vec<_> = path.split('/').collect();
+    segments.len() == 5 && segments[1] == "api" && segments[2] == "media"
+        && matches!(segments[4], "poster" | "backdrop" | "logo")
+}
+
 #[derive(Debug)]
 pub enum AuthError {
     MissingToken,
@@ -203,7 +212,7 @@ pub enum AuthError {
     Internal,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 struct AuthErrorBody {
     error_code: &'static str,
     message: &'static str,

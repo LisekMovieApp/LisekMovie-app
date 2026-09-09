@@ -20,7 +20,7 @@ use lisek_db::{DatabaseConfig, DbError};
 
 use crate::state::{AppState, ServerMode, SharedState};
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct StatusResponse {
     pub setup_required: bool,
     pub database_connected: bool,
@@ -29,6 +29,7 @@ pub struct StatusResponse {
 /// Always reachable, in every server mode — this is the first thing the
 /// frontend calls on every page load to decide whether to redirect to
 /// `/setup`.
+#[utoipa::path(get,path="/api/status",tag="setup",responses((status=200,body=StatusResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)))]
 pub async fn status(State(state): State<SharedState>) -> Json<StatusResponse> {
     let mode = state.mode.read().await;
     let (setup_required, database_connected) = match &*mode {
@@ -42,7 +43,7 @@ pub async fn status(State(state): State<SharedState>) -> Json<StatusResponse> {
     })
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct SetupError {
     pub error_code: &'static str,
     pub message: String,
@@ -66,7 +67,7 @@ fn setup_error(error_code: &'static str, message: impl Into<String>) -> SetupErr
 /// fact and create a second, unauthenticated admin account.
 async fn guard_setup_not_already_done(state: &AppState) -> Result<(), SetupError> {
     let mode = state.mode.read().await;
-    if matches!(&*mode, ServerMode::Ready(_)) {
+    if !matches!(&*mode, ServerMode::SetupRequired) {
         return Err(setup_error(
             "setup_already_complete",
             "Setup has already been completed on this server.",
@@ -75,11 +76,12 @@ async fn guard_setup_not_already_done(state: &AppState) -> Result<(), SetupError
     Ok(())
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct TestConnectionResponse {
     pub ok: bool,
 }
 
+#[utoipa::path(post,path="/api/setup/database/test",tag="setup",request_body=DatabaseConfig,responses((status=200,body=TestConnectionResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)))]
 pub async fn test_database(
     State(state): State<SharedState>,
     Json(config): Json<DatabaseConfig>,
@@ -93,7 +95,7 @@ pub async fn test_database(
     Ok(Json(TestConnectionResponse { ok: true }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct FinishRequest {
     pub database: DatabaseConfig,
     pub admin_username: String,
@@ -101,16 +103,23 @@ pub struct FinishRequest {
     pub ui_language: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct FinishResponse {
     pub ok: bool,
 }
 
+#[utoipa::path(post,path="/api/setup/finish",tag="setup",request_body=FinishRequest,responses((status=200,body=FinishResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)))]
 pub async fn finish(
     State(state): State<SharedState>,
     Json(req): Json<FinishRequest>,
 ) -> Result<Json<FinishResponse>, SetupError> {
+    static SETUP_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _guard = SETUP_LOCK.lock().await;
     guard_setup_not_already_done(&state).await?;
+
+    if !matches!(req.ui_language.as_str(), "en" | "pl") || req.admin_username.len() > 128 || req.admin_password.len() > 1024 {
+        return Err(setup_error("invalid_request", "Invalid account settings."));
+    }
 
     if req.admin_username.trim().is_empty() {
         return Err(setup_error(
@@ -139,7 +148,7 @@ pub async fn finish(
             _ => setup_error("internal_error", "Could not process the password."),
         })?;
 
-    lisek_db::insert_admin_user(&pool, &req.admin_username, &password_hash, &req.ui_language)
+    lisek_db::insert_admin_user(&pool, req.admin_username.trim(), &password_hash, &req.ui_language)
         .await
         .map_err(db_error_to_setup_error)?;
 

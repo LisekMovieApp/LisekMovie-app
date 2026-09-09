@@ -11,6 +11,10 @@ mod auth;
 mod background_refresh;
 mod env_file;
 mod media;
+mod playback;
+mod games;
+mod notifications;
+mod openapi;
 mod metadata_enrichment;
 mod provider_registry;
 mod setup;
@@ -78,12 +82,22 @@ async fn main() {
     // request — see background_refresh.rs's own doc comment for exactly
     // what it does and how it stays safe around locked items/fields.
     tokio::spawn(background_refresh::run(state.clone()));
+    tokio::spawn(notifications::run(state.clone()));
+    tokio::spawn(async {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            lisek_playback::transcode::cleanup().await;
+        }
+    });
 
     // Reachable with no session at all: health/status checks, the setup
     // wizard (which by definition runs before any account exists), and
     // login itself.
     let public_routes = Router::new()
         .route("/api/health", get(health))
+        .route("/api/openapi.json", get(openapi::document))
+        .route("/api/playback/{session_id}/stream", get(playback::stream))
+        .route("/api/playback/{session_id}/hls/{file}", get(playback::hls))
         .route("/api/status", get(setup::status))
         .route("/api/setup/database/test", post(setup::test_database))
         .route("/api/setup/finish", post(setup::finish))
@@ -96,6 +110,20 @@ async fn main() {
     // to this group, not `public_routes`.
     let protected_routes = Router::new()
         .route("/api/auth/me", get(auth::me))
+        .route("/api/admin/webhooks", get(notifications::list).post(notifications::create))
+        .route("/api/admin/webhooks/{id}", delete(notifications::delete))
+        .route("/api/admin/webhooks/deliveries", get(notifications::deliveries))
+        .route("/api/games", get(games::list))
+        .route("/api/admin/games", get(games::admin_list))
+        .route("/api/admin/games/{key}", put(games::configure))
+        .route("/api/games/{key}/scores", post(games::save))
+        .route("/api/games/{key}/leaderboard", get(games::leaderboard))
+        .route("/api/media/{item_id}/playback", post(playback::start))
+        .route("/api/playback/{session_id}/progress", put(playback::progress))
+        .route("/api/media/{item_id}/state", get(playback::media_state).put(playback::set_flags))
+        .route("/api/me/list", get(playback::my_list))
+        .route("/api/admin/stats/users", get(playback::stats))
+        .route("/api/admin/playback/safety", get(playback::safety).put(playback::set_safety))
         .route("/api/auth/logout", post(auth::logout))
         // Admin-only in practice, not in routing: every handler in
         // admin.rs re-checks `user.is_admin` itself (see that module's doc

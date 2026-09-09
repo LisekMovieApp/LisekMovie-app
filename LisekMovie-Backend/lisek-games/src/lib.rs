@@ -1,14 +1,14 @@
-//! Game registry, scores, global leaderboard.
-//!
-//! Scaffolded in Faza 1 (workspace init). Real implementation lands in Faza 6
-//! per the LisekMovie architecture plan.
-
+//! Rules shared by the game API. Scores are recreational client submissions.
+pub fn valid_score(key: &str, score: i32) -> bool {
+    key == "flappy-bird" && (0..=100_000).contains(&score)
+}
 #[cfg(test)]
 mod tests {
-    /// Proves the crate compiles and its test harness runs — nothing more.
-    /// Replace with real coverage once lisek-games grows actual logic.
     #[test]
-    fn crate_scaffold_compiles() {
-        assert_eq!(env!("CARGO_PKG_NAME"), "lisek-games");
+    fn validates_registered_game_and_score_bounds() {
+        assert!(super::valid_score("flappy-bird",0));
+        assert!(!super::valid_score("flappy-bird",-1));
+        assert!(!super::valid_score("flappy-bird",100_001));
+        assert!(!super::valid_score("unknown",1));
     }
 }

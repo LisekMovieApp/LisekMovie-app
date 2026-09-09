@@ -15,7 +15,7 @@ use uuid::Uuid;
 /// Deliberately has no sqlx dependency or derive: lisek-db maps database rows
 /// onto this struct field by field, so this crate stays free of any notion
 /// of Postgres or SQL (see the architecture plan's crate boundaries).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 pub struct User {
     pub id: Uuid,
     pub username: String,
@@ -35,7 +35,7 @@ pub struct User {
 /// (`"movies"` / `"tv_shows"`) actually live; `lisek-db` validates against
 /// those same values when creating a library, so an invalid type can never
 /// reach this struct via the normal path.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 pub struct Library {
     pub id: Uuid,
     pub name: String,
@@ -67,7 +67,7 @@ pub struct Library {
 /// provider (or, for season/episode, the scanner's own filename parsing)
 /// has filled them in — a freshly-scanned, not-yet-enriched item is a
 /// perfectly valid `MediaItem`, just a sparser one.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 pub struct MediaItem {
     pub id: Uuid,
     pub library_id: Uuid,

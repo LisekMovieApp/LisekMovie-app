@@ -15,6 +15,10 @@
 
 	const tabs = [
 		{ href: '/admin/plugins', labelKey: 'admin.tab_plugins' },
+		{ href: '/admin/stats', labelKey: 'player.stats' },
+        { href: '/admin/playback', labelKey: 'player.safety' },
+        { href: '/admin/notifications', labelKey: 'notifications.title' },
+		{ href: '/admin/games', labelKey: 'nav.games' },
 		{ href: '/admin/libraries', labelKey: 'admin.tab_libraries' },
 		{ href: '/admin/media/fallback', labelKey: 'admin.tab_fallback' }
 	] as const;
@@ -30,7 +34,7 @@
 -->
 <div class="pt-24">
 	<nav class="border-b border-white/10 bg-surface/40 px-4 md:px-8">
-		<div class="mx-auto flex max-w-2xl gap-1">
+		<div class="mx-auto flex max-w-4xl gap-1 overflow-x-auto">
 			{#each tabs as tab (tab.href)}
 				{@const active = page.url.pathname.startsWith(tab.href)}
 				<a

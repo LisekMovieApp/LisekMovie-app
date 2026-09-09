@@ -1,93 +1,3 @@
-<!--
-  Faza 7 completion's "Widok Szczegółów" — the movie/series Detail View
-  every card and Top 10 entry now navigates to (see `MediaCard.svelte` /
-  `Top10Row.svelte`), and `HeroBanner`'s own "More Info" button links here
-  too. A dedicated route (`/media/[id]`) rather than a Netflix-style modal:
-  URL-shareable, survives a reload, and matches this project's existing
-  dynamic-route convention (`/admin/libraries/[id]/items`).
-
-  Modeled on the reference screenshots at
-  `Pliki_DoPomocy/Netflix/{Film-Inforamcje,Serial-Informacje}` plus
-  Jellyfin's own detail-page layout — a big logo/title over a backdrop
-  (Netflix), then a poster+metadata row below it (Jellyfin) — rebuilt with
-  this project's own Tailwind classes and gold/surface palette; no markup
-  from either reference was reused.
-
-  Runda 8: `item.item_type` is `'movie'` or `'series'` now, never a bare
-  `'episode'` — the backend collapses every episode of one show into a
-  single `'series'` card (see `lisek_db`'s `home_candidates` CTE doc
-  comment for the full story, including the bug this fixed: every episode
-  used to show up as its own card on the home page). A `'series'` item
-  fetches one extra thing this page didn't need before — its "Sezony"
-  list, from `GET /api/media/{id}/seasons` — and renders a season-picker
-  strip plus that season's episode numbers below the poster/metadata row.
-  Still honest about what a season/episode "is" here: a poster (the show's
-  own — no per-season artwork exists), and for an episode, only its number
-  (`S01E03`, or `E03` alone in this list since the season is already
-  selected) — never a title, thumbnail, runtime, or synopsis, because none
-  of that is ever fetched from any provider for an individual episode; see
-  `lisek_db::list_series_seasons`'s own doc comment for exactly why.
-
-  Genres, a critic/audience rating, runtime, an age/content rating, cast &
-  crew, and a "similar titles" section were all asked for (Runda 7) and
-  are deliberately still NOT shown — not because they were forgotten, but
-  because none of that data exists anywhere in this app yet, and inventing
-  placeholder values would be dishonest:
-    - Genres + rating: TMDB's *movie* search response does carry
-      `genre_ids`/`vote_average` for free (no extra API call), but neither
-      is parsed by `LisekMovie-plugin-tmdb` or threaded through
-      `ProviderMatch`/`lisek-db` yet — and TMDB's *TV* genre-id table
-      couldn't be independently verified, so movie-only genres would be an
-      inconsistent, silently-partial feature (present for a film, always
-      missing for an episode). Needs new plugin struct fields plus a new
-      `lisek-db` read path for a JSONB array — a backend round of its own.
-    - Runtime + age rating (e.g. "PL-16"): not in TMDB's search response
-      at all; each needs its own on-demand `/movie/{id}` +
-      `/release_dates` call.
-    - "Obsada i ekipa": needs a `/credits` call this app has never made,
-      and somewhere to put photo/name/role data — no cast concept exists
-      anywhere in `lisek_db::MediaItem` yet.
-    - "Więcej podobnych": needs a `/similar` call, plus an unresolved
-      product question first — show TMDB's raw suggestions even for
-      titles this server doesn't own, or cross-reference against the
-      library's own stored `tmdb_id`s (the honest choice for a
-      self-hosted app, but likely thin for a small library).
-    - Marking watched / favorites: not a display gap but a missing
-      *feature* — no watch-history or favorites table, no
-      per-user-interaction model at all in this schema. Needs new
-      migrations, endpoints, and UI from scratch, not a frontend tweak.
-  All are architecturally feasible later (the raw `tmdb_id`/`tvdb_id` and
-  provider name are already persisted per item — see
-  `lisek_db::attach_provider_metadata`), just not from a SvelteKit-only
-  round. No inert "coming soon" buttons stand in for any of them either:
-  a control for a feature that isn't even roadmapped yet would be
-  inventing UI, not fixing it.
-
-  Uses the public `GET /api/media/{id}` endpoint (any signed-in user, not
-  just admins — see `media.rs`'s own doc comment for why that endpoint
-  exists separately from the admin-only `/api/admin/media/{id}`), so a
-  direct link or an older item not among the home feed's handful of rows
-  still opens correctly. The "Edytuj metadane" button — and the
-  provider list it needs — only ever loads for an admin, and opens the
-  same `MediaItemEditorModal` the library items browse page already uses,
-  wired the same way (`providers`/`editingItemId` pattern).
-
-  Same client-side fetch-from-a-cookie-token shape as Home and every Admin
-  Panel page — see `/+page.svelte` (home)'s own comment for why this
-  codebase prefers that over a `+page.ts` load function here.
-
-  Runda 10: was `onMount(load)`, which only ever fires once per component
-  instance. SvelteKit reuses this exact component instance across a
-  client-side navigation between two `/media/[id]` URLs that differ only in
-  `id` (e.g. a future "similar titles" link), so `onMount` never re-fired
-  and the page kept showing the previous item under the new URL — the same
-  bug reported against `/library/[id]`, found here during that round's audit
-  and fixed the same way: a `$effect` that reads the reactive `itemId`
-  synchronously re-runs on every id change, including the first mount, so it
-  fully replaces `onMount` here. `loadSeq` guards against an older
-  navigation's fetch (primary or either non-fatal secondary one) resolving
-  after a newer one already landed and clobbering its state.
--->
 <script lang="ts">
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
@@ -102,6 +12,7 @@
 		type SeriesSeason
 	} from '$lib/media/api';
 	import { fetchProviders, type ProviderConfig } from '$lib/admin/providers';
+	import MediaActions from '$lib/components/MediaActions.svelte';
 	import MediaItemEditorModal from '$lib/components/MediaItemEditorModal.svelte';
 
 	const itemId = $derived(page.params.id ?? '');
@@ -356,13 +267,12 @@
 					</div>
 
 					<div class="flex justify-center gap-3 sm:justify-start">
-						<button
-							type="button"
-							disabled
+						<a
+							href={resolve('/watch/[id]', { id: item.item_type === 'series' ? (seasons[0]?.episodes[0]?.id ?? item.id) : item.id })}
 							class="rounded-md bg-gold px-6 py-2.5 font-medium text-black transition-colors hover:bg-gold-dim disabled:cursor-not-allowed disabled:opacity-50"
 						>
 							{t('home.play')}
-						</button>
+						</a>
 						{#if page.data.user?.is_admin}
 							<button
 								type="button"
@@ -374,6 +284,7 @@
 						{/if}
 					</div>
 
+					<MediaActions itemId={item.id} {token} />
 					{#if item.overview}
 						<!--
 						  `md:text-[1rem] md:leading-6`, not `md:text-base` — the
@@ -448,14 +359,14 @@
 					{#if activeSeasonEpisodes.length > 0}
 						<div class="mt-4 flex flex-wrap gap-2">
 							{#each activeSeasonEpisodes as ep (ep.id)}
-								<span class="rounded-md bg-surface px-3 py-1.5 text-xs text-neutral-300">
+								<a href={resolve('/watch/[id]', { id: ep.id })} class="rounded-md bg-surface px-3 py-2 text-sm text-neutral-300 hover:text-gold focus-visible:outline-2">
 									{ep.end_episode !== null
 										? t('detail.episode_label_range', {
 												number: ep.episode,
 												end: ep.end_episode
 											})
 										: t('detail.episode_label', { number: ep.episode })}
-								</span>
+								</a>
 							{/each}
 						</div>
 					{/if}

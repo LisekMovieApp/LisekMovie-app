@@ -53,7 +53,7 @@ use crate::state::SharedState;
 /// `"episode"` any more (see `lisek_db`'s `home_candidates` CTE doc
 /// comment): every response this module hands out already represents
 /// something browsable on its own, not one file out of a season.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct MediaItemResponse {
     pub id: Uuid,
     pub item_type: String,
@@ -153,7 +153,7 @@ async fn to_responses(
 const ROW_LIMIT: i64 = 14;
 const TOP10_LIMIT: i64 = 10;
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct HomeFeedResponse {
     pub hero: Option<MediaItemResponse>,
     pub recently_added: Vec<MediaItemResponse>,
@@ -168,6 +168,7 @@ pub struct HomeFeedResponse {
 /// means and, for `top10`/`recommended`/`popular`, the honest placeholder
 /// ranking each uses in the absence of any real watch-history/popularity
 /// tracking (not yet built — see the roadmap).
+#[utoipa::path(get,path="/api/home",tag="media",responses((status=200,body=HomeFeedResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn home_feed(
     _auth: AuthUser,
     State(state): State<SharedState>,
@@ -210,7 +211,7 @@ pub async fn home_feed(
 /// reaching a non-admin browser tab (Runda 9). Every signed-in account gets
 /// to see *that* a library exists and what the admin named it, never where
 /// its files actually live.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct PublicLibraryResponse {
     pub id: Uuid,
     pub name: String,
@@ -235,6 +236,7 @@ impl From<lisek_core::Library> for PublicLibraryResponse {
 /// `admin::list_libraries` already used for the Admin Panel — one query,
 /// two response shapes, so the Navbar can never disagree with the admin's
 /// own reorder buttons about which library comes first.
+#[utoipa::path(get,path="/api/libraries",tag="media",responses((status=200,body=Vec<PublicLibraryResponse>),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn list_libraries(
     _auth: AuthUser,
     State(state): State<SharedState>,
@@ -265,7 +267,7 @@ const MAX_LIBRARY_PAGE_SIZE: i64 = 200;
 /// [`parse_letter_filter`]): a malformed value here is a stale link or a
 /// bug in this app's own UI, not something worth failing the whole request
 /// over.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct LibraryItemsQuery {
     pub page: Option<i64>,
     pub page_size: Option<i64>,
@@ -299,7 +301,7 @@ fn parse_letter_filter(raw: Option<&str>) -> Option<char> {
     Some(first.to_ascii_uppercase())
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct LibraryItemsResponse {
     pub library: PublicLibraryResponse,
     pub items: Vec<MediaItemResponse>,
@@ -328,6 +330,7 @@ pub struct LibraryItemsResponse {
 /// library exists and has nothing in it yet" and "this library doesn't
 /// exist", and the frontend needs to tell those apart to show the right
 /// message.
+#[utoipa::path(get,path="/api/libraries/{library_id}/items",tag="media",params(("library_id"=uuid::Uuid,Path),("page"=Option<i64>,Query),("sort"=Option<String>,Query),("letter"=Option<String>,Query)),responses((status=200,body=LibraryItemsResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn library_items(
     _auth: AuthUser,
     State(state): State<SharedState>,
@@ -375,7 +378,7 @@ pub async fn library_items(
 /// than sharing one earlier lookup) so a failure in one section's request
 /// can never take another section down with it — see the Runda 10 plan's
 /// reasoning for three separate endpoints instead of one bundled response.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct LibraryRowResponse {
     pub library: PublicLibraryResponse,
     pub items: Vec<MediaItemResponse>,
@@ -385,6 +388,7 @@ pub struct LibraryRowResponse {
 /// scoped to this library, reusing the exact same query (and therefore the
 /// exact same `home_candidates` grouping and `created_at DESC` ordering) the
 /// home feed's own "recently added" row already uses.
+#[utoipa::path(get,path="/api/libraries/{library_id}/recent",tag="media",params(("library_id"=uuid::Uuid,Path)),responses((status=200,body=LibraryRowResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn library_recent(
     _auth: AuthUser,
     State(state): State<SharedState>,
@@ -411,6 +415,7 @@ pub async fn library_recent(
 /// scoped to this library, so a Filmy library never recommends a series and
 /// vice versa. Same honest "no real taste model yet" caveat as the home
 /// feed's own recommended row.
+#[utoipa::path(get,path="/api/libraries/{library_id}/recommended",tag="media",params(("library_id"=uuid::Uuid,Path)),responses((status=200,body=LibraryRowResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn library_recommended(
     _auth: AuthUser,
     State(state): State<SharedState>,
@@ -436,6 +441,7 @@ pub async fn library_recommended(
 /// `/library/[id]`'s "Popularne teraz" row — `lisek_db::list_popular` scoped
 /// to this library. Same honest "no real popularity tracking yet" caveat as
 /// the home feed's own popular row.
+#[utoipa::path(get,path="/api/libraries/{library_id}/popular",tag="media",params(("library_id"=uuid::Uuid,Path)),responses((status=200,body=LibraryRowResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn library_popular(
     _auth: AuthUser,
     State(state): State<SharedState>,
@@ -468,6 +474,7 @@ pub async fn library_popular(
 /// because the home feed only ever returns a handful of rows — an item
 /// reached by direct link (or simply not among the home feed's most-recent
 /// picks) still needs to be fetchable on its own.
+#[utoipa::path(get,path="/api/media/{item_id}",tag="media",params(("item_id"=uuid::Uuid,Path)),responses((status=200,body=MediaItemResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn media_item_detail(
     _auth: AuthUser,
     State(state): State<SharedState>,
@@ -487,7 +494,7 @@ pub async fn media_item_detail(
 /// anywhere in this app yet). `poster_url`/`backdrop_url` reuse the exact
 /// same `/api/media/{id}/...` routes as [`MediaItemResponse`] — `id` here
 /// is a real `media_items` row, so they resolve the same way.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct SeriesEpisodeResponse {
     pub id: Uuid,
     pub episode: i32,
@@ -508,7 +515,7 @@ impl From<lisek_db::SeriesEpisode> for SeriesEpisodeResponse {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct SeriesSeasonResponse {
     pub season: i32,
     pub episodes: Vec<SeriesEpisodeResponse>,
@@ -529,6 +536,7 @@ impl From<lisek_db::SeriesSeason> for SeriesSeasonResponse {
 /// doesn't exist, isn't a `media_items` row, or names a movie — see
 /// `lisek_db::list_series_seasons`'s own doc comment on why that's the
 /// right response rather than a distinct error case here.
+#[utoipa::path(get,path="/api/media/{item_id}/seasons",tag="media",params(("item_id"=uuid::Uuid,Path)),responses((status=200,body=Vec<SeriesSeasonResponse>),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn media_item_seasons(
     _auth: AuthUser,
     State(state): State<SharedState>,
@@ -544,6 +552,7 @@ pub async fn media_item_seasons(
 /// Serves one item's poster. `AuthUser` accepts a `?token=` query param
 /// specifically so a plain `<img src>` can hit this route — see
 /// `auth.rs::token_from_query`'s doc comment.
+#[utoipa::path(get,path="/api/media/{item_id}/poster",tag="media",params(("item_id"=uuid::Uuid,Path)),responses((status=200,description="Image bytes"),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn poster_image(
     _auth: AuthUser,
     State(state): State<SharedState>,
@@ -560,6 +569,7 @@ pub async fn poster_image(
 }
 
 /// Same as [`poster_image`] for the backdrop image.
+#[utoipa::path(get,path="/api/media/{item_id}/backdrop",tag="media",params(("item_id"=uuid::Uuid,Path)),responses((status=200,description="Image bytes"),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn backdrop_image(
     _auth: AuthUser,
     State(state): State<SharedState>,
@@ -585,6 +595,7 @@ pub async fn backdrop_image(
 /// TVDB-only items never will yet — see `lisek_plugin_api::ProviderMatch`'s
 /// own doc comment), which is exactly why the frontend treats it the same
 /// as a missing poster: an `<img onerror>` fallback, not an error state.
+#[utoipa::path(get,path="/api/media/{item_id}/logo",tag="media",params(("item_id"=uuid::Uuid,Path)),responses((status=200,description="Image bytes"),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn logo_image(
     _auth: AuthUser,
     State(state): State<SharedState>,
