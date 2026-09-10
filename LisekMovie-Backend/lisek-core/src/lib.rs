@@ -20,6 +20,8 @@ pub struct User {
     pub id: Uuid,
     pub username: String,
     pub is_admin: bool,
+    pub must_change_password: bool,
+    pub disabled: bool,
     pub ui_language: String,
     pub email: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -95,11 +97,18 @@ mod tests {
             id: Uuid::nil(),
             username: "admin".to_string(),
             is_admin: true,
+            must_change_password: false,
+            disabled: false,
             ui_language: "en".to_string(),
             email: None,
             created_at: Utc::now(),
         };
-        let json = serde_json::to_string(&user).unwrap();
-        assert!(!json.contains("password"));
+        let json = serde_json::to_value(&user).unwrap();
+        assert!(json.get("password").is_none());
+        assert!(json.get("password_hash").is_none());
+        assert!(json.get("temporary_password").is_none());
+        assert_eq!(json["must_change_password"], false);
     }
 }
+
+pub mod playback_settings;

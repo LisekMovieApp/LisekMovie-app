@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 pub mod playback;
+pub mod users;
 pub mod games;
 pub mod notifications;
 use std::time::Duration;
@@ -26,7 +27,7 @@ use lisek_metadata::{ProviderConfig, display_name_for};
 /// The raw shape every `users` row comes back as — used both for the plain
 /// `User` domain type and (with `password_hash` on the side) for login,
 /// which needs the hash but must never let it leak into `User` itself.
-type UserRow = (Uuid, String, bool, String, Option<String>, DateTime<Utc>);
+type UserRow = (Uuid, String, bool, String, Option<String>, DateTime<Utc>, bool, bool);
 
 fn user_from_row(row: UserRow) -> User {
     User {
@@ -36,6 +37,8 @@ fn user_from_row(row: UserRow) -> User {
         ui_language: row.3,
         email: row.4,
         created_at: row.5,
+        must_change_password: row.6,
+        disabled: row.7,
     }
 }
 
@@ -166,7 +169,7 @@ pub async fn insert_admin_user(
         r#"
         INSERT INTO users (username, password_hash, is_admin, ui_language)
         VALUES ($1, $2, true, $3)
-        RETURNING id, username, is_admin, ui_language, email, created_at
+        RETURNING id, username, is_admin, ui_language, email, created_at, must_change_password, disabled
         "#,
     )
     .bind(username)
@@ -188,41 +191,10 @@ pub async fn insert_admin_user(
 /// running a dummy password verification in that case, so a request for a
 /// nonexistent username doesn't respond measurably faster than a wrong
 /// password for a real one.
-#[allow(clippy::type_complexity)]
-pub async fn find_user_with_password_hash(
-    pool: &PgPool,
-    username: &str,
-) -> Result<Option<(User, String)>, DbError> {
-    let row = sqlx::query_as::<
-        _,
-        (
-            Uuid,
-            String,
-            bool,
-            String,
-            Option<String>,
-            DateTime<Utc>,
-            String,
-        ),
-    >(
-        r#"
-        SELECT id, username, is_admin, ui_language, email, created_at, password_hash
-        FROM users
-        WHERE username = $1
-        "#,
-    )
-    .bind(username)
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(row.map(
-        |(id, username, is_admin, ui_language, email, created_at, password_hash)| {
-            (
-                user_from_row((id, username, is_admin, ui_language, email, created_at)),
-                password_hash,
-            )
-        },
-    ))
+pub async fn find_user_with_password_hash(pool:&PgPool,username:&str)->Result<Option<(User,String)>,DbError>{
+    let row:Option<(Uuid,String,bool,String,Option<String>,DateTime<Utc>,bool,bool,String)>=sqlx::query_as("SELECT id,username,is_admin,ui_language,email,created_at,must_change_password,disabled,password_hash FROM users WHERE username=$1")
+        .bind(username).fetch_optional(pool).await?;
+    Ok(row.map(|(id,name,admin,lang,email,created,change,disabled,hash)|(user_from_row((id,name,admin,lang,email,created,change,disabled)),hash)))
 }
 
 /// Records a new login session. `token_hash` must already be hashed (see
@@ -266,10 +238,10 @@ pub async fn find_user_by_session_token_hash(
 ) -> Result<Option<User>, DbError> {
     let row = sqlx::query_as::<_, UserRow>(
         r#"
-        SELECT u.id, u.username, u.is_admin, u.ui_language, u.email, u.created_at
+        SELECT u.id, u.username, u.is_admin, u.ui_language, u.email, u.created_at, u.must_change_password, u.disabled
         FROM sessions s
         JOIN users u ON u.id = s.user_id
-        WHERE s.token_hash = $1 AND s.expires_at > now()
+        WHERE s.token_hash = $1 AND s.expires_at > now() AND NOT u.disabled
         "#,
     )
     .bind(token_hash)

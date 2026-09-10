@@ -1,4 +1,5 @@
 <script lang="ts">
+    import PlaybackSettings from '$lib/components/PlaybackSettings.svelte';
     import { onMount } from 'svelte';
     import { t } from '$lib/i18n';
     import { getSessionCookieClientSide } from '$lib/auth';
@@ -22,7 +23,8 @@
     }
 </script>
 <main class="mx-auto max-w-2xl px-4 py-8 text-white">
-    <h1 class="mb-3 text-2xl">{t('player.safety')}</h1>
+    <PlaybackSettings />
+    <h2 class="mb-3 text-2xl">{t('player.safety')}</h2>
     <p class="mb-6 text-sm text-neutral-400">{t('player.safety_hint')}</p>
     {#if loaded}
         <form onsubmit={save} class="flex flex-col gap-4">

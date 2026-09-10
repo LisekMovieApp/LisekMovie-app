@@ -23,7 +23,7 @@ export default defineConfig({
 		// the two behind one origin instead — see the deployment notes
 		// planned for the packaging phase.
 		proxy: {
-			'/api': 'http://localhost:8080'
+			'/api': { target: 'http://localhost:8080', ws: true }
 		}
 	},
 	test: {

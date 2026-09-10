@@ -30,12 +30,12 @@
     <form onsubmit={create} class="mb-8 flex flex-col gap-4 rounded-lg bg-surface p-5">
         <label>{t('notifications.name')}<input class="mt-1 w-full rounded bg-base p-3" required maxlength="128" bind:value={name} /></label>
         <label>{t('notifications.url')}<input class="mt-1 w-full rounded bg-base p-3" type="url" required maxlength="2048" bind:value={url} /></label>
-        <label>{t('notifications.destination')}<select class="mt-1 w-full rounded bg-base p-3" bind:value={destination}><option value="generic_json">JSON</option><option value="discord">Discord</option><option value="slack">Slack</option></select></label>
+        <label>{t('notifications.destination')}<select class="mt-1 w-full rounded bg-base p-3" bind:value={destination}><option value="generic_json">{t('notifications.formats.generic_json')}</option><option value="discord">{t('notifications.formats.discord')}</option><option value="slack">{t('notifications.formats.slack')}</option></select></label>
         <label class="flex gap-3"><input type="checkbox" bind:checked={enabled} />{t('notifications.enabled')}</label>
         <button disabled={busy} class="rounded bg-gold px-4 py-3 text-black disabled:opacity-50">{t('notifications.add')}</button>
     </form>
     {#each endpoints as endpoint}
-        <div class="mb-3 flex items-center justify-between gap-3 rounded border border-white/10 p-4"><span>{endpoint.name} · {endpoint.destination_type} · {t(endpoint.enabled ? 'notifications.active' : 'notifications.inactive')}</span><button disabled={busy} class="rounded border border-white/20 px-3 py-2" onclick={() => remove(endpoint.id)}>{t('notifications.remove')}</button></div>
+        <div class="mb-3 flex items-center justify-between gap-3 rounded border border-white/10 p-4"><span>{endpoint.name} · {t(`notifications.formats.${endpoint.destination_type}`)} · {t(endpoint.enabled ? 'notifications.active' : 'notifications.inactive')}</span><button disabled={busy} class="rounded border border-white/20 px-3 py-2" onclick={() => remove(endpoint.id)}>{t('notifications.remove')}</button></div>
     {/each}
     <h2 class="mt-8 mb-3 text-xl">{t('notifications.deliveries')}</h2>
     <button class="mb-4 rounded border border-white/20 px-3 py-2" onclick={() => load().catch(() => (failed = true))}>{t('notifications.refresh')}</button>

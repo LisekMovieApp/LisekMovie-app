@@ -7,7 +7,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { t, setLocale, getLocale, setLocaleCookie, type Locale } from '$lib/i18n';
+	import { t, setLocale, getLocale, setLocaleCookie, SUPPORTED_LOCALES, type Locale } from '$lib/i18n';
 	import { setSessionCookie } from '$lib/auth';
 	import logoText from '$lib/assets/logo_text.svg';
 
@@ -198,26 +198,13 @@
 				</h1>
 				<p class="mb-6 text-sm text-neutral-400">{t('setup.step_language_subtitle')}</p>
 
-				<div class="flex flex-col gap-3">
-					<button
-						type="button"
-						class="rounded-md border px-4 py-3 text-left transition-colors {uiLanguage === 'pl'
-							? 'border-gold bg-gold/10 text-gold'
-							: 'border-neutral-700 text-neutral-200 hover:border-gold-dim'}"
-						onclick={() => selectLanguage('pl')}
-					>
-						Polski
-					</button>
-					<button
-						type="button"
-						class="rounded-md border px-4 py-3 text-left transition-colors {uiLanguage === 'en'
-							? 'border-gold bg-gold/10 text-gold'
-							: 'border-neutral-700 text-neutral-200 hover:border-gold-dim'}"
-						onclick={() => selectLanguage('en')}
-					>
-						English
-					</button>
-				</div>
+                <div class="flex flex-col gap-3">
+                    {#each SUPPORTED_LOCALES as locale}
+                        <button type="button"
+                            class="rounded-md border px-4 py-3 text-left transition-colors {uiLanguage === locale ? 'border-gold bg-gold/10 text-gold' : 'border-neutral-700 text-neutral-200 hover:border-gold-dim'}"
+                            onclick={() => selectLanguage(locale)}>{t(`languages.${locale}`)}</button>
+                    {/each}
+                </div>
 
 				<button
 					type="button"

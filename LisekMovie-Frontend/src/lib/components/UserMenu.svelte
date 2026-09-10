@@ -5,6 +5,8 @@
   that the navbar is the permanent home for account controls.
 -->
 <script lang="ts">
+	import BrowserNotifications from './BrowserNotifications.svelte';
+	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { t } from '$lib/i18n';
@@ -66,14 +68,16 @@
 		{initial}
 	</button>
 
-	{#if open}
 		<div
-			class="absolute right-0 mt-2 w-48 rounded-md border border-white/10 bg-surface p-3 shadow-lg"
+			hidden={!open}
+			class="absolute right-0 mt-2 w-64 rounded-md border border-white/10 bg-surface p-3 shadow-lg"
 		>
 			<p class="truncate px-1 pb-2 text-sm text-neutral-300">
 				{t('auth.logged_in_as', { username })}
 			</p>
-			{#if isAdmin}
+			{#key page.data.user?.id}<BrowserNotifications userId={page.data.user?.id ?? username} />{/key}
+            <a href={resolve('/change-password')} class="mb-2 block rounded border border-neutral-700 px-3 py-2 text-sm">{t('auth.change_password')}</a>
+            {#if isAdmin}
 				<a
 					href={resolve('/admin/plugins')}
 					class="mb-1.5 block w-full rounded-md border border-neutral-700 px-3 py-1.5 text-left text-sm text-neutral-200 transition-colors hover:border-gold-dim"
@@ -90,5 +94,4 @@
 				{loggingOut ? t('auth.logging_out') : t('auth.log_out')}
 			</button>
 		</div>
-	{/if}
 </div>

@@ -1,0 +1,2 @@
+ALTER TABLE users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN disabled BOOLEAN NOT NULL DEFAULT false;

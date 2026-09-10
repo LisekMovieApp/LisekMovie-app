@@ -6,17 +6,17 @@
 // third planned language (see the roadmap), but its UI strings haven't been
 // written and reviewed yet — shipping a machine-translated stub would look
 // like a finished, wrong translation rather than a missing one. Adding it
-// later is just a new `cs.json` plus one entry in `SUPPORTED_LOCALES`.
+// later is just a new `cs.json` plus one import and an entry in `dictionaries`.
 
 import en from './en.json';
 import pl from './pl.json';
 
-export type Locale = 'en' | 'pl';
+const dictionaries = { en, pl };
+export type Locale = keyof typeof dictionaries;
 
-export const SUPPORTED_LOCALES: Locale[] = ['en', 'pl'];
+export const SUPPORTED_LOCALES = Object.keys(dictionaries) as Locale[];
 export const DEFAULT_LOCALE: Locale = 'en';
 
-const dictionaries: Record<Locale, unknown> = { en, pl };
 
 function lookup(dictionary: unknown, path: string[]): string | undefined {
 	let node: unknown = dictionary;

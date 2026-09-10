@@ -8,12 +8,14 @@
 
 mod admin;
 mod auth;
+mod users;
 mod background_refresh;
 mod env_file;
 mod media;
 mod playback;
 mod games;
 mod notifications;
+mod browser_notifications;
 mod openapi;
 mod metadata_enrichment;
 mod provider_registry;
@@ -101,6 +103,10 @@ async fn main() {
         .route("/api/status", get(setup::status))
         .route("/api/setup/database/test", post(setup::test_database))
         .route("/api/setup/finish", post(setup::finish))
+        .route("/api/admin/users", get(users::list).post(users::create))
+        .route("/api/admin/users/{id}", put(users::edit))
+        .route("/api/admin/users/{id}/password", post(users::reset))
+        .route("/api/auth/password", post(users::change))
         .route("/api/auth/login", post(auth::login));
 
     // PROTECTED ROUTES — every handler here takes `auth::AuthUser` as a
@@ -110,6 +116,7 @@ async fn main() {
     // to this group, not `public_routes`.
     let protected_routes = Router::new()
         .route("/api/auth/me", get(auth::me))
+        .route("/api/notifications/socket", get(browser_notifications::socket))
         .route("/api/admin/webhooks", get(notifications::list).post(notifications::create))
         .route("/api/admin/webhooks/{id}", delete(notifications::delete))
         .route("/api/admin/webhooks/deliveries", get(notifications::deliveries))
@@ -119,10 +126,13 @@ async fn main() {
         .route("/api/games/{key}/scores", post(games::save))
         .route("/api/games/{key}/leaderboard", get(games::leaderboard))
         .route("/api/media/{item_id}/playback", post(playback::start))
+        .route("/api/playback/{session_id}", delete(playback::stop))
         .route("/api/playback/{session_id}/progress", put(playback::progress))
         .route("/api/media/{item_id}/state", get(playback::media_state).put(playback::set_flags))
         .route("/api/me/list", get(playback::my_list))
         .route("/api/admin/stats/users", get(playback::stats))
+        .route("/api/admin/playback/settings", get(playback::settings).put(playback::set_settings))
+        .route("/api/admin/playback/capabilities", post(playback::capabilities))
         .route("/api/admin/playback/safety", get(playback::safety).put(playback::set_safety))
         .route("/api/auth/logout", post(auth::logout))
         // Admin-only in practice, not in routing: every handler in
@@ -220,7 +230,7 @@ async fn main() {
         listener.local_addr().unwrap()
     );
 
-    axum::serve(listener, app).await.expect("server error");
+    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.expect("server error");
 }
 
 /// Looks for a previously saved `DATABASE_URL` and tries to connect. No

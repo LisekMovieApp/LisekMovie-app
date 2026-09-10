@@ -41,3 +41,15 @@ pub async fn deliveries(pool:&PgPool)->Result<serde_json::Value,DbError>{
     let (rows,):(serde_json::Value,)=sqlx::query_as("SELECT COALESCE(jsonb_agg(r),'[]'::jsonb) FROM (SELECT d.id,e.name,d.event_type,d.status,d.attempt_count,d.response_code,d.created_at,(SELECT COALESCE(jsonb_agg(a ORDER BY a.attempted_at),'[]'::jsonb) FROM webhook_delivery_attempts a WHERE a.delivery_id=d.id) AS attempts FROM webhook_deliveries d JOIN webhook_endpoints e ON e.id=d.endpoint_id ORDER BY d.created_at DESC LIMIT 100) r").fetch_one(pool).await?;
     Ok(rows)
 }
+
+
+#[derive(serde::Serialize,sqlx::FromRow)]
+pub struct BrowserEvent { pub event_id:i64, pub item_id:uuid::Uuid, pub title:String }
+pub async fn browser_events(pool:&PgPool,since:chrono::DateTime<chrono::Utc>)->Result<Vec<BrowserEvent>,DbError>{
+    Ok(sqlx::query_as("SELECT e.id AS event_id,e.item_id,m.title FROM browser_notification_events e JOIN media_items m ON m.id=e.item_id WHERE e.created_at >= $1 AND e.created_at > now()-interval '5 minutes' ORDER BY e.id DESC LIMIT 1000")
+        .bind(since).fetch_all(pool).await?.into_iter().rev().collect())
+}
+pub async fn prune_browser_events(pool:&PgPool)->Result<(),DbError>{
+    sqlx::query("DELETE FROM browser_notification_events WHERE created_at < now()-interval '1 day'").execute(pool).await?;
+    Ok(())
+}

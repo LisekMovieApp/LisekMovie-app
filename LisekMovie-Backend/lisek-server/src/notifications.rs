@@ -31,8 +31,10 @@ pub async fn deliveries(auth:AuthUser,State(state):State<SharedState>)->Result<J
     admin(&auth)?;Ok(Json(db::deliveries(&pool(&state).await?).await?))
 }
 pub async fn run(state:SharedState){
+    let mut last_prune=std::time::Instant::now()-std::time::Duration::from_secs(3600);
     loop{
         if let Some(pool)=state.pool().await{
+            if last_prune.elapsed().as_secs()>=3600 { let _=db::prune_browser_events(&pool).await; last_prune=std::time::Instant::now(); }
             match db::claim(&pool).await{
                 Ok(Some(delivery))=>{
                     let result=lisek_notifications::deliver(&delivery.url,&delivery.destination_type,&delivery.payload).await;

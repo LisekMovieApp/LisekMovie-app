@@ -42,7 +42,7 @@
   has confirmed one — which also means it's naturally absent on /setup and
   /login, with no route-based check needed here.
 -->
-{#if data.user}
+{#if data.user && !data.user.must_change_password}
 	<Navbar username={data.user.username} isAdmin={data.user.is_admin} />
 {/if}
 {@render children()}

@@ -26,7 +26,7 @@ export async function api<T>(token: string, path: string, method = 'GET', body?:
         method,
         headers: { ...buildAuthHeader(token), 'Content-Type': 'application/json' },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        keepalive: method === 'PUT'
+        keepalive: method === 'PUT' || method === 'DELETE'
     });
     if (!response.ok) throw new Error(`Request failed: ${response.status}`);
     return response.status === 204 ? undefined as T : await response.json() as T;
@@ -42,4 +42,8 @@ export function saveProgress(token: string, sessionId: string, position: number,
         paused,
         ended
     });
+}
+
+export function stopPlayback(token: string, sessionId: string) {
+    return api<void>(token, `/api/playback/${encodeURIComponent(sessionId)}`, 'DELETE');
 }

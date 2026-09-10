@@ -19,6 +19,8 @@ export interface AuthUser {
 	id: string;
 	username: string;
 	is_admin: boolean;
+	must_change_password: boolean;
+	disabled: boolean;
 	ui_language: string;
 	email: string | null;
 	created_at: string;
@@ -56,6 +58,9 @@ export const load: LayoutLoad = async ({ fetch, url, data }) => {
 
 		if (!user && url.pathname !== '/login') {
 			redirect(307, '/login');
+		}
+		if (user?.must_change_password && url.pathname !== '/change-password') {
+			redirect(307, '/change-password');
 		}
 		if (user && url.pathname === '/login') {
 			redirect(307, '/');

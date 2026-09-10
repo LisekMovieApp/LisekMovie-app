@@ -4,7 +4,7 @@
     import { resolve } from '$app/paths';
     import { t } from '$lib/i18n';
     import { getSessionCookieClientSide } from '$lib/auth';
-    import { startPlayback, saveProgress, type PlaybackSession } from '$lib/playback/api';
+    import { startPlayback, saveProgress, stopPlayback, type PlaybackSession } from '$lib/playback/api';
 
     let compatible = $state(false);
     let session = $state<PlaybackSession | null>(null);
@@ -26,17 +26,22 @@
         loading = true;
         saveFailed = false;
         const send = (ended = false) => {
-            if (!current || !video) return;
-            const { currentTime, duration, paused } = video;
+            if (!current) return;
+            const { currentTime = 0, duration = 0, paused = true } = video ?? {};
             const sessionId = current.session_id;
-            queue = queue.catch(() => {}).then(() => saveProgress(token ?? '', sessionId, currentTime + (current?.time_offset_seconds ?? 0), current?.duration_seconds ?? duration, paused, ended))
+            const offset = current.time_offset_seconds;
+            const total = current.duration_seconds ?? duration;
+            queue = queue.catch(() => {}).then(async () => {
+                try { await saveProgress(token ?? '', sessionId, currentTime + offset, total, paused, ended); }
+                finally { if (ended) await stopPlayback(token ?? '', sessionId); }
+            })
                 .then(() => { if (active) saveFailed = false; })
                 .catch(() => { if (active) saveFailed = true; });
         };
         report = send;
         if (token) {
             startPlayback(token, id, useTranscode).then((result) => {
-                if (!active) return;
+                if (!active) { void stopPlayback(token, result.session_id).catch(() => {}); return; }
                 current = result;
                 session = result;
             }).catch(() => { if (active) failed = true; })
@@ -46,7 +51,7 @@
             failed = true;
         }
         const timer = setInterval(() => send(), 10000);
-        const onPageHide = () => send();
+        const onPageHide = () => send(true);
         window.addEventListener('pagehide', onPageHide);
         return () => {
             send(true);
@@ -94,7 +99,7 @@
             <video bind:this={video} controls playsinline preload="metadata"
                 class="aspect-video w-full rounded-lg bg-black"
                 onloadedmetadata={resume} onplay={() => report()} onpause={() => report()}
-                onended={() => report(true)} onerror={() => (failed = true)}>
+                onended={() => report()} onerror={() => (failed = true)}>
             </video>
             {#if saveFailed}<p role="status" class="mt-3 text-gold">{t('player.save_failed')}</p>{/if}
         {/if}

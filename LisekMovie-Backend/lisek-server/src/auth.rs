@@ -18,7 +18,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{StatusCode, request::Parts};
 use axum::response::{IntoResponse, Response};
-use chrono::Utc;
+
 use serde::{Deserialize, Serialize};
 
 use lisek_core::User;
@@ -55,49 +55,25 @@ pub struct LoginResponse {
 pub async fn login(
     State(state): State<SharedState>,
     Json(req): Json<LoginRequest>,
-) -> Result<Json<LoginResponse>, AuthError> {
+) -> Result<AuthReply, AuthError> {
     let pool = state.pool().await.ok_or(AuthError::ServerNotReady)?;
 
-    let found = lisek_db::find_user_with_password_hash(&pool, &req.username)
-        .await
-        .map_err(|_| AuthError::Internal)?;
-
-    let (user, password_ok) = match found {
-        Some((user, password_hash)) => {
-            let ok = lisek_auth::verify_password(&req.password, &password_hash).unwrap_or(false);
-            (Some(user), ok)
-        }
-        None => {
-            // Same Argon2 cost as a real check, spent on a hash that can
-            // never match — see DUMMY_PASSWORD_HASH's doc comment.
-            let _ = lisek_auth::verify_password(&req.password, DUMMY_PASSWORD_HASH);
-            (None, false)
-        }
-    };
-
-    let Some(user) = user.filter(|_| password_ok) else {
-        return Err(AuthError::InvalidCredentials);
-    };
-
-    let token = lisek_auth::generate_session_token();
-    let token_hash = lisek_auth::hash_session_token(&token);
-    let expires_at = Utc::now() + lisek_auth::SESSION_TTL;
-
-    lisek_db::create_session(
-        &pool,
-        user.id,
-        &token_hash,
-        req.client.as_deref().unwrap_or("unknown"),
-        req.device.as_deref().unwrap_or("unknown"),
-        req.device_id.as_deref().unwrap_or("unknown"),
-        expires_at,
-    )
-    .await
-    .map_err(|_| AuthError::Internal)?;
+    if req.password.len()>1024 || req.username.len()>128 || req.username.trim().is_empty() { return Err(AuthError::InvalidCredentials); }
+    let found = lisek_db::find_user_with_password_hash(&pool, req.username.trim()).await.map_err(|_| AuthError::Internal)?;
+    let expected_hash = found.as_ref().map(|(_,hash)|hash.clone()).unwrap_or_else(||DUMMY_PASSWORD_HASH.to_owned());
+    let check_hash=expected_hash.clone();
+    let password=req.password;
+    let password_ok=tokio::task::spawn_blocking(move ||lisek_auth::verify_password(&password,&check_hash).unwrap_or(false)).await.map_err(|_|AuthError::Internal)?;
+    let Some((user,_))=found.filter(|(u,_)|password_ok && !u.disabled) else { return Err(AuthError::InvalidCredentials); };
+    let token=lisek_auth::generate_session_token();
+    let created=lisek_db::users::login_session(&pool,user.id,&expected_hash,&lisek_auth::hash_session_token(&token),
+        req.client.as_deref().unwrap_or("unknown"),req.device.as_deref().unwrap_or("unknown"),req.device_id.as_deref().unwrap_or("unknown"))
+        .await.map_err(|_|AuthError::Internal)?;
+    if !created{return Err(AuthError::InvalidCredentials);}
 
     tracing::info!(username = %user.username, "user logged in");
 
-    Ok(Json(LoginResponse { token, user }))
+    Ok(no_store(LoginResponse { token, user }))
 }
 
 #[utoipa::path(get,path="/api/auth/me",tag="auth",responses((status=200,body=User),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
@@ -154,6 +130,9 @@ impl axum::extract::FromRequestParts<SharedState> for AuthUser {
             .map_err(|_| AuthError::Internal)?
             .ok_or(AuthError::InvalidToken)?;
 
+        if user.must_change_password && !matches!(parts.uri.path(),"/api/auth/me"|"/api/auth/logout"|"/api/auth/password") {
+            return Err(AuthError::PasswordChangeRequired);
+        }
         Ok(AuthUser { user, token_hash })
     }
 }
@@ -205,6 +184,7 @@ fn is_image_path(path: &str) -> bool {
 
 #[derive(Debug)]
 pub enum AuthError {
+    PasswordChangeRequired,
     MissingToken,
     InvalidToken,
     InvalidCredentials,
@@ -221,6 +201,7 @@ struct AuthErrorBody {
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
         let (status, error_code, message) = match self {
+            AuthError::PasswordChangeRequired => (StatusCode::FORBIDDEN,"password_change_required","Set your own password before using the application."),
             AuthError::MissingToken => (
                 StatusCode::UNAUTHORIZED,
                 "missing_token",
@@ -315,3 +296,7 @@ mod tests {
         assert_eq!(token_from_query(Some("token=")), None);
     }
 }
+
+
+pub type AuthReply = ([(axum::http::HeaderName,&'static str);1],Json<LoginResponse>);
+pub fn no_store(body:LoginResponse)->AuthReply { ([(axum::http::header::CACHE_CONTROL,"no-store")],Json(body)) }

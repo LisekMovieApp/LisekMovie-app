@@ -48,9 +48,9 @@
 				return;
 			}
 
-			const { token } = (await response.json()) as { token: string };
+			const { token, user } = (await response.json()) as { token: string; user: { must_change_password: boolean } };
 			setSessionCookie(token);
-			await goto(resolve('/'), { invalidateAll: true });
+			await goto(user.must_change_password ? resolve('/change-password') : resolve('/'), { invalidateAll: true });
 		} catch {
 			errorCode = 'network_error';
 			signingIn = false;

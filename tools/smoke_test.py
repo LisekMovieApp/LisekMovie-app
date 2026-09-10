@@ -18,6 +18,7 @@ import urllib.parse
 import urllib.request
 import uuid
 import threading
+import queue
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 def main():
@@ -27,6 +28,7 @@ def main():
     parser.add_argument("--database-url", required=True)
     parser.add_argument("--ffmpeg")
     parser.add_argument("--ffprobe")
+    parser.add_argument("--node")
     args = parser.parse_args()
     database = "lisek_smoke_" + uuid.uuid4().hex
     admin_url = urllib.parse.urlsplit(args.database_url)
@@ -51,7 +53,7 @@ def main():
             movie_path=media / "Test Movie (2024).mp4"
             content = bytes(range(256)) * 100
             if args.ffmpeg:
-                subprocess.run([args.ffmpeg,"-v","error","-f","lavfi","-i","testsrc=size=320x180:rate=24","-t","8","-c:v","libx264","-pix_fmt","yuv420p",str(movie_path)],check=True)
+                subprocess.run([args.ffmpeg,"-v","error","-f","lavfi","-i","testsrc2=size=640x360:rate=24","-t","8","-c:v","libx264","-pix_fmt","yuv420p",str(movie_path)],check=True)
                 content=movie_path.read_bytes()
             else:
                 movie_path.write_bytes(content)
@@ -130,6 +132,27 @@ def main():
             spec = ok_json("/api/openapi.json")
             assert "/api/auth/login" in spec["paths"]
             assert "/api/media/{item_id}/playback" in spec["paths"]
+            settings=ok_json('/api/admin/playback/settings',token=token)
+            assert settings['min_resume_percentage']==5 and settings['max_resume_percentage']==90 and settings['min_resume_duration_seconds']==300
+            invalid=dict(settings,min_resume_percentage=95)
+            assert request('/api/admin/playback/settings','PUT',invalid,token)[0]==400
+            settings['min_resume_duration_seconds']=0
+            settings['encoding_threads']=2
+            ok_json('/api/admin/playback/settings','PUT',settings,token)
+            assert ok_json('/api/admin/playback/settings',token=token)==settings
+            if args.ffmpeg:
+                caps=ok_json('/api/admin/playback/capabilities','POST',settings,token)
+                assert caps['ffmpeg_path']==str(Path(args.ffmpeg).resolve())
+                assert 'ffmpeg version' in caps['version']
+            notification_queue=queue.Queue()
+            if args.node:
+                probe=subprocess.Popen([args.node,str(Path(__file__).with_name('notification_probe.mjs').resolve())],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+                cleanup.callback(stop_server,probe)
+                probe.stdin.write(json.dumps({'base':base,'token':token})+'\n');probe.stdin.flush()
+                def collect():
+                    for line in probe.stdout: notification_queue.put(json.loads(line))
+                threading.Thread(target=collect,daemon=True).start()
+                assert notification_queue.get(timeout=15)['type']=='ready'
             sql("UPDATE provider_config SET enabled=false")
             ok_json('/api/admin/webhooks','POST',{'name':'Local test','url':f'http://127.0.0.1:{target.server_port}/notify','destination_type':'generic_json','enabled':True,'subscribed_events':['item_added']},token)
             library = ok_json("/api/admin/libraries", "POST", {"name":"Smoke","library_type":"movies",
@@ -138,6 +161,9 @@ def main():
             ok_json(f"/api/admin/libraries/{library_id}/scan", "POST", {}, token)
             item_id = sql("SELECT id FROM media_items LIMIT 1")
             assert item_id
+            if args.node:
+                event=notification_queue.get(timeout=15)
+                assert event['type']=='library_changed' and event['items'][0]['item_id']==item_id,event
             session = ok_json(f"/api/media/{item_id}/playback", "POST", {}, token)
             sid = session["session_id"]
             status, body, headers = request(session["stream_url"],headers={"Range":"bytes=10-19"})
@@ -158,6 +184,14 @@ def main():
             sql(f"UPDATE playback_sessions SET last_heartbeat_at=now()-interval '25 seconds' WHERE id='{sid}'")
             ok_json(f"/api/playback/{sid}/progress","PUT",progress,token)
             assert abs(float(sql(f"SELECT watched_seconds FROM playback_sessions WHERE id='{sid}'"))-viewed)<.001
+            # Resume policy boundaries are applied by the real persistence path.
+            for position,expected,watched in [(4,0,False),(5,5,False),(90,90,False),(91,0,True)]:
+                ok_json(f"/api/media/{item_id}/state","PUT",{"watched":False},token)
+                ok_json(f"/api/playback/{sid}/progress","PUT",dict(progress,position_seconds=position),token)
+                state=ok_json(f"/api/media/{item_id}/state",token=token)
+                assert state['position_seconds']==expected and state['watched']==watched,state
+            ok_json(f"/api/media/{item_id}/state","PUT",{"watched":False},token)
+            ok_json(f"/api/playback/{sid}/progress","PUT",progress,token)
             resumed = ok_json(f"/api/media/{item_id}/playback","POST",{},token)
             assert resumed["position_seconds"] == 50
             ok_json(f"/api/media/{item_id}/state","PUT",{"favorite":True},token)
@@ -182,6 +216,28 @@ def main():
                 assert status==200 and len(segment_body)>188
                 ok_json(f"/api/playback/{converted['session_id']}/progress",'PUT',{'position_seconds':1,'duration_seconds':8,'paused':True,'ended':True},token)
                 assert request(segment_url)[0]==401
+                # Trusted reverse proxy detects the remote address; direct URLs cannot bypass the cap.
+                settings['streaming_bitrate_limit_mbps']=0.25
+                settings['trusted_proxies']=['127.0.0.1/32']
+                ok_json('/api/admin/playback/settings','PUT',settings,token)
+                remote_headers={'X-Forwarded-For':'8.8.8.8'}
+                assert request(resumed['stream_url'],headers=remote_headers)[0]==403
+                status,body,_=request(f'/api/media/{item_id}/playback','POST',{},token,remote_headers)
+                assert status==200,(status,body)
+                remote=json.loads(body)
+                assert remote['mode']=='transcode',remote
+                assert request(remote['stream_url'],headers=remote_headers)[0]==200
+                ok_json(f"/api/playback/{remote['session_id']}/progress",'PUT',{'position_seconds':0,'duration_seconds':8,'paused':True,'ended':True},token)
+                settings['streaming_bitrate_limit_mbps']=None
+                ok_json('/api/admin/playback/settings','PUT',settings,token)
+                if caps['nvenc_available']:
+                    settings['hardware_acceleration']='nvenc'
+                    ok_json('/api/admin/playback/settings','PUT',settings,token)
+                    hardware=ok_json(f'/api/media/{item_id}/playback?transcode=true','POST',{},token)
+                    assert request(hardware['stream_url'])[0]==200
+                    ok_json(f"/api/playback/{hardware['session_id']}/progress",'PUT',{'position_seconds':0,'duration_seconds':8,'paused':True,'ended':True},token)
+                    settings['hardware_acceleration']='none'
+                    ok_json('/api/admin/playback/settings','PUT',settings,token)
                 ok_json('/api/admin/playback/safety','PUT',{'enabled':True,'max_width':100,'max_height':100,'max_bitrate_kbps':None},token)
                 assert request(f'/api/media/{item_id}/playback?transcode=true','POST',{},token)[0]==403
                 assert sql('SELECT count(*) FROM transcode_kills')=='1'
@@ -194,6 +250,8 @@ def main():
                 time.sleep(.1)
             assert sql("SELECT count(*) FROM webhook_delivery_attempts")=='2'
             assert sql("SELECT status FROM webhook_deliveries LIMIT 1")=='delivered'
+            from accounts_smoke import check_accounts
+            check_accounts(request,ok_json,sql,token,config['admin_username'],item_id)
             # A second account cannot mutate another account's playback or reach admin APIs.
             other_id=sql("INSERT INTO users(username,password_hash) VALUES ('other','unused') RETURNING id")
             import hashlib,base64
@@ -201,16 +259,23 @@ def main():
             other_hash=base64.urlsafe_b64encode(hashlib.sha256(other_token.encode()).digest()).decode().rstrip("=")
             sql(f"INSERT INTO sessions(user_id,token_hash,expires_at) VALUES ('{other_id}','{other_hash}',now()+interval '1 hour')")
             assert request(f"/api/playback/{sid}/progress","PUT",progress,other_token)[0] == 404
+            assert request(f"/api/playback/{sid}","DELETE",token=other_token)[0]==404
+            unloaded=ok_json(f"/api/media/{item_id}/playback","POST",{},token)
+            ok_json(f"/api/playback/{unloaded['session_id']}","DELETE",token=token)
+            assert request(unloaded['stream_url'])[0]==401
             assert request("/api/admin/stats/users",token=other_token)[0] == 403
+            assert request('/api/admin/playback/settings',token=other_token)[0]==403
+            assert request('/api/admin/playback/settings','PUT',settings,other_token)[0]==403
             assert ok_json("/api/me/list",token=other_token) == []
             ok_json("/api/auth/logout","POST",{},token)
+            if args.node: assert notification_queue.get(timeout=15)['type']=='closed'
             assert request(resumed["stream_url"])[0] == 401
             assert request("/api/auth/me",token=token)[0] == 401
             server.terminate()
             server.wait(timeout=10)
             log.close()
             server = None
-            print("PASS: migrations, concurrent setup, auth, scan, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, optional FFmpeg/HLS")
+            print("PASS: migrations, concurrent setup, auth, scan, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, browser notifications")
     finally:
         if server:
             server.terminate()

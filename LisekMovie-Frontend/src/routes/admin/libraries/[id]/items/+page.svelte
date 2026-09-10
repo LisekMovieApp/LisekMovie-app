@@ -111,7 +111,7 @@
 								</span>
 								{#if item.season !== null && item.episode !== null}
 									<span class="shrink-0 text-xs text-neutral-500">
-										S{item.season}E{item.episode}
+										{t('admin.episode_code', { season: item.season ?? '', episode: item.episode ?? '' })}
 									</span>
 								{/if}
 								{#if item.metadata_locked}

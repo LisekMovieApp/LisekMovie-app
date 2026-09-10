@@ -14,6 +14,7 @@
 	let { children } = $props();
 
 	const tabs = [
+        { href: '/admin/users', labelKey: 'admin.tab_users' },
 		{ href: '/admin/plugins', labelKey: 'admin.tab_plugins' },
 		{ href: '/admin/stats', labelKey: 'player.stats' },
         { href: '/admin/playback', labelKey: 'player.safety' },

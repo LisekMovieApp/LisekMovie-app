@@ -30,7 +30,7 @@ export function getLocale(): Locale {
 }
 
 /**
- * Translation helper for use inside `.svelte` components: `t('setup.next')`.
+ * Translation helper for use inside `.svelte` components: `t('common.next')`.
  * Reads the reactive locale, so any expression using it re-renders when
  * `setLocale` changes it.
  */
