@@ -25,6 +25,55 @@ Most self-hosted media servers carry a decade of accumulated technical debt. Lis
 | Frontend | [SvelteKit](https://kit.svelte.dev/) + TypeScript + [Tailwind CSS](https://tailwindcss.com/) |
 | Transcoding | [FFmpeg](https://ffmpeg.org/) |
 
+## Development Setup
+
+Getting the project up and running locally is simple, even if you are a beginner! We use [Bun](https://bun.sh) to manage our web dependencies and run scripts.
+
+### 1. Install Prerequisites
+
+**Install Bun:**
+Open your terminal and run the following command to install Bun:
+
+- **macOS and Linux:**
+  ```bash
+  curl -fsSL https://bun.sh/install | bash
+  ```
+- **Windows:**
+  ```powershell
+  powershell -c "irm bun.sh/install.ps1 | iex"
+  ```
+*(After installing, you might need to close and reopen your terminal so it recognizes the `bun` command).*
+
+**Install Rust:**
+Since the core server is built in Rust, you'll also need the Rust toolchain. Run:
+- **macOS and Linux:**
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  ```
+- **Windows:** Download and run the `rustup-init.exe` from [rustup.rs](https://rustup.rs/).
+
+### 2. Run the Project
+
+1. **Clone the repository and go to the project folder:**
+   ```bash
+   git clone https://github.com/your-username/LisekMovie.git
+   cd LisekMovie
+   ```
+
+2. **Install dependencies:**
+   Use Bun to install all necessary packages in one go:
+   ```bash
+   bun install
+   ```
+
+3. **Start the development server:**
+   Run the following command to start both the backend and frontend at the same time:
+   ```bash
+   bun run dev
+   ```
+
+That's it! The terminal will display the local addresses where you can view the app in your browser.
+
 ## Repository layout
 
 ```
