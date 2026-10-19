@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT e.season_number, e.media_item_id, e.episode_number, e.end_episode_number\n        FROM episodes e\n        WHERE e.series_id = (SELECT series_id FROM episodes WHERE media_item_id = $1)\n        ORDER BY e.season_number, e.episode_number, e.media_item_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "season_number",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "episodes",
+            "name": "season_number"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "media_item_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "episodes",
+            "name": "media_item_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "episode_number",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "episodes",
+            "name": "episode_number"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "end_episode_number",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "episodes",
+            "name": "end_episode_number"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "64b0c303c09b14632435f1f5348bf36a06eb3cf1e1aa49665e2caade0d9630ad"
+}

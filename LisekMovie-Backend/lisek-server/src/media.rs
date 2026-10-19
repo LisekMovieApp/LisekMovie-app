@@ -15,7 +15,7 @@
 //! As of Faza 5 round 2, an item's image doesn't always live in the local
 //! `config_dir` cache — a library with `save_metadata_in_media_folder`
 //! turned on has it written directly next to the video file instead (see
-//! `metadata_enrichment::enrich_item`). [`serve_item_image`] tries that
+//! `metadata_enrichment::enrich_item_cached`). [`serve_item_image`] tries that
 //! media-folder copy first (looking the item's `file_path` up fresh on
 //! every request, rather than trusting a value cached at scan time — an
 //! admin can toggle the setting or move files between scans) and only
@@ -24,6 +24,7 @@
 //! turned off, or a fallback-flagged item whose image only ever made it
 //! into the cache in the first place.
 
+use std::collections::HashMap;
 use std::path::{Path as FsPath, PathBuf};
 
 use axum::Json;
@@ -97,25 +98,21 @@ impl From<lisek_core::MediaItem> for MediaItemResponse {
     }
 }
 
-/// [`MediaItemResponse::from`] plus this item's "new" badge, if any — a
-/// separate async step because a `"series"` row's badge needs its own
-/// database round trip (see `lisek_db::classify_series_badge`), which a
-/// plain `From` impl can't do; a `"movie"` row's badge is decided purely
-/// from data already in hand ([`is_recently_added`]), but is computed here
-/// too rather than in the `From` impl, so both badge kinds live in exactly
-/// one place instead of splitting "when does a card get a badge" across two
-/// call sites. Used for every item the home feed hands back, and (Runda 9)
-/// every item a `/library/[id]` grid hands back; [`media_item_detail`]
-/// deliberately skips this and uses the plain `From` conversion instead
-/// (see [`MediaItemResponse::badge`]'s own doc comment for why).
-async fn to_response(pool: &lisek_db::PgPool, item: lisek_core::MediaItem) -> MediaItemResponse {
+/// [`MediaItemResponse::from`] plus this item's "new" badge, if any. A
+/// movie's badge comes from data in hand ([`is_recently_added`]); a
+/// series' badge is looked up from `series_badges`, which
+/// [`to_responses`] fills with one query for the whole list (previously
+/// one query per card). Used for every item the home feed and the
+/// `/library/[id]` grid hand back; [`media_item_detail`] deliberately skips
+/// it (see [`MediaItemResponse::badge`]'s own doc comment for why).
+fn to_response(
+    item: lisek_core::MediaItem,
+    series_badges: &HashMap<Uuid, lisek_db::SeriesBadge>,
+    now: DateTime<Utc>,
+) -> MediaItemResponse {
     let badge = match item.item_type.as_str() {
-        "series" => lisek_db::classify_series_badge(pool, item.library_id, &item.title)
-            .await
-            .ok()
-            .flatten()
-            .map(|badge| badge.as_str().to_string()),
-        "movie" if is_recently_added(item.created_at, Utc::now()) => Some("new_movie".to_string()),
+        "series" => series_badges.get(&item.id).map(|badge| badge.as_str().to_string()),
+        "movie" if is_recently_added(item.created_at, now) => Some("new_movie".to_string()),
         _ => None,
     };
 
@@ -139,11 +136,20 @@ async fn to_responses(
     pool: &lisek_db::PgPool,
     items: Vec<lisek_core::MediaItem>,
 ) -> Vec<MediaItemResponse> {
-    let mut out = Vec::with_capacity(items.len());
-    for item in items {
-        out.push(to_response(pool, item).await);
-    }
-    out
+    let series: Vec<Uuid> = items
+        .iter()
+        .filter(|item| item.item_type == "series")
+        .map(|item| item.id)
+        .collect();
+    // A badge is decoration: on a database error the cards still render.
+    let badges = lisek_db::classify_series_badges(pool, &series)
+        .await
+        .unwrap_or_default();
+    let now = Utc::now();
+    items
+        .into_iter()
+        .map(|item| to_response(item, &badges, now))
+        .collect()
 }
 
 /// How many cards each row fetches — generous enough to fill and slightly
@@ -175,33 +181,42 @@ pub async fn home_feed(
 ) -> Result<Json<HomeFeedResponse>, MediaError> {
     let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
 
-    let hero = lisek_db::get_hero_item(&pool)
-        .await
-        .map_err(|_| MediaError::Internal)?;
-    let recently_added = lisek_db::list_recently_added(&pool, None, ROW_LIMIT)
-        .await
-        .map_err(|_| MediaError::Internal)?;
-    let top10 = lisek_db::list_top_today(&pool, TOP10_LIMIT)
-        .await
-        .map_err(|_| MediaError::Internal)?;
-    let recommended = lisek_db::list_recommended(&pool, None, ROW_LIMIT)
-        .await
-        .map_err(|_| MediaError::Internal)?;
-    let popular = lisek_db::list_popular(&pool, None, ROW_LIMIT)
-        .await
-        .map_err(|_| MediaError::Internal)?;
+    // Five independent index-backed queries: run them concurrently on
+    // separate pool connections instead of back to back.
+    let (hero, recently_added, top10, recommended, popular) = tokio::try_join!(
+        lisek_db::get_hero_item(&pool),
+        lisek_db::list_recently_added(&pool, None, ROW_LIMIT),
+        lisek_db::list_top_today(&pool, TOP10_LIMIT),
+        lisek_db::list_recommended(&pool, None, ROW_LIMIT),
+        lisek_db::list_popular(&pool, None, ROW_LIMIT),
+    )
+    .map_err(|_| MediaError::Internal)?;
 
-    let hero = match hero {
-        Some(item) => Some(to_response(&pool, item).await),
-        None => None,
-    };
+    // All cards in one list so every series badge is one query.
+    let rows = [
+        usize::from(hero.is_some()),
+        recently_added.len(),
+        top10.len(),
+        recommended.len(),
+        popular.len(),
+    ];
+    let all: Vec<_> = hero
+        .into_iter()
+        .chain(recently_added)
+        .chain(top10)
+        .chain(recommended)
+        .chain(popular)
+        .collect();
+    let mut cards = to_responses(&pool, all).await.into_iter();
+    let mut take = |n: usize| cards.by_ref().take(n).collect::<Vec<_>>();
+    let hero = take(rows[0]).pop();
 
     Ok(Json(HomeFeedResponse {
         hero,
-        recently_added: to_responses(&pool, recently_added).await,
-        top10: to_responses(&pool, top10).await,
-        recommended: to_responses(&pool, recommended).await,
-        popular: to_responses(&pool, popular).await,
+        recently_added: take(rows[1]),
+        top10: take(rows[2]),
+        recommended: take(rows[3]),
+        popular: take(rows[4]),
     }))
 }
 
@@ -273,6 +288,17 @@ pub struct LibraryItemsQuery {
     pub page_size: Option<i64>,
     pub sort: Option<String>,
     pub letter: Option<String>,
+    /// Case-insensitive title substring (trigram-indexed). Blank or longer
+    /// than [`MAX_SEARCH_CHARS`] characters is ignored.
+    pub q: Option<String>,
+}
+
+const MAX_SEARCH_CHARS: usize = 100;
+
+/// `?q=` trimmed; `None` when empty or implausibly long.
+fn parse_search(raw: Option<&str>) -> Option<&str> {
+    let value = raw?.trim();
+    (!value.is_empty() && value.chars().count() <= MAX_SEARCH_CHARS).then_some(value)
 }
 
 /// Parses `?sort=`'s raw value into a [`lisek_db::LibrarySort`]. Unknown or
@@ -330,7 +356,7 @@ pub struct LibraryItemsResponse {
 /// library exists and has nothing in it yet" and "this library doesn't
 /// exist", and the frontend needs to tell those apart to show the right
 /// message.
-#[utoipa::path(get,path="/api/libraries/{library_id}/items",tag="media",params(("library_id"=uuid::Uuid,Path),("page"=Option<i64>,Query),("sort"=Option<String>,Query),("letter"=Option<String>,Query)),responses((status=200,body=LibraryItemsResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
+#[utoipa::path(get,path="/api/libraries/{library_id}/items",tag="media",params(("library_id"=uuid::Uuid,Path),("page"=Option<i64>,Query),("sort"=Option<String>,Query),("letter"=Option<String>,Query),("q"=Option<String>,Query),("page_size"=Option<i64>,Query)),responses((status=200,body=LibraryItemsResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn library_items(
     _auth: AuthUser,
     State(state): State<SharedState>,
@@ -345,21 +371,23 @@ pub async fn library_items(
         .ok_or(MediaError::LibraryNotFound)?;
 
     let sort = parse_library_sort(query.sort.as_deref());
-    let letter = parse_letter_filter(query.letter.as_deref());
+    let filter = lisek_db::LibraryFilter {
+        letter: parse_letter_filter(query.letter.as_deref()),
+        search: parse_search(query.q.as_deref()),
+    };
     let page = query.page.unwrap_or(1).max(1);
     let page_size = query
         .page_size
         .unwrap_or(DEFAULT_LIBRARY_PAGE_SIZE)
         .clamp(1, MAX_LIBRARY_PAGE_SIZE);
-    let offset = (page - 1) * page_size;
+    // Saturating: `?page=` is caller input and must not overflow.
+    let offset = (page - 1).saturating_mul(page_size);
 
-    let total = lisek_db::count_items_by_library(&pool, library_id, letter)
-        .await
-        .map_err(|_| MediaError::Internal)?;
-    let items =
-        lisek_db::list_items_by_library_page(&pool, library_id, sort, letter, page_size, offset)
-            .await
-            .map_err(|_| MediaError::Internal)?;
+    let (total, items) = tokio::try_join!(
+        lisek_db::count_items_by_library(&pool, library_id, filter),
+        lisek_db::list_items_by_library_page(&pool, library_id, sort, filter, page_size, offset),
+    )
+    .map_err(|_| MediaError::Internal)?;
 
     Ok(Json(LibraryItemsResponse {
         library: library.into(),

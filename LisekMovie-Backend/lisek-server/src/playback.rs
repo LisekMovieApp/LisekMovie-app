@@ -80,6 +80,28 @@ async fn checked_file(source: &db::Source) -> Result<std::path::PathBuf, Playbac
     Err(missing())
 }
 
+/// Transcoder facts for `path`. Uses the probe stored by the scanner (or a
+/// previous request) while the file's size and mtime are unchanged;
+/// otherwise runs ffprobe once and stores the result. Direct play with a
+/// remote bitrate limit calls this on every range request, so before this
+/// cache each chunk of a movie spawned its own ffprobe process.
+async fn source_info(pool:&lisek_db::PgPool,item_id:Uuid,path:&std::path::Path,settings:&lisek_core::playback_settings::PlaybackSettings)->Result<lisek_playback::transcode::SourceInfo,String>{
+    use lisek_db::streams::{self, FileStamp};
+    let stamp=tokio::fs::metadata(path).await.ok().map(|m|FileStamp::from_metadata(&m));
+    match streams::stored_probe(pool,item_id).await {
+        Ok(Some((probe,stored))) if !stamp.is_some_and(|s|s.differs_from(&stored)) => {
+            return lisek_playback::transcode::source_info(&probe);
+        }
+        Ok(_) => {}
+        Err(err) => tracing::warn!(%item_id,%err,"cannot read stored probe; probing the file"),
+    }
+    let probe=lisek_playback::transcode::probe_media(path,settings).await?;
+    if let Err(err)=streams::save_probe(pool,item_id,&probe,stamp).await {
+        tracing::warn!(%item_id,%err,"cannot store probe result");
+    }
+    lisek_playback::transcode::source_info(&probe)
+}
+
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct StartResponse {
     pub session_id: Uuid,
@@ -109,7 +131,7 @@ pub async fn start(auth: AuthUser, State(state): State<SharedState>, Path(item_i
         stream_url: format!("/api/playback/{session_id}/stream?ticket={ticket}"),
         position_seconds: position, time_offset_seconds: 0.0, duration_seconds: None, mode: "direct_play".into() };
     if options.transcode || remote_limit.is_some() {
-        let info = match lisek_playback::transcode::probe(&path,&settings).await {
+        let info = match source_info(&pool,item_id,&path,&settings).await {
             Ok(info) => info,
             Err(reason) => { db::end_session(&pool,session_id).await?; tracing::warn!(%reason,"cannot probe video"); return Err(PlaybackError(StatusCode::SERVICE_UNAVAILABLE,"transcode_unavailable")); }
         };
@@ -160,7 +182,7 @@ pub async fn stream(State(state): State<SharedState>, Path(id): Path<Uuid>, Quer
     let settings = db::settings(&pool).await?;
     let address = lisek_core::playback_settings::client_address(peer.ip(), headers.get("x-forwarded-for").and_then(|h|h.to_str().ok()), &settings.trusted_proxies);
     if let Some(limit)=settings.remote_limit_kbps(address) {
-        let info=lisek_playback::transcode::probe(&path,&settings).await.map_err(|_|PlaybackError(StatusCode::SERVICE_UNAVAILABLE,"transcode_unavailable"))?;
+        let info=source_info(&pool,source.id,&path,&settings).await.map_err(|_|PlaybackError(StatusCode::SERVICE_UNAVAILABLE,"transcode_unavailable"))?;
         if info.bitrate_kbps==0 || info.bitrate_kbps>limit { return Err(PlaybackError(StatusCode::FORBIDDEN,"remote_transcode_required")); }
     }
     let mut file = tokio::fs::File::open(&path).await.map_err(|_| PlaybackError(StatusCode::NOT_FOUND,"media_file_unavailable"))?;

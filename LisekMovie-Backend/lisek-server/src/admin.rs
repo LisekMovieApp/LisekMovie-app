@@ -1,8 +1,7 @@
 //! Admin-only endpoints: the metadata provider registry backing the Admin
 //! Panel's plugins tab (enable/disable, priority, and setting/clearing an
-//! API key), plus, as of Faza 5, library management (create/list/delete)
-//! and the scan-trigger endpoint that runs `lisek-library`'s scanner over
-//! one library's root paths and persists the result. Every handler here
+//! API key), plus, as of Faza 5, library management (create/list/delete).
+//! Scans are queued from `scan_jobs.rs` and run by its background worker. Every handler here
 //! takes `AuthUser` and immediately calls `require_admin` — that check (not
 //! a separate role-checking middleware layer) is this module's entire
 //! security boundary, the same way `AuthUser` itself is `auth.rs`'s.
@@ -11,13 +10,11 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use chrono::Datelike;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::auth::AuthUser;
-use crate::metadata_enrichment;
 use crate::state::SharedState;
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -297,144 +294,6 @@ pub async fn move_library(
     Ok(Json(json!({ "ok": true })))
 }
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct ScanSummaryResponse {
-    pub movies_found: usize,
-    pub episodes_found: usize,
-    pub unrecognized: usize,
-    /// How many of the items above matched an enabled, configured metadata
-    /// provider during this scan's enrichment pass. Always `0` when no
-    /// provider is both enabled and has an API key set — see the
-    /// `tracing::warn!` this endpoint emits for that exact case — but a low
-    /// number here can just as well mean a provider that didn't recognize
-    /// some titles, so this is a hint to check the Admin Panel's Plugins
-    /// tab, not on its own proof of a misconfiguration.
-    pub metadata_matched: usize,
-    /// How many items actually got a poster and/or backdrop written to
-    /// disk (media folder or local cache) this scan. Can be lower than
-    /// `metadata_matched` when a provider matched a title but had no image
-    /// for it, or the download/write itself failed — see the per-item
-    /// `tracing::warn!` lines `metadata_enrichment::enrich_item` emits for
-    /// which one happened.
-    pub images_saved: usize,
-}
-
-/// Walks one library's root paths on disk (`lisek-library`'s scanner),
-/// parses every video file found (movie title/year, or series/season/
-/// episode — whichever `library_type` calls for), and upserts the results
-/// into `media_items`. Synchronous from the caller's point of view: a large
-/// library can make this take a while, which is an acceptable Faza 5
-/// simplification (see the roadmap notes on a future background job queue)
-/// rather than something this endpoint tries to solve.
-#[utoipa::path(post,path="/api/admin/libraries/{library_id}/scan",tag="admin",params(("library_id"=uuid::Uuid,Path)),responses((status=200,body=ScanSummaryResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
-pub async fn scan_library(
-    auth: AuthUser,
-    State(state): State<SharedState>,
-    Path(library_id): Path<Uuid>,
-) -> Result<Json<ScanSummaryResponse>, AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
-
-    let library = lisek_db::get_library(&pool, library_id)
-        .await
-        .map_err(map_db_error)?
-        .ok_or(AdminError::LibraryNotFound)?;
-
-    let library_type =
-        lisek_library::LibraryType::from_db_str(&library.library_type).ok_or_else(|| {
-            AdminError::InvalidInput("library has an unrecognized library_type".to_string())
-        })?;
-
-    let now_year = chrono::Utc::now().year();
-    let results = lisek_library::scan_library(&library.root_paths, library_type, now_year);
-    let persisted = lisek_db::persist_scan_results(&pool, library_id, &results)
-        .await
-        .map_err(map_db_error)?;
-
-    // Best-effort metadata enrichment: look up every newly-touched item
-    // against whichever providers are enabled and have a key configured,
-    // in the admin's priority order (see `metadata_enrichment`). Skipped
-    // entirely, with a `warn!` (not silently, and not merely at `debug!` —
-    // this is a common real first-run trap: `tmdb`'s `provider_config` row
-    // is enabled out of the box, but still needs an admin-supplied API key
-    // before it counts as usable), when no provider is usable yet — a scan
-    // is still useful with bare filenames-derived titles even so.
-    let global_providers = lisek_db::list_enabled_provider_keys(&pool)
-        .await
-        .map_err(map_db_error)?;
-    // A library can override the admin's global priority order for its own
-    // item type (the Admin Panel's drag-and-drop reordering — see
-    // `lisek_db::get_library_provider_order`'s doc comment). `None` (no
-    // override ever saved for this library) falls back to the global order
-    // unchanged; when one exists, `apply_provider_order` keeps only the
-    // providers that are still actually enabled/configured, in the
-    // library's chosen order — a provider the admin disabled since saving
-    // that order simply drops out rather than erroring the whole scan.
-    let library_item_type = item_type_for_library(&library.library_type);
-    let library_order = lisek_db::get_library_provider_order(&pool, library_id, library_item_type)
-        .await
-        .map_err(map_db_error)?;
-    let providers = apply_provider_order(global_providers, library_order.as_deref());
-
-    let mut metadata_matched = 0usize;
-    let mut images_saved = 0usize;
-    if providers.is_empty() {
-        tracing::warn!(
-            %library_id,
-            "no enabled/configured metadata provider — skipping enrichment for this scan; \
-             set an API key for at least one provider under Admin Panel \u{2192} Plugins"
-        );
-    } else {
-        let http = reqwest::Client::new();
-        let config_dir = crate::state::config_dir();
-        // No dedicated server-wide "metadata language" setting exists yet
-        // (see the roadmap's provider-language-priority item) — the
-        // scanning admin's own UI language is a reasonable, honest stand-in
-        // for "this server's primary language" until that's built.
-        let primary_language = auth.user.ui_language.as_str();
-        for (item_id, target, file_path, forced_provider) in &persisted.enrich_targets {
-            let outcome = metadata_enrichment::enrich_item(
-                &pool,
-                &http,
-                &config_dir,
-                &providers,
-                *item_id,
-                target,
-                file_path,
-                library.save_metadata_in_media_folder,
-                primary_language,
-                forced_provider.as_deref(),
-            )
-            .await;
-            if outcome.matched {
-                metadata_matched += 1;
-            }
-            if outcome.image_saved {
-                images_saved += 1;
-            }
-        }
-    }
-
-    tracing::info!(
-        %library_id,
-        movies_found = persisted.summary.movies_found,
-        episodes_found = persisted.summary.episodes_found,
-        unrecognized = persisted.summary.unrecognized,
-        metadata_matched,
-        images_saved,
-        admin = %auth.user.username,
-        "library scan completed"
-    );
-
-    Ok(Json(ScanSummaryResponse {
-        movies_found: persisted.summary.movies_found,
-        episodes_found: persisted.summary.episodes_found,
-        unrecognized: persisted.summary.unrecognized,
-        metadata_matched,
-        images_saved,
-    }))
-}
-
 /// Every item in one library, for the Admin Panel's browse view that opens
 /// the metadata editor (see `lisek_db::MediaItemSummary`'s own doc comment
 /// for exactly what rides along).
@@ -558,7 +417,7 @@ pub struct MigrateFallbackResponse {
 /// whichever of this item's poster/backdrop currently only exist in the
 /// local `config_dir` cache into its media folder (right next to the
 /// video file, same `poster.jpg`/`backdrop.jpg` naming
-/// `metadata_enrichment::enrich_item` already uses), then clears
+/// `metadata_enrichment::enrich_item_cached` already uses), then clears
 /// `metadata_fallback` once at least one image actually made it across —
 /// a partial success (say, the destination folder only just got its write
 /// permission fixed for one of the two files) still counts as real
@@ -733,7 +592,7 @@ pub(crate) fn apply_provider_order(
     ordered
 }
 
-fn require_admin(auth: &AuthUser) -> Result<(), AdminError> {
+pub(crate) fn require_admin(auth: &AuthUser) -> Result<(), AdminError> {
     if auth.user.is_admin {
         Ok(())
     } else {
@@ -741,7 +600,7 @@ fn require_admin(auth: &AuthUser) -> Result<(), AdminError> {
     }
 }
 
-fn map_db_error(err: lisek_db::DbError) -> AdminError {
+pub(crate) fn map_db_error(err: lisek_db::DbError) -> AdminError {
     match err {
         lisek_db::DbError::ProviderNotFound => AdminError::ProviderNotFound,
         lisek_db::DbError::LibraryNotFound => AdminError::LibraryNotFound,

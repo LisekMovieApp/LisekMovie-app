@@ -118,9 +118,24 @@ pub async fn save_image(
     fallback_dest: &Path,
 ) -> Result<bool, ImageCacheError> {
     let bytes = fetch_bytes(http, url).await?;
+    store_image(&bytes, media_folder_dest, fallback_dest).await
+}
 
+/// Downloads an image without writing it anywhere — for callers that write
+/// the same bytes to several items (every episode of one series).
+pub async fn fetch_image(http: &reqwest::Client, url: &str) -> Result<Vec<u8>, ImageCacheError> {
+    fetch_bytes(http, url).await
+}
+
+/// The write half of [`save_image`], same destinations and fallback rule,
+/// same return value.
+pub async fn store_image(
+    bytes: &[u8],
+    media_folder_dest: Option<&Path>,
+    fallback_dest: &Path,
+) -> Result<bool, ImageCacheError> {
     if let Some(dest) = media_folder_dest {
-        let result = write_bytes(dest, &bytes).await;
+        let result = write_bytes(dest, bytes).await;
         if should_fall_back(&result) {
             let err = result.expect_err("should_fall_back only returns true for an Err");
             tracing::warn!(
@@ -133,7 +148,7 @@ pub async fn save_image(
         }
     }
 
-    write_bytes(fallback_dest, &bytes).await?;
+    write_bytes(fallback_dest, bytes).await?;
     Ok(media_folder_dest.is_some())
 }
 

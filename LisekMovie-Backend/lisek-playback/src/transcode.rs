@@ -1,4 +1,5 @@
 //! Bounded FFmpeg jobs. Configuration is snapshotted when each job starts.
+use lisek_core::media_probe::{MediaProbe, MediaStream, StreamKind};
 use lisek_core::playback_settings::PlaybackSettings;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -30,25 +31,46 @@ pub struct SourceInfo {
     pub hdr: bool,
     pub interlaced: bool,
     pub audio_channels: u32,
+    /// ffprobe index of the stream to encode; skips cover-art "video"
+    /// streams that `-map 0:v:0` would otherwise pick.
+    pub video_index: Option<i32>,
 }
+/// Raw `ffprobe -show_streams -show_format -of json` output. Every field is
+/// optional: ffprobe omits keys freely depending on the codec.
 #[derive(Deserialize)]
 struct Probe {
+    #[serde(default)]
     streams: Vec<Stream>,
-    format: Format,
+    format: Option<Format>,
 }
 #[derive(Deserialize)]
 struct Stream {
+    index: Option<i32>,
     codec_type: Option<String>,
-    width: Option<u32>,
-    height: Option<u32>,
     codec_name: Option<String>,
+    profile: Option<String>,
+    width: Option<i32>,
+    height: Option<i32>,
     pix_fmt: Option<String>,
+    bits_per_raw_sample: Option<String>,
     color_transfer: Option<String>,
+    color_primaries: Option<String>,
+    color_space: Option<String>,
     field_order: Option<String>,
-    channels: Option<u32>,
+    avg_frame_rate: Option<String>,
+    r_frame_rate: Option<String>,
+    channels: Option<i32>,
+    channel_layout: Option<String>,
+    sample_rate: Option<String>,
+    bit_rate: Option<String>,
+    #[serde(default)]
+    disposition: HashMap<String, i64>,
+    #[serde(default)]
+    tags: HashMap<String, String>,
 }
 #[derive(Deserialize)]
 struct Format {
+    format_name: Option<String>,
     duration: Option<String>,
     bit_rate: Option<String>,
 }
@@ -164,17 +186,20 @@ pub async fn capabilities(config: &PlaybackSettings) -> Result<Capabilities, Str
         software_tonemapping: filters.contains(" zscale ") && filters.contains(" tonemap "),
     })
 }
+/// Probes `path` and derives the transcoder's view of it. Kept for callers
+/// that have no stored probe; the scanner and playback endpoints use
+/// [`probe_media`] + [`source_info`] so the result can be cached.
 pub async fn probe(path: &Path, config: &PlaybackSettings) -> Result<SourceInfo, String> {
+    source_info(&probe_media(path, config).await?)
+}
+
+/// Runs ffprobe once and returns every stream. Error codes:
+/// `ffprobe_unavailable` (binary missing, a configuration problem),
+/// `probe_timed_out`, `probe_failed` (the file itself is unreadable).
+pub async fn probe_media(path: &Path, config: &PlaybackSettings) -> Result<MediaProbe, String> {
     let mut cmd = command("ffprobe", config);
-    cmd.args([
-        "-v",
-        "error",
-        "-show_streams",
-        "-show_format",
-        "-of",
-        "json",
-    ])
-    .arg(path);
+    cmd.args(["-v", "error", "-show_streams", "-show_format", "-of", "json"])
+        .arg(path);
     let output = tokio::time::timeout(Duration::from_secs(20), cmd.output())
         .await
         .map_err(|_| "probe_timed_out")?
@@ -182,30 +207,89 @@ pub async fn probe(path: &Path, config: &PlaybackSettings) -> Result<SourceInfo,
     if !output.status.success() {
         return Err("probe_failed".into());
     }
-    let probe: Probe = serde_json::from_slice(&output.stdout).map_err(|_| "probe_failed")?;
-    let video = probe
+    parse_probe(&output.stdout)
+}
+
+/// Pure JSON-to-domain conversion, split out for unit tests.
+pub fn parse_probe(json: &[u8]) -> Result<MediaProbe, String> {
+    let probe: Probe = serde_json::from_slice(json).map_err(|_| "probe_failed")?;
+    let format = probe.format.unwrap_or(Format {
+        format_name: None,
+        duration: None,
+        bit_rate: None,
+    });
+    let streams = probe
         .streams
-        .iter()
-        .find(|s| s.codec_type.as_deref() == Some("video"))
-        .ok_or("video_stream_missing")?;
-    let duration = probe
-        .format
-        .duration
-        .and_then(|v| v.parse::<f64>().ok())
-        .filter(|v| v.is_finite() && *v > 0.0)
-        .ok_or("duration_unavailable")?;
+        .into_iter()
+        .enumerate()
+        .map(|(position, s)| {
+            let flag = |name: &str| s.disposition.get(name).copied().unwrap_or(0) == 1;
+            let tag = |name: &str| {
+                s.tags
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                    .map(|(_, v)| v.clone())
+                    .filter(|v| !v.is_empty())
+            };
+            MediaStream {
+                index: s.index.unwrap_or(position as i32),
+                kind: StreamKind::parse(s.codec_type.as_deref().unwrap_or("data")),
+                is_default: flag("default"),
+                is_forced: flag("forced"),
+                language: tag("language"),
+                title: tag("title"),
+                codec: s.codec_name,
+                profile: s.profile,
+                width: s.width,
+                height: s.height,
+                bit_depth: s.bits_per_raw_sample.and_then(|v| v.parse().ok()),
+                pixel_format: s.pix_fmt,
+                color_transfer: s.color_transfer,
+                color_primaries: s.color_primaries,
+                color_space: s.color_space,
+                field_order: s.field_order,
+                frame_rate: s
+                    .avg_frame_rate
+                    .as_deref()
+                    .and_then(parse_rational)
+                    .or_else(|| s.r_frame_rate.as_deref().and_then(parse_rational)),
+                channels: s.channels,
+                channel_layout: s.channel_layout,
+                sample_rate: s.sample_rate.and_then(|v| v.parse().ok()),
+                bitrate_kbps: s.bit_rate.as_deref().and_then(kbps),
+            }
+        })
+        .collect();
+    Ok(MediaProbe {
+        container: format.format_name,
+        duration_seconds: format
+            .duration
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v > 0.0),
+        bitrate_kbps: format.bit_rate.as_deref().and_then(kbps),
+        streams,
+    })
+}
+
+/// The transcoder's view of a probed file. Fails the same way the old
+/// inline probe did, so callers keep their error codes.
+pub fn source_info(probe: &MediaProbe) -> Result<SourceInfo, String> {
+    let video = probe.primary_video().ok_or("video_stream_missing")?;
+    let duration = probe.duration_seconds.ok_or("duration_unavailable")?;
+    let dimension = |v: Option<i32>| {
+        v.and_then(|v| u32::try_from(v).ok())
+            .ok_or("resolution_unavailable")
+    };
     Ok(SourceInfo {
-        width: video.width.ok_or("resolution_unavailable")?,
-        height: video.height.ok_or("resolution_unavailable")?,
+        width: dimension(video.width)?,
+        height: dimension(video.height)?,
         bitrate_kbps: probe
-            .format
-            .bit_rate
-            .and_then(|v| v.parse::<u64>().ok())
-            .map(|v| (v / 1000).min(u32::MAX as u64) as u32)
+            .bitrate_kbps
+            .and_then(|v| u32::try_from(v).ok())
             .unwrap_or(0),
         duration,
-        codec: video.codec_name.clone().unwrap_or_default(),
-        pixel_format: video.pix_fmt.clone().unwrap_or_default(),
+        codec: video.codec.clone().unwrap_or_default(),
+        pixel_format: video.pixel_format.clone().unwrap_or_default(),
         hdr: matches!(
             video.color_transfer.as_deref(),
             Some("smpte2084" | "arib-std-b67")
@@ -215,12 +299,23 @@ pub async fn probe(path: &Path, config: &PlaybackSettings) -> Result<SourceInfo,
             Some("tt" | "bb" | "tb" | "bt")
         ),
         audio_channels: probe
-            .streams
-            .iter()
-            .find(|s| s.codec_type.as_deref() == Some("audio"))
-            .and_then(|s| s.channels)
+            .primary_audio()
+            .and_then(|a| a.channels)
+            .and_then(|c| u32::try_from(c).ok())
             .unwrap_or(0),
+        video_index: Some(video.index),
     })
+}
+
+fn parse_rational(value: &str) -> Option<f64> {
+    let (num, den) = value.split_once('/').unwrap_or((value, "1"));
+    let (num, den) = (num.parse::<f64>().ok()?, den.parse::<f64>().ok()?);
+    (den != 0.0 && num > 0.0).then(|| num / den)
+}
+
+fn kbps(bits_per_second: &str) -> Option<i32> {
+    let bps = bits_per_second.parse::<u64>().ok()?;
+    Some((bps / 1000).min(i32::MAX as u64) as i32)
 }
 
 fn encode_command(
@@ -279,7 +374,15 @@ fn encode_command(
     }
     cmd.args(["-threads", &config.encoding_threads.to_string(), "-i"])
         .arg(path)
-        .args(["-map", "0:v:0", "-map", "0:a:0?", "-sn"]);
+        .args([
+            "-map",
+            &source
+                .video_index
+                .map_or_else(|| "0:v:0".to_owned(), |index| format!("0:{index}")),
+            "-map",
+            "0:a:0?",
+            "-sn",
+        ]);
     if config.hardware_acceleration == "nvenc" && config.hardware_encoding {
         let preset = match config.encoder_preset.as_str() {
             "ultrafast" | "superfast" => "p1",
@@ -524,6 +627,7 @@ mod tests {
             hdr: false,
             interlaced: false,
             audio_channels: 6,
+            video_index: None,
         };
         let cmd = encode_command(
             Path::new("input.mp4"),
@@ -558,5 +662,68 @@ mod tests {
             )
             .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod probe_tests {
+    use super::*;
+
+    const SAMPLE: &str = r#"{
+      "streams": [
+        {"index":0,"codec_type":"video","codec_name":"mjpeg","width":600,"height":900,
+         "disposition":{"attached_pic":1}},
+        {"index":1,"codec_type":"video","codec_name":"hevc","profile":"Main 10","width":3840,"height":2160,
+         "pix_fmt":"yuv420p10le","color_transfer":"smpte2084","color_primaries":"bt2020","color_space":"bt2020nc",
+         "field_order":"progressive","avg_frame_rate":"24000/1001","r_frame_rate":"24000/1001",
+         "bits_per_raw_sample":"10","disposition":{"default":1}},
+        {"index":2,"codec_type":"audio","codec_name":"aac","channels":2,"sample_rate":"48000",
+         "bit_rate":"192000","tags":{"language":"eng"},"disposition":{"default":0}},
+        {"index":3,"codec_type":"audio","codec_name":"eac3","channels":6,"channel_layout":"5.1(side)",
+         "sample_rate":"48000","tags":{"language":"pol","title":"Lektor"},"disposition":{"default":1}},
+        {"index":4,"codec_type":"subtitle","codec_name":"subrip","tags":{"LANGUAGE":"pol"},
+         "disposition":{"default":0,"forced":1}}
+      ],
+      "format": {"format_name":"matroska,webm","duration":"5421.120000","bit_rate":"24500123"}
+    }"#;
+
+    #[test]
+    fn parses_every_stream_with_tags_and_dispositions() {
+        let probe = parse_probe(SAMPLE.as_bytes()).unwrap();
+        assert_eq!(probe.container.as_deref(), Some("matroska,webm"));
+        assert_eq!(probe.duration_seconds, Some(5421.12));
+        assert_eq!(probe.bitrate_kbps, Some(24500));
+        assert_eq!(probe.streams.len(), 5);
+        let video = &probe.streams[1];
+        assert_eq!(video.bit_depth, Some(10));
+        assert!((video.frame_rate.unwrap() - 23.976).abs() < 0.001);
+        let lektor = &probe.streams[3];
+        assert_eq!(lektor.language.as_deref(), Some("pol"));
+        assert_eq!(lektor.title.as_deref(), Some("Lektor"));
+        assert!(lektor.is_default);
+        let subtitle = &probe.streams[4];
+        assert_eq!(subtitle.kind, StreamKind::Subtitle);
+        assert_eq!(subtitle.language.as_deref(), Some("pol"), "tag keys are case-insensitive");
+        assert!(subtitle.is_forced);
+    }
+
+    #[test]
+    fn source_info_skips_cover_art_and_uses_default_audio() {
+        let info = source_info(&parse_probe(SAMPLE.as_bytes()).unwrap()).unwrap();
+        assert_eq!((info.width, info.height), (3840, 2160));
+        assert_eq!(info.video_index, Some(1));
+        assert!(info.hdr);
+        assert!(!info.interlaced);
+        assert_eq!(info.audio_channels, 6);
+        assert_eq!(info.bitrate_kbps, 24500);
+    }
+
+    #[test]
+    fn source_info_reports_the_same_error_codes_as_before() {
+        let no_video = r#"{"streams":[{"index":0,"codec_type":"audio"}],"format":{"duration":"10"}}"#;
+        assert_eq!(source_info(&parse_probe(no_video.as_bytes()).unwrap()).unwrap_err(), "video_stream_missing");
+        let no_duration = r#"{"streams":[{"index":0,"codec_type":"video","width":1,"height":1}],"format":{}}"#;
+        assert_eq!(source_info(&parse_probe(no_duration.as_bytes()).unwrap()).unwrap_err(), "duration_unavailable");
+        assert_eq!(parse_probe(b"not json").unwrap_err(), "probe_failed");
     }
 }

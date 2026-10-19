@@ -99,7 +99,7 @@ def main():
                 return response.status, body, response.headers
             def ok_json(path, method="GET", data=None, token=None):
                 status, body, _ = request(path, method, data, token)
-                assert status in (200, 201, 204), (path, status, body)
+                assert status in (200, 201, 202, 204), (path, status, body)
                 return json.loads(body) if body else None
             for attempt in range(100):
                 try:
@@ -158,11 +158,34 @@ def main():
             library = ok_json("/api/admin/libraries", "POST", {"name":"Smoke","library_type":"movies",
                 "root_paths":[str(media)],"save_metadata_in_media_folder":False},token)
             library_id = library["id"]
-            ok_json(f"/api/admin/libraries/{library_id}/scan", "POST", {}, token)
+            # Scans are queued (202) and run by the background worker.
+            status, body, _ = request(f"/api/admin/libraries/{library_id}/scan", "POST", {}, token)
+            assert status == 202, (status, body)
+            job = json.loads(body)
+            for _ in range(300):
+                job = ok_json(f"/api/admin/scan-jobs/{job['id']}", token=token)
+                if job["status"] in ("completed", "failed"):
+                    break
+                time.sleep(.1)
+            assert job["status"] == "completed" and job["phase"] == "done", job
+            assert (job["files_found"], job["movies_found"], job["unrecognized"]) == (1, 1, 0), job
+            assert any(j["id"] == job["id"] for j in ok_json("/api/admin/scan-jobs", token=token))
             item_id = sql("SELECT id FROM media_items LIMIT 1")
             assert item_id
+            if args.ffmpeg and args.ffprobe:
+                # Streams are probed once, during the scan.
+                assert job["probed"] == 1, job
+                assert sql(f"SELECT count(*) FROM media_streams WHERE media_item_id='{item_id}' AND stream_type='video'") == "1"
+                assert sql(f"SELECT probed_at IS NOT NULL AND file_size IS NOT NULL FROM media_items WHERE id='{item_id}'") == "t"
             if args.node:
-                event=notification_queue.get(timeout=15)
+                progress_seen = False
+                while True:
+                    event=notification_queue.get(timeout=15)
+                    if event['type']=='scan_progress':
+                        progress_seen |= event['job']['id']==job['id']
+                        continue
+                    break
+                assert progress_seen, "admin sockets receive scan_progress"
                 assert event['type']=='library_changed' and event['items'][0]['item_id']==item_id,event
             session = ok_json(f"/api/media/{item_id}/playback", "POST", {}, token)
             sid = session["session_id"]
@@ -268,14 +291,18 @@ def main():
             assert request('/api/admin/playback/settings','PUT',settings,other_token)[0]==403
             assert ok_json("/api/me/list",token=other_token) == []
             ok_json("/api/auth/logout","POST",{},token)
-            if args.node: assert notification_queue.get(timeout=15)['type']=='closed'
+            if args.node:
+                event=notification_queue.get(timeout=15)
+                while event['type']=='scan_progress':
+                    event=notification_queue.get(timeout=15)
+                assert event['type']=='closed',event
             assert request(resumed["stream_url"])[0] == 401
             assert request("/api/auth/me",token=token)[0] == 401
             server.terminate()
             server.wait(timeout=10)
             log.close()
             server = None
-            print("PASS: migrations, concurrent setup, auth, scan, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, browser notifications")
+            print("PASS: migrations, concurrent setup, auth, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, browser notifications")
     finally:
         if server:
             server.terminate()

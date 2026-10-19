@@ -5,6 +5,7 @@
 //! [`crate::naming::episode`]).
 
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use walkdir::{DirEntry, WalkDir};
 
@@ -44,6 +45,10 @@ pub struct ScannedFile {
     pub path: PathBuf,
     pub season_dir_name: Option<String>,
     pub series_dir_name: Option<String>,
+    /// Size and modification time let a rescan skip ffprobe for files
+    /// that have not changed. `None` when the OS cannot report them.
+    pub size_bytes: Option<u64>,
+    pub modified: Option<SystemTime>,
 }
 
 fn has_video_extension(path: &Path) -> bool {
@@ -96,6 +101,16 @@ fn dir_name(path: Option<&Path>) -> Option<String> {
 /// clips). A root path that doesn't exist or can't be read is skipped
 /// rather than aborting the whole scan — see the module doc comment.
 pub fn scan_paths<P: AsRef<Path>>(root_paths: &[P]) -> Vec<ScannedFile> {
+    scan_paths_with_progress(root_paths, |_| {})
+}
+
+/// Same walk as [`scan_paths`], calling `on_file` with the running count
+/// after every accepted video file. Blocking: run it on a blocking thread
+/// (`tokio::task::spawn_blocking`), never directly on an async worker.
+pub fn scan_paths_with_progress<P: AsRef<Path>>(
+    root_paths: &[P],
+    mut on_file: impl FnMut(usize),
+) -> Vec<ScannedFile> {
     let mut results = Vec::new();
 
     for root in root_paths {
@@ -120,12 +135,18 @@ pub fn scan_paths<P: AsRef<Path>>(root_paths: &[P]) -> Vec<ScannedFile> {
 
             let season_dir_name = dir_name(path.parent());
             let series_dir_name = dir_name(path.parent().and_then(Path::parent));
+            // On Windows walkdir answers this from the directory listing
+            // itself; elsewhere it is one stat per file.
+            let metadata = entry.metadata().ok();
 
             results.push(ScannedFile {
                 path: path.to_path_buf(),
                 season_dir_name,
                 series_dir_name,
+                size_bytes: metadata.as_ref().map(|m| m.len()),
+                modified: metadata.and_then(|m| m.modified().ok()),
             });
+            on_file(results.len());
         }
     }
 

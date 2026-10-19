@@ -1,5 +1,5 @@
 //! Live browser notifications. Authentication is sent in the first frame, never in a URL.
-use crate::state::SharedState;
+use crate::state::{ServerEvent, SharedState};
 use axum::{
     extract::{
         State, WebSocketUpgrade,
@@ -9,11 +9,11 @@ use axum::{
     response::Response,
 };
 use std::{sync::Arc, sync::LazyLock, time::Duration};
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, broadcast};
 
 static CONNECTIONS: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(128)));
 
-#[utoipa::path(get,path="/api/notifications/socket",responses((status=101,description="WebSocket. First frame: JSON {token:string}. Server sends ready then library_changed with items. Requires an active login; closes when revoked."),(status=503)))]
+#[utoipa::path(get,path="/api/notifications/socket",responses((status=101,description="WebSocket. First frame: JSON {token:string}. Server sends ready, then library_changed with items; administrators also receive scan_progress with the full scan job. Requires an active login; closes when revoked."),(status=503)))]
 pub async fn socket(
     State(state): State<SharedState>,
     ws: WebSocketUpgrade,
@@ -50,12 +50,12 @@ async fn run(mut socket: WebSocket, state: SharedState) {
         return;
     }
     let hash = lisek_auth::hash_session_token(&login.token);
-    if !matches!(
-        lisek_db::find_user_by_session_token_hash(&pool, &hash).await,
-        Ok(Some(lisek_core::User { must_change_password:false, .. }))
-    ) {
-        return;
-    }
+    let mut is_admin = match lisek_db::find_user_by_session_token_hash(&pool, &hash).await {
+        Ok(Some(user)) if !user.must_change_password => user.is_admin,
+        _ => return,
+    };
+    // Subscribed before "ready" so no event between the two is missed.
+    let mut events = state.events.subscribe();
     let started = chrono::Utc::now();
     // Overlapping reads and a set also handle transactions committing out of sequence.
     let mut seen = std::collections::HashSet::new();
@@ -72,8 +72,21 @@ async fn run(mut socket: WebSocket, state: SharedState) {
     loop {
         tokio::select! {
             incoming=socket.recv()=>match incoming {Some(Ok(Message::Ping(_)|Message::Pong(_)))=>{},_=>break},
+            event=events.recv()=>match event {
+                // Scan progress is admin-only; the role is re-read every tick below.
+                Ok(ServerEvent::ScanProgress { .. }) if !is_admin => {}
+                Ok(event) => {
+                    let Ok(text) = serde_json::to_string(&event) else { continue };
+                    if socket.send(Message::Text(text.into())).await.is_err(){break;}
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
             _=interval.tick()=>{
-                if !matches!(lisek_db::find_user_by_session_token_hash(&pool,&hash).await,Ok(Some(lisek_core::User { must_change_password:false, .. }))){break;}
+                match lisek_db::find_user_by_session_token_hash(&pool,&hash).await {
+                    Ok(Some(user)) if !user.must_change_password => is_admin = user.is_admin,
+                    _ => break,
+                }
                 let Ok(events)=lisek_db::notifications::browser_events(&pool,started).await else{break;};
                 let present:std::collections::HashSet<_>=events.iter().map(|e|e.event_id).collect();
                 seen.retain(|id|present.contains(id));

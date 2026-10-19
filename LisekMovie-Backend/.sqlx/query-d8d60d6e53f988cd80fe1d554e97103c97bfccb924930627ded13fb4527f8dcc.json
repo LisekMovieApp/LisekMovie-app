@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT representative_item_id FROM series WHERE library_id = $1 AND title = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "representative_item_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "series",
+            "name": "representative_item_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "d8d60d6e53f988cd80fe1d554e97103c97bfccb924930627ded13fb4527f8dcc"
+}

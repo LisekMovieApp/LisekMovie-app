@@ -6,7 +6,7 @@
 //! do that across separately compiled artifacts) plus exactly one match
 //! arm here. Everything else — enabled/disabled, priority, the API key —
 //! is read fresh from `provider_config` on every scan by
-//! `admin::scan_library` (`lisek_db::list_enabled_provider_keys`), never
+//! `scan_jobs::scan_library` (`lisek_db::list_enabled_provider_keys`), never
 //! decided at startup, so flipping a provider on/off from the Admin Panel
 //! is instant, no restart.
 

@@ -1,0 +1,14 @@
+# Query macros (`sqlx::query!` and friends) are checked against the
+# committed `.sqlx/` cache, so building needs no running database and a
+# fresh clone or CI compiles out of the box.
+#
+# After adding or changing a query macro, regenerate the cache against a
+# database migrated to the latest schema:
+#
+#     cargo install sqlx-cli --no-default-features --features postgres,rustls
+#     sqlx migrate run --source lisek-db/migrations
+#     cargo sqlx prepare --workspace
+#
+# (`cargo sqlx prepare` overrides this setting for its own check run.)
+[env]
+SQLX_OFFLINE = "true"

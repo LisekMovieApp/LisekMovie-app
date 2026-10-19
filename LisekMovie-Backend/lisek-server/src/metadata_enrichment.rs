@@ -4,7 +4,7 @@
 //! its fields into the row, then saves its poster/backdrop/logo images —
 //! unless the item has its own `forced_provider` set (the metadata editor's
 //! per-item override) or individual `locked_fields`, in which case
-//! [`enrich_item`] narrows to just that provider or protects just that
+//! [`enrich_item_cached`] narrows to just that provider or protects just that
 //! field respectively; see that function's own doc comment for both.
 //!
 //! As of Faza 5 round 2, "saves its images" means writing directly next to
@@ -22,18 +22,21 @@
 //! provider extension currently populates it — see
 //! `lisek_plugin_api::ProviderMatch`'s own doc comment for why.
 //!
-//! Called once per item from `admin::scan_library`, right after
-//! `lisek_db::persist_scan_results`. A provider failing (network error,
+//! Called once per item from the scan worker (`scan_jobs`) and the
+//! background refresh, through an [`EnrichCache`]: every episode of a show
+//! shares one provider lookup and one image download per URL. A provider failing (network error,
 //! rejected key, no match) for one item is logged and treated as "try the
 //! next provider" / "leave this item without provider metadata for now" —
 //! it never aborts the rest of the scan, since one bad provider or one
 //! unmatched title shouldn't cost the admin every other item's data.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use lisek_db::{EnrichTarget, PgPool};
 use lisek_metadata::image_cache::{
-    backdrop_cache_path, logo_cache_path, poster_cache_path, save_image,
+    backdrop_cache_path, fetch_image, logo_cache_path, poster_cache_path, store_image,
 };
 use lisek_plugin_api::{MovieQuery, ProviderMatch, SeriesQuery};
 use uuid::Uuid;
@@ -44,7 +47,7 @@ use crate::provider_registry;
 /// it for `target`, dispatching to `find_movie`/`find_series` depending on
 /// which variant `target` is. `None` covers an unregistered `provider_key`,
 /// no match, and a failed lookup alike — all three are "try the next
-/// provider in the admin's priority list" as far as [`enrich_item`] is
+/// provider in the admin's priority list" as far as [`enrich_item_cached`] is
 /// concerned; which one actually happened is only ever visible in the
 /// `tracing::warn!` line this function emits.
 async fn try_provider(
@@ -138,8 +141,55 @@ fn media_folder_destination(
     file_path.parent().map(|dir| dir.join(filename))
 }
 
+/// Memo for one enrichment pass. A scan of a 20-episode season used to
+/// search the provider 20 times and download the same three images 20
+/// times; with this, once.
+///
+/// Only series lookups are memoized (a movie target is unique per item).
+/// Image bytes are kept only for the series currently being processed —
+/// callers pass targets grouped by series (`persist_scan_results` and
+/// `list_unlocked_items_for_refresh` both sort that way) — so memory stays
+/// bounded by one show's artwork.
+/// `(target, forced_provider)` — a forced provider changes the answer.
+type LookupKey = (EnrichTarget, Option<String>);
+/// `(provider_key, match)`.
+type Found = (String, ProviderMatch);
+
+#[derive(Default)]
+pub struct EnrichCache {
+    lookups: HashMap<LookupKey, Option<Found>>,
+    images_for: Option<EnrichTarget>,
+    images: HashMap<String, Arc<Vec<u8>>>,
+    /// Media-folder files written this pass. Episodes in one season folder
+    /// share `poster.jpg`; it is written once.
+    written: HashSet<PathBuf>,
+}
+
+impl EnrichCache {
+    async fn image(
+        &mut self,
+        http: &reqwest::Client,
+        target: &EnrichTarget,
+        url: &str,
+    ) -> Result<Arc<Vec<u8>>, lisek_metadata::image_cache::ImageCacheError> {
+        let cacheable = matches!(target, EnrichTarget::Series { .. });
+        if cacheable && self.images_for.as_ref() != Some(target) {
+            self.images.clear();
+            self.images_for = Some(target.clone());
+        }
+        if let Some(bytes) = self.images.get(url) {
+            return Ok(bytes.clone());
+        }
+        let bytes = Arc::new(fetch_image(http, url).await?);
+        if cacheable {
+            self.images.insert(url.to_owned(), bytes.clone());
+        }
+        Ok(bytes)
+    }
+}
+
 /// Tries `providers` (an admin- or library-priority-ordered
-/// `(provider_key, api_key)` list — see `admin::scan_library` for where
+/// `(provider_key, api_key)` list — see `scan_jobs::scan_library` for where
 /// that ordering itself comes from) in order for `target`, stopping at the
 /// first match; merges its fields into `item_id`'s `media_items` row and
 /// saves its poster/backdrop.
@@ -173,12 +223,16 @@ fn media_folder_destination(
 /// A failed image download/write is logged and otherwise ignored — the
 /// text metadata it's paired with is still worth keeping even if the
 /// picture didn't come down this time. The returned [`EnrichOutcome`] is
-/// how the caller (`admin::scan_library`) rolls per-item results up into a
+/// how the caller (`scan_jobs::scan_library`) rolls per-item results up into a
 /// scan-wide count instead of that information only ever existing as
 /// scattered log lines — see that type's own doc comment for why this
 /// exists.
+///
+/// `cache` shares lookups and downloads across the items of one pass; see
+/// [`EnrichCache`].
 #[allow(clippy::too_many_arguments)]
-pub async fn enrich_item(
+pub async fn enrich_item_cached(
+    cache: &mut EnrichCache,
     pool: &PgPool,
     http: &reqwest::Client,
     config_dir: &Path,
@@ -208,79 +262,79 @@ pub async fn enrich_item(
         None => providers,
     };
 
-    for (provider_key, api_key) in providers {
-        let Some(matched) = try_provider(provider_key, api_key, target, primary_language).await
-        else {
-            continue;
-        };
-
-        if let Err(err) =
-            lisek_db::attach_provider_metadata(pool, item_id, provider_key, &matched.fields).await
-        {
-            tracing::warn!(%item_id, provider_key, %err, "failed to save provider metadata");
-        }
-
-        let mut used_fallback = false;
-        let mut image_saved = false;
-
-        if let Some(url) = &matched.poster_url {
-            let media_dest =
-                media_folder_destination(file_path, "poster.jpg", save_in_media_folder);
-            let fallback_dest = poster_cache_path(config_dir, item_id);
-            match save_image(http, url, media_dest.as_deref(), &fallback_dest).await {
-                Ok(fell_back_to_cache) => {
-                    used_fallback |= fell_back_to_cache;
-                    image_saved = true;
+    let memo_key = (target.clone(), forced_provider.map(str::to_owned));
+    let found = match cache.lookups.get(&memo_key) {
+        Some(found) => found.clone(),
+        None => {
+            let mut found = None;
+            for (provider_key, api_key) in providers {
+                if let Some(matched) =
+                    try_provider(provider_key, api_key, target, primary_language).await
+                {
+                    found = Some((provider_key.clone(), matched));
+                    break;
                 }
-                Err(err) => tracing::warn!(%item_id, %err, "failed to save poster image"),
             }
-        }
-        if let Some(url) = &matched.backdrop_url {
-            let media_dest =
-                media_folder_destination(file_path, "backdrop.jpg", save_in_media_folder);
-            let fallback_dest = backdrop_cache_path(config_dir, item_id);
-            match save_image(http, url, media_dest.as_deref(), &fallback_dest).await {
-                Ok(fell_back_to_cache) => {
-                    used_fallback |= fell_back_to_cache;
-                    image_saved = true;
-                }
-                Err(err) => tracing::warn!(%item_id, %err, "failed to save backdrop image"),
+            if matches!(target, EnrichTarget::Series { .. }) {
+                cache.lookups.insert(memo_key, found.clone());
             }
+            found
         }
-        // `logo_url` is only ever populated by a provider that actually has
-        // one for this title (TMDB, when it has a PNG logo cataloged — see
-        // `LisekMovie-plugin-tmdb`) — most items simply won't have one, and
-        // that's not counted as a failed save the way a broken download
-        // would be, just an absent optional asset.
-        if let Some(url) = &matched.logo_url {
-            let media_dest = media_folder_destination(file_path, "logo.png", save_in_media_folder);
-            let fallback_dest = logo_cache_path(config_dir, item_id);
-            match save_image(http, url, media_dest.as_deref(), &fallback_dest).await {
-                Ok(fell_back_to_cache) => used_fallback |= fell_back_to_cache,
-                Err(err) => tracing::warn!(%item_id, %err, "failed to save logo image"),
-            }
-        }
+    };
+    let Some((provider_key, matched)) = found else {
+        return EnrichOutcome::default();
+    };
 
-        if let Err(err) = lisek_db::set_metadata_fallback(pool, item_id, used_fallback).await {
-            tracing::warn!(%item_id, %err, "failed to record metadata_fallback flag");
-        }
-
-        return EnrichOutcome {
-            matched: true,
-            image_saved,
-        };
+    if let Err(err) =
+        lisek_db::attach_provider_metadata(pool, item_id, &provider_key, &matched.fields).await
+    {
+        tracing::warn!(%item_id, provider_key, %err, "failed to save provider metadata");
     }
 
-    EnrichOutcome::default()
+    let mut used_fallback = false;
+    let mut image_saved = false;
+    let images: [(&Option<String>, &str, PathBuf, bool); 3] = [
+        (&matched.poster_url, "poster.jpg", poster_cache_path(config_dir, item_id), true),
+        (&matched.backdrop_url, "backdrop.jpg", backdrop_cache_path(config_dir, item_id), true),
+        // A logo alone does not count as "an image was saved".
+        (&matched.logo_url, "logo.png", logo_cache_path(config_dir, item_id), false),
+    ];
+    for (url, filename, fallback_dest, counts) in images {
+        let Some(url) = url else { continue };
+        let media_dest = media_folder_destination(file_path, filename, save_in_media_folder);
+        if media_dest.as_ref().is_some_and(|dest| cache.written.contains(dest)) {
+            image_saved |= counts;
+            continue;
+        }
+        let bytes = match cache.image(http, target, url).await {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                tracing::warn!(%item_id, %err, image = filename, "failed to download image");
+                continue;
+            }
+        };
+        match store_image(&bytes, media_dest.as_deref(), &fallback_dest).await {
+            Ok(fell_back_to_cache) => {
+                used_fallback |= fell_back_to_cache;
+                image_saved |= counts;
+                if let (false, Some(dest)) = (fell_back_to_cache, media_dest) {
+                    cache.written.insert(dest);
+                }
+            }
+            Err(err) => tracing::warn!(%item_id, %err, image = filename, "failed to save image"),
+        }
+    }
+
+    if let Err(err) = lisek_db::set_metadata_fallback(pool, item_id, used_fallback).await {
+        tracing::warn!(%item_id, %err, "failed to record metadata_fallback flag");
+    }
+
+    EnrichOutcome {
+        matched: true,
+        image_saved,
+    }
 }
 
-/// What happened when one item was run through the provider chain — lets
-/// `admin::scan_library` aggregate a scan-wide "N/total items got a
-/// picture" count for its response, so a provider that's misconfigured (no
-/// API key set, or one TMDB rejects) or simply finds nothing shows up as a
-/// number the admin sees immediately after clicking "scan" instead of only
-/// as a 404 in the browser console once they open the library — the same
-/// gap Faza 5 round 2's hardening pass closed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct EnrichOutcome {
     /// A provider (any of them, in priority order) returned a match for

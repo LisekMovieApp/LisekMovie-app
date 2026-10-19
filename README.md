@@ -46,6 +46,18 @@ Development runs in phases, roughly:
 6. Native features — stats, transcode protection, webhooks/notifications, games
 7. External metadata provider plugins
 
+## Development
+
+The backend builds without a running database: SQL written with `sqlx` query macros is checked against the committed `LisekMovie-Backend/.sqlx/` cache (`SQLX_OFFLINE=true` in `LisekMovie-Backend/.cargo/config.toml`). After adding or changing such a query, refresh the cache against a database migrated to the latest schema:
+
+```
+cd LisekMovie-Backend
+sqlx migrate run --source lisek-db/migrations
+cargo sqlx prepare --workspace
+```
+
+Database-backed tests (`lisek-db/tests/`) run when `LISEK_TEST_DATABASE_URL` points at a PostgreSQL role allowed to create databases, e.g. `postgres://lisekmovie:lisekmovie@localhost/postgres`; otherwise they are skipped.
+
 ## License
 
 LisekMovie is licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)**, with an additional attribution requirement.

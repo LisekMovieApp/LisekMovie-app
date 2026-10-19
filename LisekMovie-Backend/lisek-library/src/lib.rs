@@ -11,9 +11,10 @@ pub mod naming;
 pub mod scanner;
 
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 pub use naming::{EpisodePathContext, ParsedEpisode, ParsedMovie, parse_episode, parse_movie_name};
-pub use scanner::{ScannedFile, scan_paths};
+pub use scanner::{ScannedFile, scan_paths, scan_paths_with_progress};
 
 /// Which parser a library's files should go through. Mirrors the
 /// `libraries.library_type` column — `"movies"` / `"tv_shows"` are this
@@ -50,6 +51,15 @@ pub struct ScannedMovie {
     pub file_path: PathBuf,
     pub title: String,
     pub year: Option<i32>,
+    pub file: FileFacts,
+}
+
+/// On-disk facts about a scanned file, carried through to `media_items`
+/// so a rescan can tell whether a stored ffprobe result is still valid.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FileFacts {
+    pub size_bytes: Option<u64>,
+    pub modified: Option<SystemTime>,
 }
 
 /// One scanned-and-parsed TV episode.
@@ -60,6 +70,7 @@ pub struct ScannedEpisode {
     pub season: i32,
     pub episode: i32,
     pub end_episode: Option<i32>,
+    pub file: FileFacts,
 }
 
 /// The outcome of scanning and parsing one video file. `Unrecognized`
@@ -86,7 +97,18 @@ pub fn scan_library<P: AsRef<Path>>(
     library_type: LibraryType,
     now_year: i32,
 ) -> Vec<ScanResult> {
-    scan_paths(root_paths)
+    scan_library_with_progress(root_paths, library_type, now_year, |_| {})
+}
+
+/// [`scan_library`] with a callback receiving the number of video files
+/// found so far. Blocking — see [`scanner::scan_paths_with_progress`].
+pub fn scan_library_with_progress<P: AsRef<Path>>(
+    root_paths: &[P],
+    library_type: LibraryType,
+    now_year: i32,
+    on_file: impl FnMut(usize),
+) -> Vec<ScanResult> {
+    scan_paths_with_progress(root_paths, on_file)
         .into_iter()
         .map(|file| classify(file, library_type, now_year))
         .collect()
@@ -98,6 +120,10 @@ fn classify(file: ScannedFile, library_type: LibraryType, now_year: i32) -> Scan
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or_default();
+    let facts = FileFacts {
+        size_bytes: file.size_bytes,
+        modified: file.modified,
+    };
 
     match library_type {
         LibraryType::Movies => {
@@ -109,6 +135,7 @@ fn classify(file: ScannedFile, library_type: LibraryType, now_year: i32) -> Scan
                     file_path: file.path,
                     title: parsed.title,
                     year: parsed.year,
+                    file: facts,
                 })
             }
         }
@@ -125,6 +152,7 @@ fn classify(file: ScannedFile, library_type: LibraryType, now_year: i32) -> Scan
                         season: parsed.season,
                         episode: parsed.episode,
                         end_episode: parsed.end_episode,
+                        file: facts,
                     })
                 }
                 _ => ScanResult::Unrecognized(file.path),
@@ -193,6 +221,29 @@ mod tests {
             }
             other => panic!("expected an Episode result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn scan_records_file_size_and_reports_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("A (2001).mkv"), b"12345").unwrap();
+        fs::write(dir.path().join("B (2002).mkv"), b"1").unwrap();
+
+        let mut seen = Vec::new();
+        let results =
+            scan_library_with_progress(&[dir.path()], LibraryType::Movies, 2026, |n| seen.push(n));
+        assert_eq!(seen, vec![1, 2]);
+        let sizes: std::collections::BTreeSet<_> = results
+            .iter()
+            .map(|r| match r {
+                ScanResult::Movie(m) => {
+                    assert!(m.file.modified.is_some());
+                    m.file.size_bytes.unwrap()
+                }
+                other => panic!("expected a movie, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(sizes, [1, 5].into_iter().collect());
     }
 
     #[test]

@@ -4,7 +4,10 @@ import {
 	createLibrary,
 	deleteLibrary,
 	scanLibrary,
-	moveLibrary
+	startScan,
+	watchScanJob,
+	moveLibrary,
+	type ScanJob
 } from './libraries';
 import { AdminApiError } from './api';
 
@@ -124,23 +127,131 @@ describe('deleteLibrary', () => {
 	});
 });
 
-describe('scanLibrary', () => {
-	it('POSTs to the /scan sub-path and returns the parsed summary', async () => {
-		const summary = {
-			movies_found: 2,
-			episodes_found: 0,
-			unrecognized: 1,
-			metadata_matched: 2,
-			images_saved: 2
-		};
-		const fetchMock = stubFetch({ ok: true, json: () => Promise.resolve(summary) });
+function job(overrides: Partial<ScanJob> = {}): ScanJob {
+	return {
+		id: 'job-1',
+		library_id: 'lib-1',
+		status: 'queued',
+		phase: 'queued',
+		phase_done: 0,
+		phase_total: 0,
+		files_found: 0,
+		movies_found: 0,
+		episodes_found: 0,
+		unrecognized: 0,
+		probed: 0,
+		probe_failed: 0,
+		metadata_matched: 0,
+		images_saved: 0,
+		error: null,
+		created_at: '2026-10-19T00:00:00Z',
+		started_at: null,
+		finished_at: null,
+		...overrides
+	};
+}
 
-		const result = await scanLibrary('tok123', 'lib-1');
+describe('startScan', () => {
+	it('POSTs to the /scan sub-path and returns the queued job', async () => {
+		const fetchMock = stubFetch({ ok: true, status: 202, json: () => Promise.resolve(job()) });
 
-		expect(result).toEqual(summary);
+		const result = await startScan('tok123', 'lib-1');
+
+		expect(result.id).toBe('job-1');
 		const [url, options] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/admin/libraries/lib-1/scan');
 		expect(options.method).toBe('POST');
+	});
+});
+
+describe('scanLibrary', () => {
+	it('polls the job until it completes and reports every update', async () => {
+		const responses = [
+			job(),
+			job({ status: 'running', phase: 'saving', phase_done: 1, phase_total: 2 }),
+			job({
+				status: 'completed',
+				phase: 'done',
+				movies_found: 2,
+				metadata_matched: 2,
+				images_saved: 2
+			})
+		];
+		const fetchMock = vi
+			.fn()
+			.mockImplementation(() =>
+				Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(responses.shift()) })
+			);
+		vi.stubGlobal('fetch', fetchMock);
+		const seen: string[] = [];
+
+		const result = await scanLibrary('tok123', 'lib-1', (j) => seen.push(j.phase), {
+			pollMs: 1,
+			createSocket: null
+		});
+
+		expect(result.movies_found).toBe(2);
+		expect(seen).toEqual(['queued', 'saving', 'done']);
+		expect(fetchMock.mock.calls[1][0]).toBe('/api/admin/scan-jobs/job-1');
+	});
+
+	it('rejects when the scan fails', async () => {
+		const responses = [job(), job({ status: 'failed', error: 'library_not_found' })];
+		vi.stubGlobal(
+			'fetch',
+			vi
+				.fn()
+				.mockImplementation(() =>
+					Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(responses.shift()) })
+				)
+		);
+
+		await expect(
+			scanLibrary('tok123', 'lib-1', () => {}, { pollMs: 1, createSocket: null })
+		).rejects.toThrow('library_not_found');
+	});
+});
+
+describe('watchScanJob', () => {
+	it('applies scan_progress events from the socket for this job only', async () => {
+		vi.stubGlobal('window', { location: { href: 'http://localhost:5173/admin/libraries' } });
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockImplementation(() => new Promise(() => {}))
+		);
+		const sent: string[] = [];
+		const socket = {
+			send: (data: string) => sent.push(data),
+			close: vi.fn()
+		} as unknown as WebSocket & { onopen: () => void; onmessage: (e: { data: string }) => void };
+		let socketUrl = '';
+		const updates: ScanJob[] = [];
+
+		const watch = watchScanJob('tok123', job(), (j) => updates.push(j), {
+			pollMs: 60_000,
+			createSocket: (url) => {
+				socketUrl = url;
+				return socket;
+			}
+		});
+		socket.onopen();
+		socket.onmessage({ data: JSON.stringify({ type: 'library_changed', items: [] }) });
+		socket.onmessage({
+			data: JSON.stringify({ type: 'scan_progress', job: job({ id: 'other' }) })
+		});
+		socket.onmessage({
+			data: JSON.stringify({
+				type: 'scan_progress',
+				job: job({ status: 'completed', phase: 'done' })
+			})
+		});
+
+		const finished = await watch.done;
+		expect(socketUrl).toBe('ws://localhost:5173/api/notifications/socket');
+		expect(JSON.parse(sent[0])).toEqual({ token: 'tok123' });
+		expect(updates.map((u) => u.id)).toEqual(['job-1']);
+		expect(finished.status).toBe('completed');
+		expect(socket.close).toHaveBeenCalled();
 	});
 });
 

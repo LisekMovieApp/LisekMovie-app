@@ -2,7 +2,7 @@
 //! re-enriches every media item that isn't `metadata_locked`, using exactly
 //! the same provider-priority / `forced_provider` / `locked_fields`-aware
 //! machinery a manual scan's enrichment pass already uses (see
-//! `metadata_enrichment::enrich_item` and `admin::scan_library`, which this
+//! `metadata_enrichment::enrich_item_cached` and `scan_jobs::scan_library`, which this
 //! module deliberately mirrors rather than reimplements its own copy of).
 //! Every actual field-protection rule still lives exactly where
 //! `scan_library` already enforces it — SQL-level, inside
@@ -34,7 +34,7 @@ use crate::state::AppState;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
 /// This job's own stand-in for the scanning admin's UI language (see
-/// `admin::scan_library`'s identical use of `auth.user.ui_language`) — a
+/// `scan_jobs::scan_library`'s identical use of `auth.user.ui_language`) — a
 /// background pass has no request/admin session to read one from, so it
 /// always asks providers for English-prioritized images until a real
 /// server-wide "metadata language" setting exists (see the roadmap).
@@ -49,7 +49,7 @@ const REFRESH_LANGUAGE: &str = "en";
 /// of `run_once` and end this task silently, since every fallible step
 /// inside it is already handled with `tracing::warn!` + `continue`/
 /// `return` instead of `?`, matching every other long-running piece of
-/// this codebase (see `metadata_enrichment::enrich_item`, which this
+/// this codebase (see `metadata_enrichment::enrich_item_cached`, which this
 /// module leans on directly).
 pub async fn run(state: Arc<AppState>) {
     loop {
@@ -107,6 +107,8 @@ async fn run_once(state: &Arc<AppState>) {
     let mut library_cache: HashMap<Uuid, Option<lisek_core::Library>> = HashMap::new();
     let mut order_cache: HashMap<(Uuid, &'static str), Vec<(String, String)>> = HashMap::new();
 
+    // Items arrive grouped by series, so each show is looked up once.
+    let mut cache = metadata_enrichment::EnrichCache::default();
     let mut items_matched = 0usize;
     let mut items_considered = 0usize;
 
@@ -151,7 +153,8 @@ async fn run_once(state: &Arc<AppState>) {
         };
 
         items_considered += 1;
-        let outcome = metadata_enrichment::enrich_item(
+        let outcome = metadata_enrichment::enrich_item_cached(
+            &mut cache,
             &pool,
             &http,
             &config_dir,

@@ -22,19 +22,28 @@
   simpler and can't drift from what actually got written, at the cost of
   one extra round trip per click (this list is never large enough for that
   to matter).
+
+  Scans run in the background on the server: "Skanuj" queues a job (202)
+  and `watchScanJob` follows it — live `scan_progress` events over the
+  notifications WebSocket, with a slow poll as fallback. Reopening this tab
+  resumes showing any scan that is still running.
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { t } from '$lib/i18n';
 	import { getSessionCookieClientSide } from '$lib/auth';
 	import {
 		fetchLibraries,
 		deleteLibrary,
-		scanLibrary,
+		startScan,
+		fetchScanJobs,
+		watchScanJob,
+		isScanFinished,
 		moveLibrary,
 		type Library,
-		type ScanSummary
+		type ScanJob,
+		type ScanWatch
 	} from '$lib/admin/libraries';
 	import AddLibraryModal from '$lib/components/AddLibraryModal.svelte';
 
@@ -45,7 +54,9 @@
 
 	let busyLibraryId: string | null = $state(null);
 	let scanFailedFor: string | null = $state(null);
-	let scanResults: Record<string, ScanSummary> = $state({});
+	/** Latest known job per library id — running, or the last finished one. */
+	let scanJobs: Record<string, ScanJob> = $state({});
+	const watches: Record<string, ScanWatch> = {};
 	let deleteFailedFor: string | null = $state(null);
 	let confirmingDeleteId: string | null = $state(null);
 	let reorderFailedFor: string | null = $state(null);
@@ -65,7 +76,68 @@
 		}
 	}
 
-	onMount(load);
+	onMount(() => {
+		void load();
+		void resumeActiveScans();
+	});
+
+	onDestroy(() => {
+		for (const watch of Object.values(watches)) watch.stop();
+	});
+
+	function follow(token: string, job: ScanJob) {
+		watches[job.library_id]?.stop();
+		scanJobs[job.library_id] = job;
+		const watch = watchScanJob(token, job, (update) => {
+			scanJobs[update.library_id] = update;
+		});
+		watches[job.library_id] = watch;
+		void watch.done.then((finished) => {
+			if (watches[finished.library_id] === watch) delete watches[finished.library_id];
+			if (finished.status === 'failed') scanFailedFor = finished.library_id;
+		});
+	}
+
+	/** Shows scans that are still running from an earlier visit. */
+	async function resumeActiveScans() {
+		const token = getSessionCookieClientSide();
+		if (!token) return;
+		try {
+			const seen: string[] = [];
+			for (const job of await fetchScanJobs(token)) {
+				if (seen.includes(job.library_id)) continue;
+				seen.push(job.library_id);
+				if (!isScanFinished(job)) follow(token, job);
+			}
+		} catch {
+			// Optional: the page works without it.
+		}
+	}
+
+	function isScanning(libraryId: string): boolean {
+		const job = scanJobs[libraryId];
+		return job !== undefined && !isScanFinished(job);
+	}
+
+	function scanProgressText(job: ScanJob): string {
+		const params = { done: job.phase_done, total: job.phase_total };
+		switch (job.phase) {
+			case 'walking':
+				return t('admin.scan_phase_walking', params);
+			case 'saving':
+				return t('admin.scan_phase_saving', params);
+			case 'enriching':
+				return t('admin.scan_phase_enriching', params);
+			case 'probing':
+				return t('admin.scan_phase_probing', params);
+			default:
+				return t('admin.scan_queued');
+		}
+	}
+
+	function scanPercent(job: ScanJob): number {
+		return job.phase_total > 0 ? Math.min(100, (job.phase_done / job.phase_total) * 100) : 0;
+	}
 
 	function handleCreated(library: Library) {
 		libraries = [...libraries, library];
@@ -77,9 +149,8 @@
 
 		busyLibraryId = library.id;
 		scanFailedFor = null;
-		delete scanResults[library.id];
 		try {
-			scanResults[library.id] = await scanLibrary(token, library.id);
+			follow(token, await startScan(token, library.id));
 		} catch {
 			scanFailedFor = library.id;
 		} finally {
@@ -105,7 +176,9 @@
 		try {
 			await deleteLibrary(token, library.id);
 			libraries = libraries.filter((l) => l.id !== library.id);
-			delete scanResults[library.id];
+			watches[library.id]?.stop();
+			delete watches[library.id];
+			delete scanJobs[library.id];
 		} catch {
 			deleteFailedFor = library.id;
 		} finally {
@@ -212,13 +285,11 @@
 								</a>
 								<button
 									type="button"
-									disabled={busyLibraryId === library.id}
+									disabled={busyLibraryId === library.id || isScanning(library.id)}
 									onclick={() => handleScan(library)}
 									class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-gold-dim disabled:cursor-not-allowed disabled:opacity-50"
 								>
-									{busyLibraryId === library.id && scanFailedFor !== library.id
-										? t('admin.scanning')
-										: t('admin.scan')}
+									{isScanning(library.id) ? t('admin.scanning') : t('admin.scan')}
 								</button>
 								<button
 									type="button"
@@ -236,8 +307,21 @@
 							</div>
 						</div>
 
-						{#if scanResults[library.id]}
-							{@const result = scanResults[library.id]}
+						{#if scanJobs[library.id] && !isScanFinished(scanJobs[library.id])}
+							{@const job = scanJobs[library.id]}
+							<p class="mt-2 text-sm text-neutral-400" aria-live="polite">
+								{scanProgressText(job)}
+							</p>
+							{#if job.phase_total > 0}
+								<div class="mt-1 h-1 w-full overflow-hidden rounded bg-white/10">
+									<div
+										class="h-1 rounded bg-gold transition-[width]"
+										style="width: {scanPercent(job)}%"
+									></div>
+								</div>
+							{/if}
+						{:else if scanJobs[library.id]?.status === 'completed'}
+							{@const result = scanJobs[library.id]}
 							{@const totalItems = result.movies_found + result.episodes_found}
 							<p class="mt-2 text-sm text-neutral-400">
 								{t('admin.scan_result', {
@@ -254,6 +338,14 @@
 										total: totalItems
 									})}
 								</p>
+								{#if result.probed + result.probe_failed > 0}
+									<p class="mt-1 text-sm text-neutral-400">
+										{t('admin.scan_result_probe', {
+											probed: result.probed,
+											failed: result.probe_failed
+										})}
+									</p>
+								{/if}
 								{#if result.images_saved === 0}
 									<p class="mt-1 text-sm text-amber-400">
 										{t('admin.scan_no_images_hint')}

@@ -36,6 +36,34 @@ export interface ScanSummary {
 	images_saved: number;
 }
 
+export type ScanStatus = 'queued' | 'running' | 'completed' | 'failed';
+export type ScanPhase = 'queued' | 'walking' | 'saving' | 'enriching' | 'probing' | 'done';
+
+/** A background scan (`/api/admin/scan-jobs`). Carries every
+ * `ScanSummary` field, filled in as the scan progresses. */
+export interface ScanJob extends ScanSummary {
+	id: string;
+	library_id: string;
+	status: ScanStatus;
+	phase: ScanPhase;
+	/** Progress within `phase`; `phase_total` is 0 while walking (the
+	 * number of files is not known until the walk ends). */
+	phase_done: number;
+	phase_total: number;
+	files_found: number;
+	/** Files whose streams ffprobe read / could not read. */
+	probed: number;
+	probe_failed: number;
+	error: string | null;
+	created_at: string;
+	started_at: string | null;
+	finished_at: string | null;
+}
+
+export function isScanFinished(job: ScanJob): boolean {
+	return job.status === 'completed' || job.status === 'failed';
+}
+
 export async function fetchLibraries(token: string): Promise<Library[]> {
 	const response = await fetch('/api/admin/libraries', { headers: buildAuthHeader(token) });
 	await assertOk(response);
@@ -71,13 +99,139 @@ export async function deleteLibrary(token: string, libraryId: string): Promise<v
 	await assertOk(response);
 }
 
-export async function scanLibrary(token: string, libraryId: string): Promise<ScanSummary> {
+/** Queues a scan; the server answers 202 with the job right away (or the
+ * scan already pending for this library). */
+export async function startScan(token: string, libraryId: string): Promise<ScanJob> {
 	const response = await fetch(`/api/admin/libraries/${encodeURIComponent(libraryId)}/scan`, {
 		method: 'POST',
 		headers: buildAuthHeader(token)
 	});
 	await assertOk(response);
-	return (await response.json()) as ScanSummary;
+	return (await response.json()) as ScanJob;
+}
+
+export async function fetchScanJob(token: string, jobId: string): Promise<ScanJob> {
+	const response = await fetch(`/api/admin/scan-jobs/${encodeURIComponent(jobId)}`, {
+		headers: buildAuthHeader(token)
+	});
+	await assertOk(response);
+	return (await response.json()) as ScanJob;
+}
+
+/** The most recent scans across all libraries, newest first. */
+export async function fetchScanJobs(token: string): Promise<ScanJob[]> {
+	const response = await fetch('/api/admin/scan-jobs', { headers: buildAuthHeader(token) });
+	await assertOk(response);
+	return (await response.json()) as ScanJob[];
+}
+
+export interface WatchOptions {
+	/** Fallback poll interval. Live updates come over the WebSocket; the
+	 * poll covers a socket that is unavailable or missed an event. */
+	pollMs?: number;
+	/** Injection point for tests; `null` disables the socket. */
+	createSocket?: ((url: string) => WebSocket) | null;
+}
+
+export interface ScanWatch {
+	/** Resolves with the finished job (completed or failed). */
+	done: Promise<ScanJob>;
+	stop(): void;
+}
+
+/**
+ * Follows a scan until it finishes: `scan_progress` events from
+ * `/api/notifications/socket` (admin sockets only) for live progress, plus a
+ * slow poll of `GET /api/admin/scan-jobs/{id}` as a fallback.
+ */
+export function watchScanJob(
+	token: string,
+	job: ScanJob,
+	onUpdate: (job: ScanJob) => void,
+	options: WatchOptions = {}
+): ScanWatch {
+	const pollMs = options.pollMs ?? 3000;
+	const createSocket =
+		options.createSocket === undefined ? defaultSocketFactory() : options.createSocket;
+	let stopped = false;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	let socket: WebSocket | undefined;
+	let latest = job;
+	let finish: (job: ScanJob) => void = () => {};
+	const done = new Promise<ScanJob>((resolve) => (finish = resolve));
+
+	function stop() {
+		stopped = true;
+		clearTimeout(timer);
+		socket?.close();
+	}
+
+	function update(next: ScanJob) {
+		if (stopped || next.id !== job.id) return;
+		latest = next;
+		onUpdate(next);
+		if (isScanFinished(next)) {
+			stop();
+			finish(next);
+		}
+	}
+
+	async function poll() {
+		if (stopped) return;
+		try {
+			update(await fetchScanJob(token, job.id));
+		} catch {
+			// Transient; the next poll retries.
+		}
+		if (!stopped) timer = setTimeout(poll, pollMs);
+	}
+
+	if (createSocket && typeof window !== 'undefined') {
+		try {
+			const url = new URL('/api/notifications/socket', window.location.href);
+			url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+			socket = createSocket(url.toString());
+			const current = socket;
+			current.onopen = () => current.send(JSON.stringify({ token }));
+			current.onmessage = (event) => {
+				try {
+					const data = JSON.parse(String(event.data));
+					if (data?.type === 'scan_progress' && data.job) update(data.job as ScanJob);
+				} catch {
+					// Ignore malformed frames.
+				}
+			};
+		} catch {
+			socket = undefined;
+		}
+	}
+
+	if (isScanFinished(latest)) {
+		update(latest);
+	} else {
+		timer = setTimeout(poll, pollMs);
+	}
+	return { done, stop };
+}
+
+function defaultSocketFactory(): ((url: string) => WebSocket) | null {
+	return typeof WebSocket === 'undefined' ? null : (url) => new WebSocket(url);
+}
+
+/** Queues a scan and resolves with its summary once it finishes;
+ * `onProgress` receives every update in between. Rejects when the scan
+ * fails. */
+export async function scanLibrary(
+	token: string,
+	libraryId: string,
+	onProgress: (job: ScanJob) => void = () => {},
+	options: WatchOptions = {}
+): Promise<ScanJob> {
+	const job = await startScan(token, libraryId);
+	onProgress(job);
+	const finished = await watchScanJob(token, job, onProgress, options).done;
+	if (finished.status === 'failed') throw new Error(finished.error ?? 'scan_failed');
+	return finished;
 }
 
 /** Nudges one library up or down in the shared `sort_order` — the "W

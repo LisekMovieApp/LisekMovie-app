@@ -112,3 +112,4 @@ mod tests {
 }
 
 pub mod playback_settings;
+pub mod media_probe;

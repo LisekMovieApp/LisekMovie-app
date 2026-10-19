@@ -19,6 +19,7 @@ mod browser_notifications;
 mod openapi;
 mod metadata_enrichment;
 mod provider_registry;
+mod scan_jobs;
 mod setup;
 mod state;
 
@@ -29,7 +30,6 @@ use axum::{
     routing::{delete, get, post, put},
 };
 use serde_json::{Value, json};
-use tokio::sync::RwLock;
 use tower_http::cors::CorsLayer;
 
 use state::{AppState, ServerMode};
@@ -75,9 +75,7 @@ async fn main() {
         }
     }
 
-    let state = Arc::new(AppState {
-        mode: RwLock::new(mode),
-    });
+    let state = Arc::new(AppState::new(mode));
 
     // Faza 5 completion's "Zadanie w tle": one detached long-running task,
     // started here so it can't delay the server's own startup or block a
@@ -85,6 +83,7 @@ async fn main() {
     // what it does and how it stays safe around locked items/fields.
     tokio::spawn(background_refresh::run(state.clone()));
     tokio::spawn(notifications::run(state.clone()));
+    tokio::spawn(scan_jobs::run_worker(state.clone()));
     tokio::spawn(async {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
@@ -163,8 +162,10 @@ async fn main() {
         )
         .route(
             "/api/admin/libraries/{library_id}/scan",
-            post(admin::scan_library),
+            post(scan_jobs::scan_library),
         )
+        .route("/api/admin/scan-jobs", get(scan_jobs::list))
+        .route("/api/admin/scan-jobs/{job_id}", get(scan_jobs::get))
         .route(
             "/api/admin/libraries/{library_id}/items",
             get(admin::list_library_items),

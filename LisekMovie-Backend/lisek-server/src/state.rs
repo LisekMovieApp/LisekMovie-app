@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use lisek_db::PgPool;
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock, broadcast};
 
 /// Where the app keeps everything that isn't in Postgres: right now, just
 /// `metadata/{posters,backdrops}/{item_id}.jpg` (see
@@ -87,6 +87,32 @@ pub enum ServerMode {
 
 pub struct AppState {
     pub mode: RwLock<ServerMode>,
+    /// Live server events fanned out to WebSocket clients. Slow receivers
+    /// lag and skip, which is fine: every event is a full snapshot.
+    pub events: broadcast::Sender<ServerEvent>,
+    /// Wakes the scan worker when a job is queued; the queue itself is the
+    /// `scan_jobs` table.
+    pub scan_wakeup: Notify,
+}
+
+impl AppState {
+    pub fn new(mode: ServerMode) -> Self {
+        let (events, _) = broadcast::channel(256);
+        Self {
+            mode: RwLock::new(mode),
+            events,
+            scan_wakeup: Notify::new(),
+        }
+    }
+}
+
+/// Server-pushed events. Serialized as `{"type": "...", ...}` on the
+/// notifications WebSocket.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ServerEvent {
+    /// Admin-only: a scan job changed phase or made progress.
+    ScanProgress { job: lisek_db::scan_jobs::ScanJob },
 }
 
 impl AppState {
