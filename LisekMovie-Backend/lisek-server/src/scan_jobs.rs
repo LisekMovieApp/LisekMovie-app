@@ -33,9 +33,9 @@ use tokio::task::JoinSet;
 use uuid::Uuid;
 
 use crate::admin::{
-    AdminError, apply_provider_order, item_type_for_library, map_db_error, require_admin,
+    AdminError, apply_provider_order, item_type_for_library, map_db_error,
 };
-use crate::auth::AuthUser;
+use crate::auth::AdminUser;
 use crate::metadata_enrichment::{self, EnrichCache};
 use crate::state::{ServerEvent, SharedState};
 
@@ -56,12 +56,11 @@ const KEEP_FINISHED_DAYS: i32 = 30;
 /// `scan_progress` events on `/api/notifications/socket`.
 #[utoipa::path(post,path="/api/admin/libraries/{library_id}/scan",tag="admin",params(("library_id"=Uuid,Path)),responses((status=202,body=ScanJob),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn scan_library(
-    auth: AuthUser,
+    AdminUser(auth): AdminUser,
     State(state): State<SharedState>,
     Path(library_id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ScanJob>), AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
     lisek_db::get_library(&pool, library_id)
         .await
         .map_err(map_db_error)?
@@ -80,22 +79,20 @@ pub async fn scan_library(
 /// The 50 most recent scan jobs, newest first.
 #[utoipa::path(get,path="/api/admin/scan-jobs",tag="admin",responses((status=200,body=Vec<ScanJob>),(status=401),(status=403),(status=503)),security(("lisek_auth"=[])))]
 pub async fn list(
-    auth: AuthUser,
+    _admin: AdminUser,
     State(state): State<SharedState>,
 ) -> Result<Json<Vec<ScanJob>>, AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
     Ok(Json(db::list_recent(&pool, 50).await.map_err(map_db_error)?))
 }
 
 #[utoipa::path(get,path="/api/admin/scan-jobs/{job_id}",tag="admin",params(("job_id"=Uuid,Path)),responses((status=200,body=ScanJob),(status=401),(status=403),(status=404),(status=503)),security(("lisek_auth"=[])))]
 pub async fn get(
-    auth: AuthUser,
+    _admin: AdminUser,
     State(state): State<SharedState>,
     Path(job_id): Path<Uuid>,
 ) -> Result<Json<ScanJob>, AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
     db::get(&pool, job_id)
         .await
         .map_err(map_db_error)?
@@ -107,7 +104,7 @@ pub async fn get(
 pub async fn run_worker(state: SharedState) {
     let mut recovered = false;
     loop {
-        let Some(pool) = state.pool().await else {
+        let Some(pool) = state.pool() else {
             wait_for_work(&state).await;
             continue;
         };
@@ -307,7 +304,7 @@ async fn enrich(
     targets: &[(Uuid, lisek_db::EnrichTarget, PathBuf, Option<String>)],
 ) -> Result<(), String> {
     let pool = progress.pool.clone();
-    let global = lisek_db::list_enabled_provider_keys(&pool)
+    let global = crate::provider_registry::enabled_provider_keys(&pool, &progress.state.secrets)
         .await
         .map_err(|e| e.to_string())?;
     // A library can override the admin's global priority order for its own

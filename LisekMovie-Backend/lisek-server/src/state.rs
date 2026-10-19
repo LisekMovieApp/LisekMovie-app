@@ -4,7 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use lisek_db::PgPool;
-use tokio::sync::{Notify, RwLock, broadcast};
+use arc_swap::ArcSwap;
+use lisek_auth::secrets::SecretBox;
+use tokio::sync::{Notify, broadcast};
+
+use crate::rate_limit::FailureLimiter;
 
 /// Where the app keeps everything that isn't in Postgres: right now, just
 /// `metadata/{posters,backdrops}/{item_id}.jpg` (see
@@ -86,7 +90,13 @@ pub enum ServerMode {
 }
 
 pub struct AppState {
-    pub mode: RwLock<ServerMode>,
+    /// Read on every request: an atomic pointer load, no lock. Replaced as
+    /// a whole when the First-Run Wizard finishes (`setup::finish`).
+    pub mode: ArcSwap<ServerMode>,
+    /// Seals provider API keys before they reach the database.
+    pub secrets: SecretBox,
+    /// Failed login / password-change counters (`rate_limit`).
+    pub auth_failures: FailureLimiter,
     /// Live server events fanned out to WebSocket clients. Slow receivers
     /// lag and skip, which is fine: every event is a full snapshot.
     pub events: broadcast::Sender<ServerEvent>,
@@ -96,13 +106,19 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(mode: ServerMode) -> Self {
+    pub fn new(mode: ServerMode, secrets: SecretBox) -> Self {
         let (events, _) = broadcast::channel(256);
         Self {
-            mode: RwLock::new(mode),
+            mode: ArcSwap::from_pointee(mode),
+            secrets,
+            auth_failures: FailureLimiter::default(),
             events,
             scan_wakeup: Notify::new(),
         }
+    }
+
+    pub fn set_mode(&self, mode: ServerMode) {
+        self.mode.store(Arc::new(mode));
     }
 }
 
@@ -119,8 +135,8 @@ impl AppState {
     /// The connection pool, once the server is `Ready`. Used by every
     /// auth-related handler in `auth.rs` and `setup.rs` instead of matching
     /// on `mode` directly.
-    pub async fn pool(&self) -> Option<PgPool> {
-        match &*self.mode.read().await {
+    pub fn pool(&self) -> Option<PgPool> {
+        match &**self.mode.load() {
             ServerMode::Ready(pool) => Some(pool.clone()),
             ServerMode::SetupRequired | ServerMode::DatabaseError(_) => None,
         }

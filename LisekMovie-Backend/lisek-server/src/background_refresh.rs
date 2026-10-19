@@ -59,7 +59,7 @@ pub async fn run(state: Arc<AppState>) {
 }
 
 async fn run_once(state: &Arc<AppState>) {
-    let Some(pool) = state.pool().await else {
+    let Some(pool) = state.pool() else {
         // Not `Ready` yet — a fresh install still sitting in the
         // First-Run Wizard, or a database that's temporarily unreachable.
         // Nothing to do this pass; the next one will simply check again.
@@ -78,7 +78,7 @@ async fn run_once(state: &Arc<AppState>) {
         return;
     }
 
-    let global_providers = match lisek_db::list_enabled_provider_keys(&pool).await {
+    let global_providers = match crate::provider_registry::enabled_provider_keys(&pool, &state.secrets).await {
         Ok(providers) => providers,
         Err(err) => {
             tracing::warn!(%err, "background metadata refresh: failed to list enabled providers");

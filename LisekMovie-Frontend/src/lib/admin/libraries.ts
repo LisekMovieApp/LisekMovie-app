@@ -2,6 +2,7 @@
 // (`/api/admin/libraries/*` on the backend). Same split as `providers.ts`:
 // pure request-shape logic here, unit-tested without rendering Svelte.
 
+import type { components } from '$lib/api/schema';
 import { buildAuthHeader } from '$lib/auth';
 import { assertOk } from './api';
 
@@ -20,45 +21,22 @@ export interface Library {
 	save_metadata_in_media_folder: boolean;
 }
 
-export interface ScanSummary {
-	movies_found: number;
-	episodes_found: number;
-	unrecognized: number;
-	/** How many scanned items matched an enabled, configured metadata
-	 * provider this scan. `0` whenever no provider has both an API key set
-	 * and its "Enabled" toggle on — see `images_saved`'s own comment. */
-	metadata_matched: number;
-	/** How many items actually got a poster and/or backdrop saved to disk
-	 * this scan (media folder or local cache) — can be lower than
-	 * `metadata_matched` when a match had no usable image. A library page
-	 * showing `0` here alongside a nonzero `movies_found`/`episodes_found`
-	 * is the signal to check the provider's API key, not a scanner bug. */
-	images_saved: number;
-}
+/** A background scan (`/api/admin/scan-jobs`). Generated from the
+ * backend's OpenAPI document (`npm run gen:api`), so a renamed or retyped
+ * field fails `npm run check` instead of a request at runtime. */
+export type ScanJob = components['schemas']['ScanJob'];
+export type ScanStatus = components['schemas']['ScanStatus'];
+export type ScanPhase = components['schemas']['ScanPhase'];
 
-export type ScanStatus = 'queued' | 'running' | 'completed' | 'failed';
-export type ScanPhase = 'queued' | 'walking' | 'saving' | 'enriching' | 'probing' | 'done';
-
-/** A background scan (`/api/admin/scan-jobs`). Carries every
- * `ScanSummary` field, filled in as the scan progresses. */
-export interface ScanJob extends ScanSummary {
-	id: string;
-	library_id: string;
-	status: ScanStatus;
-	phase: ScanPhase;
-	/** Progress within `phase`; `phase_total` is 0 while walking (the
-	 * number of files is not known until the walk ends). */
-	phase_done: number;
-	phase_total: number;
-	files_found: number;
-	/** Files whose streams ffprobe read / could not read. */
-	probed: number;
-	probe_failed: number;
-	error: string | null;
-	created_at: string;
-	started_at: string | null;
-	finished_at: string | null;
-}
+/** The counters the libraries tab shows once a scan completes.
+ * `metadata_matched` is `0` whenever no provider has both an API key set
+ * and its "Enabled" toggle on; `images_saved` lower than
+ * `movies_found + episodes_found` alongside `0` matches is the signal to
+ * check the provider's API key, not a scanner bug. */
+export type ScanSummary = Pick<
+	ScanJob,
+	'movies_found' | 'episodes_found' | 'unrecognized' | 'metadata_matched' | 'images_saved'
+>;
 
 export function isScanFinished(job: ScanJob): boolean {
 	return job.status === 'completed' || job.status === 'failed';

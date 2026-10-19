@@ -13,7 +13,9 @@
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write .",
 		"test:unit": "vitest",
-		"test": "npm run test:unit -- --run"
+		"test": "npm run test:unit -- --run",
+		"gen:api": "cd ../LisekMovie-Backend && cargo run --quiet -p lisek-server -- --print-openapi > ../LisekMovie-Frontend/src/lib/api/openapi.json && cd ../LisekMovie-Frontend && openapi-typescript src/lib/api/openapi.json -o src/lib/api/schema.d.ts",
+		"check:api": "npm run gen:api && git diff --exit-code -- src/lib/api"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
@@ -29,6 +31,7 @@
 		"eslint-plugin-svelte": "^3.19.0",
 		"globals": "^17.6.0",
 		"jsdom": "^30.0.1",
+		"openapi-typescript": "^7.13.0",
 		"prettier": "^3.8.3",
 		"prettier-plugin-svelte": "^4.1.0",
 		"prettier-plugin-tailwindcss": "^0.8.0",
@@ -42,5 +45,10 @@
 	},
 	"dependencies": {
 		"hls.js": "^1.7.2"
+	},
+	"overrides": {
+		"openapi-typescript": {
+			"typescript": "$typescript"
+		}
 	}
 }

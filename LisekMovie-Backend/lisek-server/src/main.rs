@@ -1,10 +1,12 @@
 //! LisekMovie server binary.
 //!
-//! Faza 2 added detecting whether a database connection has already been
-//! saved from a completed First-Run Wizard run. Faza 3 adds login/sessions
-//! and splits the router into a public group and an `AuthUser`-protected
-//! group — see `auth.rs` for what "protected" means here. The OpenAPI
-//! surface (utoipa) is still open for a later phase.
+//! Startup: load `.env`, resolve the secret key, connect to the saved
+//! database (or start in setup mode), spawn the background workers, serve
+//! the routes from `routes.rs`.
+//!
+//! `lisek-server --print-openapi` prints the OpenAPI document and exits
+//! without touching a database; the frontend generates its API types from
+//! that output (`npm run gen:api`).
 
 mod admin;
 mod auth;
@@ -19,23 +21,33 @@ mod browser_notifications;
 mod openapi;
 mod metadata_enrichment;
 mod provider_registry;
+mod rate_limit;
+mod routes;
 mod scan_jobs;
 mod setup;
 mod state;
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use axum::{
-    Json, Router,
-    routing::{delete, get, post, put},
-};
-use serde_json::{Value, json};
-use tower_http::cors::CorsLayer;
+use axum::http::{HeaderValue, Method, header};
+use lisek_auth::secrets::SecretBox;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use state::{AppState, ServerMode};
 
 #[tokio::main]
 async fn main() {
+    if std::env::args().any(|arg| arg == "--print-openapi") {
+        let state = Arc::new(AppState::new(
+            ServerMode::SetupRequired,
+            SecretBox::from_encoded_key(&SecretBox::generate_encoded_key()).expect("valid key"),
+        ));
+        let (_, api) = routes::build(&state);
+        println!("{}", api.to_pretty_json().expect("OpenAPI document serializes"));
+        return;
+    }
+
     // No RUST_LOG set → default to "info" so a plain `cargo run` actually
     // shows startup logs, instead of silently sitting at the default
     // "errors only" level.
@@ -75,7 +87,11 @@ async fn main() {
         }
     }
 
-    let state = Arc::new(AppState::new(mode));
+    let secrets = load_secret_key();
+    if let ServerMode::Ready(pool) = &mode {
+        seal_legacy_provider_keys(pool, &secrets).await;
+    }
+    let state = Arc::new(AppState::new(mode, secrets));
 
     // Faza 5 completion's "Zadanie w tle": one detached long-running task,
     // started here so it can't delay the server's own startup or block a
@@ -91,135 +107,11 @@ async fn main() {
         }
     });
 
-    // Reachable with no session at all: health/status checks, the setup
-    // wizard (which by definition runs before any account exists), and
-    // login itself.
-    let public_routes = Router::new()
-        .route("/api/health", get(health))
-        .route("/api/openapi.json", get(openapi::document))
-        .route("/api/playback/{session_id}/stream", get(playback::stream))
-        .route("/api/playback/{session_id}/hls/{file}", get(playback::hls))
-        .route("/api/status", get(setup::status))
-        .route("/api/setup/database/test", post(setup::test_database))
-        .route("/api/setup/finish", post(setup::finish))
-        .route("/api/admin/users", get(users::list).post(users::create))
-        .route("/api/admin/users/{id}", put(users::edit))
-        .route("/api/admin/users/{id}/password", post(users::reset))
-        .route("/api/auth/password", post(users::change))
-        .route("/api/auth/login", post(auth::login));
-
-    // PROTECTED ROUTES — every handler here takes `auth::AuthUser` as a
-    // parameter; that extractor rejecting the request with 401 *is* the
-    // enforcement (see auth.rs's doc comment on `AuthUser`). Add every
-    // future data-serving endpoint (libraries, media, admin settings, ...)
-    // to this group, not `public_routes`.
-    let protected_routes = Router::new()
-        .route("/api/auth/me", get(auth::me))
-        .route("/api/notifications/socket", get(browser_notifications::socket))
-        .route("/api/admin/webhooks", get(notifications::list).post(notifications::create))
-        .route("/api/admin/webhooks/{id}", delete(notifications::delete))
-        .route("/api/admin/webhooks/deliveries", get(notifications::deliveries))
-        .route("/api/games", get(games::list))
-        .route("/api/admin/games", get(games::admin_list))
-        .route("/api/admin/games/{key}", put(games::configure))
-        .route("/api/games/{key}/scores", post(games::save))
-        .route("/api/games/{key}/leaderboard", get(games::leaderboard))
-        .route("/api/media/{item_id}/playback", post(playback::start))
-        .route("/api/playback/{session_id}", delete(playback::stop))
-        .route("/api/playback/{session_id}/progress", put(playback::progress))
-        .route("/api/media/{item_id}/state", get(playback::media_state).put(playback::set_flags))
-        .route("/api/me/list", get(playback::my_list))
-        .route("/api/admin/stats/users", get(playback::stats))
-        .route("/api/admin/playback/settings", get(playback::settings).put(playback::set_settings))
-        .route("/api/admin/playback/capabilities", post(playback::capabilities))
-        .route("/api/admin/playback/safety", get(playback::safety).put(playback::set_safety))
-        .route("/api/auth/logout", post(auth::logout))
-        // Admin-only in practice, not in routing: every handler in
-        // admin.rs re-checks `user.is_admin` itself (see that module's doc
-        // comment) rather than this router having a separate admin-only
-        // sub-group, matching how AuthUser itself is the whole enforcement
-        // for "protected" above.
-        .route("/api/admin/providers", get(admin::list_providers))
-        .route(
-            "/api/admin/providers/{provider_key}",
-            put(admin::update_provider),
-        )
-        .route(
-            "/api/admin/providers/{provider_key}/key",
-            put(admin::set_provider_key).delete(admin::clear_provider_key),
-        )
-        .route(
-            "/api/admin/libraries",
-            get(admin::list_libraries).post(admin::create_library),
-        )
-        .route(
-            "/api/admin/libraries/{library_id}",
-            delete(admin::delete_library),
-        )
-        .route(
-            "/api/admin/libraries/{library_id}/reorder",
-            put(admin::move_library),
-        )
-        .route(
-            "/api/admin/libraries/{library_id}/scan",
-            post(scan_jobs::scan_library),
-        )
-        .route("/api/admin/scan-jobs", get(scan_jobs::list))
-        .route("/api/admin/scan-jobs/{job_id}", get(scan_jobs::get))
-        .route(
-            "/api/admin/libraries/{library_id}/items",
-            get(admin::list_library_items),
-        )
-        .route(
-            "/api/admin/libraries/{library_id}/provider-order/{item_type}",
-            get(admin::get_provider_order).put(admin::set_provider_order),
-        )
-        .route("/api/admin/media/fallback", get(admin::list_fallback_items))
-        .route(
-            "/api/admin/media/{item_id}",
-            get(admin::get_media_item).put(admin::update_media_item),
-        )
-        .route(
-            "/api/admin/media/{item_id}/migrate-to-media-folder",
-            post(admin::migrate_fallback_item),
-        )
-        // Not admin-only — see media.rs's own doc comment.
-        .route("/api/home", get(media::home_feed))
-        .route("/api/libraries", get(media::list_libraries))
-        .route(
-            "/api/libraries/{library_id}/items",
-            get(media::library_items),
-        )
-        .route(
-            "/api/libraries/{library_id}/recent",
-            get(media::library_recent),
-        )
-        .route(
-            "/api/libraries/{library_id}/recommended",
-            get(media::library_recommended),
-        )
-        .route(
-            "/api/libraries/{library_id}/popular",
-            get(media::library_popular),
-        )
-        .route("/api/media/{item_id}", get(media::media_item_detail))
-        .route(
-            "/api/media/{item_id}/seasons",
-            get(media::media_item_seasons),
-        )
-        .route("/api/media/{item_id}/poster", get(media::poster_image))
-        .route("/api/media/{item_id}/backdrop", get(media::backdrop_image))
-        .route("/api/media/{item_id}/logo", get(media::logo_image));
-
-    // Permissive for now: same-origin in dev (via the frontend's Vite
-    // proxy) and planned same-origin in production (one reverse proxy in
-    // front of both). The custom Authorization header and the frontend's
-    // session cookie both need this revisited before this server is ever
-    // exposed to a different origin than its own web app.
-    let app = public_routes
-        .merge(protected_routes)
-        .layer(CorsLayer::permissive())
-        .with_state(state);
+    let (router, _) = routes::build(&state);
+    let mut app = router.with_state(state);
+    if let Some(cors) = cors_layer() {
+        app = app.layer(cors);
+    }
 
     let bind_addr = std::env::var("LISEK_BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
     let listener = tokio::net::TcpListener::bind(&bind_addr)
@@ -252,17 +144,76 @@ async fn detect_initial_mode() -> ServerMode {
     }
 }
 
-async fn health() -> Json<Value> {
-    Json(json!({ "status": "ok", "service": "lisek-server" }))
+/// `LISEK_SECRET_KEY` from the environment / `.env`. On first start a key
+/// is generated and appended to `.env` next to `DATABASE_URL`: back the two
+/// up together. An invalid value stops the server — silently replacing it
+/// would make every stored provider key unreadable.
+fn load_secret_key() -> SecretBox {
+    match std::env::var("LISEK_SECRET_KEY") {
+        Ok(value) if !value.trim().is_empty() => SecretBox::from_encoded_key(&value)
+            .unwrap_or_else(|err| panic!("LISEK_SECRET_KEY is invalid: {err}")),
+        _ => {
+            let key = SecretBox::generate_encoded_key();
+            match env_file::save_var("LISEK_SECRET_KEY", &key) {
+                Ok(()) => tracing::info!(
+                    "generated LISEK_SECRET_KEY and saved it to .env; \
+                     back it up together with the database"
+                ),
+                Err(err) => tracing::error!(
+                    %err,
+                    "generated LISEK_SECRET_KEY but could not save it to .env; provider API \
+                     keys entered now will be unreadable after a restart"
+                ),
+            }
+            SecretBox::from_encoded_key(&key).expect("generated key is valid")
+        }
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn health_reports_ok() {
-        let Json(body) = health().await;
-        assert_eq!(body["status"], "ok");
+/// Encrypts provider API keys saved in plaintext by earlier versions.
+async fn seal_legacy_provider_keys(pool: &lisek_db::PgPool, secrets: &SecretBox) {
+    match lisek_db::seal_legacy_provider_keys(pool, |provider, plain| secrets.seal(plain, provider)).await {
+        Ok(0) => {}
+        Ok(count) => tracing::info!(count, "encrypted provider API keys stored in plaintext"),
+        Err(err) => tracing::error!(%err, "could not encrypt plaintext provider API keys"),
     }
+}
+
+/// CORS is off by default: the web app is served from the same origin as
+/// the API (Vite proxy in development, one reverse proxy in production),
+/// and native clients do not use CORS. A browser app on another origin is
+/// allowed only when listed in `LISEK_CORS_ORIGINS` (comma-separated, e.g.
+/// `https://lisek.example.com,http://localhost:5173`). Auth travels in the
+/// `Authorization` header, never cookies, so credentials stay disabled.
+fn cors_layer() -> Option<CorsLayer> {
+    let raw = std::env::var("LISEK_CORS_ORIGINS").ok()?;
+    let origins: Vec<HeaderValue> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|origin| !origin.is_empty())
+        .filter_map(|origin| match origin.parse::<HeaderValue>() {
+            Ok(value) if origin.starts_with("http://") || origin.starts_with("https://") => Some(value),
+            _ => {
+                tracing::error!(origin, "ignoring invalid entry in LISEK_CORS_ORIGINS");
+                None
+            }
+        })
+        .collect();
+    if origins.is_empty() {
+        return None;
+    }
+    tracing::info!(origins = %raw, "CORS enabled for listed origins");
+    Some(
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::list(origins))
+            .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+            .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE, header::RANGE])
+            .expose_headers([
+                header::CONTENT_RANGE,
+                header::ACCEPT_RANGES,
+                header::CONTENT_LENGTH,
+                header::RETRY_AFTER,
+            ])
+            .max_age(Duration::from_secs(600)),
+    )
 }

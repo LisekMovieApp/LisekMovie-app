@@ -179,7 +179,7 @@ pub async fn home_feed(
     _auth: AuthUser,
     State(state): State<SharedState>,
 ) -> Result<Json<HomeFeedResponse>, MediaError> {
-    let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
+    let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
 
     // Five independent index-backed queries: run them concurrently on
     // separate pool connections instead of back to back.
@@ -256,7 +256,7 @@ pub async fn list_libraries(
     _auth: AuthUser,
     State(state): State<SharedState>,
 ) -> Result<Json<Vec<PublicLibraryResponse>>, MediaError> {
-    let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
+    let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
     let libraries = lisek_db::list_libraries(&pool)
         .await
         .map_err(|_| MediaError::Internal)?;
@@ -363,7 +363,7 @@ pub async fn library_items(
     Path(library_id): Path<Uuid>,
     Query(query): Query<LibraryItemsQuery>,
 ) -> Result<Json<LibraryItemsResponse>, MediaError> {
-    let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
+    let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
 
     let library = lisek_db::get_library(&pool, library_id)
         .await
@@ -422,7 +422,7 @@ pub async fn library_recent(
     State(state): State<SharedState>,
     Path(library_id): Path<Uuid>,
 ) -> Result<Json<LibraryRowResponse>, MediaError> {
-    let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
+    let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
 
     let library = lisek_db::get_library(&pool, library_id)
         .await
@@ -449,7 +449,7 @@ pub async fn library_recommended(
     State(state): State<SharedState>,
     Path(library_id): Path<Uuid>,
 ) -> Result<Json<LibraryRowResponse>, MediaError> {
-    let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
+    let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
 
     let library = lisek_db::get_library(&pool, library_id)
         .await
@@ -475,7 +475,7 @@ pub async fn library_popular(
     State(state): State<SharedState>,
     Path(library_id): Path<Uuid>,
 ) -> Result<Json<LibraryRowResponse>, MediaError> {
-    let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
+    let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
 
     let library = lisek_db::get_library(&pool, library_id)
         .await
@@ -508,7 +508,7 @@ pub async fn media_item_detail(
     State(state): State<SharedState>,
     Path(item_id): Path<Uuid>,
 ) -> Result<Json<MediaItemResponse>, MediaError> {
-    let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
+    let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
     let item = lisek_db::get_media_item(&pool, item_id)
         .await
         .map_err(|_| MediaError::Internal)?
@@ -570,7 +570,7 @@ pub async fn media_item_seasons(
     State(state): State<SharedState>,
     Path(item_id): Path<Uuid>,
 ) -> Result<Json<Vec<SeriesSeasonResponse>>, MediaError> {
-    let pool = state.pool().await.ok_or(MediaError::ServerNotReady)?;
+    let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
     let seasons = lisek_db::list_series_seasons(&pool, item_id)
         .await
         .map_err(|_| MediaError::Internal)?;
@@ -697,7 +697,7 @@ async fn read_media_folder_image(
     item_id: Uuid,
     filename: &str,
 ) -> Option<Vec<u8>> {
-    let pool = state.pool().await?;
+    let pool = state.pool()?;
     let file_path = match lisek_db::get_media_item_file_path(&pool, item_id).await {
         Ok(Some(file_path)) => file_path,
         Ok(None) => {

@@ -31,8 +31,8 @@ pub struct StatusResponse {
 /// `/setup`.
 #[utoipa::path(get,path="/api/status",tag="setup",responses((status=200,body=StatusResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)))]
 pub async fn status(State(state): State<SharedState>) -> Json<StatusResponse> {
-    let mode = state.mode.read().await;
-    let (setup_required, database_connected) = match &*mode {
+    let mode = state.mode.load();
+    let (setup_required, database_connected) = match &**mode {
         ServerMode::SetupRequired => (true, false),
         ServerMode::DatabaseError(_) => (false, false),
         ServerMode::Ready(_) => (false, true),
@@ -66,8 +66,7 @@ fn setup_error(error_code: &'static str, message: impl Into<String>) -> SetupErr
 /// configured — otherwise anyone could hit `/api/setup/finish` after the
 /// fact and create a second, unauthenticated admin account.
 async fn guard_setup_not_already_done(state: &AppState) -> Result<(), SetupError> {
-    let mode = state.mode.read().await;
-    if !matches!(&*mode, ServerMode::SetupRequired) {
+    if !matches!(&**state.mode.load(), ServerMode::SetupRequired) {
         return Err(setup_error(
             "setup_already_complete",
             "Setup has already been completed on this server.",
@@ -161,7 +160,10 @@ pub async fn finish(
         ));
     }
 
-    *state.mode.write().await = ServerMode::Ready(pool);
+    state.set_mode(ServerMode::Ready(pool));
+    // A scan cannot have been queued before setup, but the worker sleeps
+    // until woken; this makes it pick up the database right away.
+    state.scan_wakeup.notify_one();
 
     tracing::info!("First-Run Wizard completed — server is now fully configured.");
 

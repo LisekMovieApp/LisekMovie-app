@@ -1,2 +1,10 @@
-# Auto detect text files and perform LF normalization
+# Normalize line endings of text files to LF in the repository.
 * text=auto
+
+# LF in every working copy too, whatever core.autocrlf says:
+# - *.sql: sqlx stores a checksum of each migration's exact bytes, so a
+#   CRLF checkout would stop matching a database migrated from an LF one;
+# - *.rs: SQL inside sqlx query macros, rustfmt and diffs stay identical
+#   on every platform.
+*.rs  text eol=lf
+*.sql text eol=lf

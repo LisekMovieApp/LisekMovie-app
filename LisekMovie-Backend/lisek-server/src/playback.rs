@@ -32,13 +32,11 @@ pub async fn hls(State(state):State<SharedState>,Path((id,file)):Path<(Uuid,Stri
     Ok(([(header::CONTENT_TYPE,content_type),(header::CACHE_CONTROL,"private, no-store")],body).into_response())
 }
 #[utoipa::path(get,path="/api/admin/playback/safety",responses((status=200,body=db::SafetyConfig),(status=403)),security(("lisek_auth"=[])))]
-pub async fn safety(auth:AuthUser,State(state):State<SharedState>)->Result<Json<db::SafetyConfig>,PlaybackError>{
-    if !auth.user.is_admin{return Err(PlaybackError(StatusCode::FORBIDDEN,"admin_required"));}
+pub async fn safety(_admin: AdminUser,State(state):State<SharedState>)->Result<Json<db::SafetyConfig>,PlaybackError>{
     Ok(Json(db::safety(&pool(&state).await?).await?))
 }
 #[utoipa::path(put,path="/api/admin/playback/safety",request_body=db::SafetyConfig,responses((status=204),(status=400),(status=403)),security(("lisek_auth"=[])))]
-pub async fn set_safety(auth:AuthUser,State(state):State<SharedState>,Json(req):Json<db::SafetyConfig>)->Result<StatusCode,PlaybackError>{
-    if !auth.user.is_admin{return Err(PlaybackError(StatusCode::FORBIDDEN,"admin_required"));}
+pub async fn set_safety(_admin: AdminUser,State(state):State<SharedState>,Json(req):Json<db::SafetyConfig>)->Result<StatusCode,PlaybackError>{
     if !(1..=16384).contains(&req.max_width)||!(1..=16384).contains(&req.max_height)||req.max_bitrate_kbps.is_some_and(|b|b<=0){return Err(PlaybackError(StatusCode::BAD_REQUEST,"invalid_safety_limits"));}
     db::set_safety(&pool(&state).await?,&req).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -49,7 +47,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
-use crate::{auth::AuthUser, state::SharedState};
+use crate::{auth::{AdminUser,AuthUser}, state::SharedState};
 use lisek_db::playback as db;
 
 pub struct PlaybackError(pub(crate) StatusCode, pub(crate) &'static str);
@@ -65,7 +63,7 @@ impl From<lisek_db::DbError> for PlaybackError {
     }
 }
 pub(crate) async fn pool(state: &SharedState) -> Result<lisek_db::PgPool, PlaybackError> {
-    state.pool().await.ok_or(PlaybackError(StatusCode::SERVICE_UNAVAILABLE, "server_not_ready"))
+    state.pool().ok_or(PlaybackError(StatusCode::SERVICE_UNAVAILABLE, "server_not_ready"))
 }
 async fn checked_file(source: &db::Source) -> Result<std::path::PathBuf, PlaybackError> {
     let missing = || PlaybackError(StatusCode::NOT_FOUND, "media_file_unavailable");
@@ -160,7 +158,7 @@ pub async fn start(auth: AuthUser, State(state): State<SharedState>, Path(item_i
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(15)).await;
-                let Some(pool)=guard_state.pool().await else { break; };
+                let Some(pool)=guard_state.pool() else { break; };
                 if !db::session_alive(&pool,session_id).await.unwrap_or(false) || enforce_safety(&pool,session_id,&guard_info).await.is_err(){break;}
                 if !lisek_playback::transcode::exists(&session_id.to_string()).await {break;}
             }
@@ -249,20 +247,17 @@ pub async fn my_list(auth:AuthUser,State(state):State<SharedState>) -> Result<Js
     Ok(Json(json!(db::my_list(&pool(&state).await?,auth.user.id).await?)))
 }
 #[utoipa::path(get,path="/api/admin/stats/users",responses((status=200,body=Value),(status=401),(status=403)),security(("lisek_auth"=[])))]
-pub async fn stats(auth:AuthUser,State(state):State<SharedState>) -> Result<Json<Value>,PlaybackError> {
-    if !auth.user.is_admin { return Err(PlaybackError(StatusCode::FORBIDDEN,"admin_required")); }
+pub async fn stats(_admin: AdminUser,State(state):State<SharedState>) -> Result<Json<Value>,PlaybackError> {
     Ok(Json(json!(db::stats(&pool(&state).await?).await?)))
 }
 
 
 #[utoipa::path(get,path="/api/admin/playback/settings",responses((status=200,body=lisek_core::playback_settings::PlaybackSettings),(status=403)),security(("lisek_auth"=[])))]
-pub async fn settings(auth:AuthUser,State(state):State<SharedState>)->Result<Json<lisek_core::playback_settings::PlaybackSettings>,PlaybackError>{
-    if !auth.user.is_admin{return Err(PlaybackError(StatusCode::FORBIDDEN,"admin_required"));}
+pub async fn settings(_admin: AdminUser,State(state):State<SharedState>)->Result<Json<lisek_core::playback_settings::PlaybackSettings>,PlaybackError>{
     Ok(Json(db::settings(&pool(&state).await?).await?))
 }
 #[utoipa::path(put,path="/api/admin/playback/settings",request_body=lisek_core::playback_settings::PlaybackSettings,responses((status=204),(status=400),(status=403)),security(("lisek_auth"=[])))]
-pub async fn set_settings(auth:AuthUser,State(state):State<SharedState>,Json(req):Json<lisek_core::playback_settings::PlaybackSettings>)->Result<StatusCode,PlaybackError>{
-    if !auth.user.is_admin{return Err(PlaybackError(StatusCode::FORBIDDEN,"admin_required"));}
+pub async fn set_settings(_admin: AdminUser,State(state):State<SharedState>,Json(req):Json<lisek_core::playback_settings::PlaybackSettings>)->Result<StatusCode,PlaybackError>{
     if !req.validate() || (!req.transcoding_temp_path.is_empty() && !std::path::Path::new(&req.transcoding_temp_path).is_absolute()) {
         return Err(PlaybackError(StatusCode::BAD_REQUEST,"invalid_playback_settings"));
     }
@@ -270,8 +265,7 @@ pub async fn set_settings(auth:AuthUser,State(state):State<SharedState>,Json(req
     Ok(StatusCode::NO_CONTENT)
 }
 #[utoipa::path(post,path="/api/admin/playback/capabilities",request_body=lisek_core::playback_settings::PlaybackSettings,responses((status=200,body=Value),(status=400),(status=403),(status=503)),security(("lisek_auth"=[])))]
-pub async fn capabilities(auth:AuthUser,Json(req):Json<lisek_core::playback_settings::PlaybackSettings>)->Result<Json<Value>,PlaybackError>{
-    if !auth.user.is_admin{return Err(PlaybackError(StatusCode::FORBIDDEN,"admin_required"));}
+pub async fn capabilities(_admin: AdminUser,Json(req):Json<lisek_core::playback_settings::PlaybackSettings>)->Result<Json<Value>,PlaybackError>{
     if !req.validate(){return Err(PlaybackError(StatusCode::BAD_REQUEST,"invalid_playback_settings"));}
     let caps=lisek_playback::transcode::capabilities(&req).await.map_err(|_|PlaybackError(StatusCode::SERVICE_UNAVAILABLE,"ffmpeg_unavailable"))?;
     Ok(Json(json!(caps)))

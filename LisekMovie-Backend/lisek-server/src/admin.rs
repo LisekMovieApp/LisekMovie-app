@@ -1,10 +1,12 @@
 //! Admin-only endpoints: the metadata provider registry backing the Admin
 //! Panel's plugins tab (enable/disable, priority, and setting/clearing an
 //! API key), plus, as of Faza 5, library management (create/list/delete).
-//! Scans are queued from `scan_jobs.rs` and run by its background worker. Every handler here
-//! takes `AuthUser` and immediately calls `require_admin` — that check (not
-//! a separate role-checking middleware layer) is this module's entire
-//! security boundary, the same way `AuthUser` itself is `auth.rs`'s.
+//! Scans are queued from `scan_jobs.rs` and run by its background worker.
+//!
+//! Access: every route here is registered in the admin router (`routes.rs`),
+//! which puts the `AdminUser` extractor in front of all of them as a layer.
+//! Each handler also takes `AdminUser` itself, so moving a handler to the
+//! wrong router cannot silently make it public.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -14,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::auth::AuthUser;
+use crate::auth::AdminUser;
 use crate::state::SharedState;
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -40,11 +42,10 @@ impl From<lisek_metadata::ProviderConfig> for ProviderConfigResponse {
 
 #[utoipa::path(get,path="/api/admin/providers",tag="admin",responses((status=200,body=Vec<ProviderConfigResponse>),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn list_providers(
-    auth: AuthUser,
+    _admin: AdminUser,
     State(state): State<SharedState>,
 ) -> Result<Json<Vec<ProviderConfigResponse>>, AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
 
     let providers = lisek_db::list_provider_configs(&pool)
         .await
@@ -61,13 +62,12 @@ pub struct UpdateProviderRequest {
 
 #[utoipa::path(put,path="/api/admin/providers/{provider_key}",tag="admin",params(("provider_key"=String,Path)),request_body=UpdateProviderRequest,responses((status=200,body=Value),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn update_provider(
-    auth: AuthUser,
+    AdminUser(auth): AdminUser,
     State(state): State<SharedState>,
     Path(provider_key): Path<String>,
     Json(req): Json<UpdateProviderRequest>,
 ) -> Result<Json<Value>, AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
 
     lisek_db::set_provider_enabled_and_priority(&pool, &provider_key, req.enabled, req.priority)
         .await
@@ -94,13 +94,11 @@ pub struct SetProviderKeyRequest {
 /// thing a client ever learns about a stored key without setting a new one.
 #[utoipa::path(put,path="/api/admin/providers/{provider_key}/key",tag="admin",params(("provider_key"=String,Path)),request_body=SetProviderKeyRequest,responses((status=200,body=Value),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn set_provider_key(
-    auth: AuthUser,
+    AdminUser(auth): AdminUser,
     State(state): State<SharedState>,
     Path(provider_key): Path<String>,
     Json(req): Json<SetProviderKeyRequest>,
 ) -> Result<Json<Value>, AdminError> {
-    require_admin(&auth)?;
-
     let api_key = req.api_key.trim();
     if api_key.is_empty() {
         return Err(AdminError::InvalidInput(
@@ -108,8 +106,11 @@ pub async fn set_provider_key(
         ));
     }
 
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
-    lisek_db::set_provider_api_key(&pool, &provider_key, api_key)
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
+    // Sealed with the provider key as context: the database never sees the
+    // plaintext, and a value copied to another provider's row won't open.
+    let sealed = state.secrets.seal(api_key, &provider_key);
+    lisek_db::set_provider_api_key(&pool, &provider_key, &sealed)
         .await
         .map_err(map_db_error)?;
 
@@ -118,13 +119,13 @@ pub async fn set_provider_key(
     Ok(Json(json!({ "ok": true })))
 }
 
+#[utoipa::path(delete,path="/api/admin/providers/{provider_key}/key",tag="admin",params(("provider_key"=String,Path)),responses((status=200,body=Value),(status=404),(status=401),(status=403),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn clear_provider_key(
-    auth: AuthUser,
+    AdminUser(auth): AdminUser,
     State(state): State<SharedState>,
     Path(provider_key): Path<String>,
 ) -> Result<Json<Value>, AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
 
     lisek_db::clear_provider_api_key(&pool, &provider_key)
         .await
@@ -160,11 +161,10 @@ impl From<lisek_core::Library> for LibraryResponse {
 
 #[utoipa::path(get,path="/api/admin/libraries",tag="admin",responses((status=200,body=Vec<LibraryResponse>),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn list_libraries(
-    auth: AuthUser,
+    _admin: AdminUser,
     State(state): State<SharedState>,
 ) -> Result<Json<Vec<LibraryResponse>>, AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
 
     let libraries = lisek_db::list_libraries(&pool)
         .await
@@ -191,13 +191,12 @@ pub struct CreateLibraryRequest {
     pub save_metadata_in_media_folder: bool,
 }
 
+#[utoipa::path(post,path="/api/admin/libraries",tag="admin",request_body=CreateLibraryRequest,responses((status=200,body=LibraryResponse),(status=400),(status=401),(status=403),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn create_library(
-    auth: AuthUser,
+    AdminUser(auth): AdminUser,
     State(state): State<SharedState>,
     Json(req): Json<CreateLibraryRequest>,
 ) -> Result<Json<LibraryResponse>, AdminError> {
-    require_admin(&auth)?;
-
     let name = req.name.trim();
     if name.is_empty() {
         return Err(AdminError::InvalidInput("name cannot be empty".to_string()));
@@ -208,7 +207,7 @@ pub async fn create_library(
         ));
     }
 
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
     let library = lisek_db::create_library(
         &pool,
         name,
@@ -231,12 +230,11 @@ pub async fn create_library(
 
 #[utoipa::path(delete,path="/api/admin/libraries/{library_id}",tag="admin",params(("library_id"=uuid::Uuid,Path)),responses((status=200,body=Value),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn delete_library(
-    auth: AuthUser,
+    AdminUser(auth): AdminUser,
     State(state): State<SharedState>,
     Path(library_id): Path<Uuid>,
 ) -> Result<Json<Value>, AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
 
     lisek_db::delete_library(&pool, library_id)
         .await
@@ -262,13 +260,12 @@ pub struct MoveLibraryRequest {
 /// ordering is global rather than per-account.
 #[utoipa::path(put,path="/api/admin/libraries/{library_id}/reorder",tag="admin",params(("library_id"=uuid::Uuid,Path)),request_body=MoveLibraryRequest,responses((status=200,body=Value),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn move_library(
-    auth: AuthUser,
+    AdminUser(auth): AdminUser,
     State(state): State<SharedState>,
     Path(library_id): Path<Uuid>,
     Json(req): Json<MoveLibraryRequest>,
 ) -> Result<Json<Value>, AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
 
     let direction = match req.direction.as_str() {
         "up" => lisek_db::LibraryMoveDirection::Up,
@@ -299,12 +296,11 @@ pub async fn move_library(
 /// for exactly what rides along).
 #[utoipa::path(get,path="/api/admin/libraries/{library_id}/items",tag="admin",params(("library_id"=uuid::Uuid,Path)),responses((status=200,body=Vec<lisek_db::MediaItemSummary>),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn list_library_items(
-    auth: AuthUser,
+    _admin: AdminUser,
     State(state): State<SharedState>,
     Path(library_id): Path<Uuid>,
 ) -> Result<Json<Vec<lisek_db::MediaItemSummary>>, AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
 
     let items = lisek_db::list_media_items_for_library(&pool, library_id)
         .await
@@ -316,12 +312,11 @@ pub async fn list_library_items(
 /// it opens.
 #[utoipa::path(get,path="/api/admin/media/{item_id}",tag="admin",params(("item_id"=uuid::Uuid,Path)),responses((status=200,body=lisek_db::MediaItemDetail),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn get_media_item(
-    auth: AuthUser,
+    _admin: AdminUser,
     State(state): State<SharedState>,
     Path(item_id): Path<Uuid>,
 ) -> Result<Json<lisek_db::MediaItemDetail>, AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
 
     let item = lisek_db::get_media_item_detail(&pool, item_id)
         .await
@@ -346,14 +341,13 @@ pub struct UpdateMediaItemRequest {
 /// surface that's never gated on `locked_fields` (an admin's own edit
 /// always applies) and the one place `locked_fields` itself, plus
 /// `metadata_locked`/`forced_provider`, actually get written.
+#[utoipa::path(put,path="/api/admin/media/{item_id}",tag="admin",params(("item_id"=Uuid,Path)),request_body=UpdateMediaItemRequest,responses((status=200,body=Value),(status=400),(status=404),(status=401),(status=403),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn update_media_item(
-    auth: AuthUser,
+    AdminUser(auth): AdminUser,
     State(state): State<SharedState>,
     Path(item_id): Path<Uuid>,
     Json(req): Json<UpdateMediaItemRequest>,
 ) -> Result<Json<Value>, AdminError> {
-    require_admin(&auth)?;
-
     let title = req.title.trim();
     if title.is_empty() {
         return Err(AdminError::InvalidInput(
@@ -361,7 +355,7 @@ pub async fn update_media_item(
         ));
     }
 
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
     let updated = lisek_db::update_media_item(
         &pool,
         item_id,
@@ -395,11 +389,10 @@ pub async fn update_media_item(
 /// warning view.
 #[utoipa::path(get,path="/api/admin/media/fallback",tag="admin",responses((status=200,body=Vec<lisek_db::FallbackItem>),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn list_fallback_items(
-    auth: AuthUser,
+    _admin: AdminUser,
     State(state): State<SharedState>,
 ) -> Result<Json<Vec<lisek_db::FallbackItem>>, AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
 
     let items = lisek_db::list_fallback_items(&pool)
         .await
@@ -424,12 +417,11 @@ pub struct MigrateFallbackResponse {
 /// progress worth reflecting in the flag.
 #[utoipa::path(post,path="/api/admin/media/{item_id}/migrate-to-media-folder",tag="admin",params(("item_id"=uuid::Uuid,Path)),responses((status=200,body=MigrateFallbackResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn migrate_fallback_item(
-    auth: AuthUser,
+    AdminUser(auth): AdminUser,
     State(state): State<SharedState>,
     Path(item_id): Path<Uuid>,
 ) -> Result<Json<MigrateFallbackResponse>, AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
 
     let file_path = lisek_db::get_media_item_file_path(&pool, item_id)
         .await
@@ -509,12 +501,11 @@ pub struct ProviderOrderPayload {
 /// "use the admin's global priority order" — see `apply_provider_order`.
 #[utoipa::path(get,path="/api/admin/libraries/{library_id}/provider-order/{item_type}",tag="admin",params(("library_id"=uuid::Uuid,Path),("item_type"=String,Path)),responses((status=200,body=ProviderOrderPayload),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn get_provider_order(
-    auth: AuthUser,
+    _admin: AdminUser,
     State(state): State<SharedState>,
     Path((library_id, item_type)): Path<(Uuid, String)>,
 ) -> Result<Json<ProviderOrderPayload>, AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
 
     let order = lisek_db::get_library_provider_order(&pool, library_id, &item_type)
         .await
@@ -525,14 +516,14 @@ pub async fn get_provider_order(
     }))
 }
 
+#[utoipa::path(put,path="/api/admin/libraries/{library_id}/provider-order/{item_type}",tag="admin",params(("library_id"=Uuid,Path),("item_type"=String,Path,description="movie | episode")),request_body=ProviderOrderPayload,responses((status=200,body=Value),(status=400),(status=404),(status=401),(status=403),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn set_provider_order(
-    auth: AuthUser,
+    AdminUser(auth): AdminUser,
     State(state): State<SharedState>,
     Path((library_id, item_type)): Path<(Uuid, String)>,
     Json(req): Json<ProviderOrderPayload>,
 ) -> Result<Json<Value>, AdminError> {
-    require_admin(&auth)?;
-    let pool = state.pool().await.ok_or(AdminError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
 
     lisek_db::set_library_provider_order(&pool, library_id, &item_type, &req.provider_order)
         .await
@@ -592,14 +583,6 @@ pub(crate) fn apply_provider_order(
     ordered
 }
 
-pub(crate) fn require_admin(auth: &AuthUser) -> Result<(), AdminError> {
-    if auth.user.is_admin {
-        Ok(())
-    } else {
-        Err(AdminError::Forbidden)
-    }
-}
-
 pub(crate) fn map_db_error(err: lisek_db::DbError) -> AdminError {
     match err {
         lisek_db::DbError::ProviderNotFound => AdminError::ProviderNotFound,
@@ -614,7 +597,6 @@ pub(crate) fn map_db_error(err: lisek_db::DbError) -> AdminError {
 #[derive(Debug)]
 pub enum AdminError {
     ServerNotReady,
-    Forbidden,
     ProviderNotFound,
     LibraryNotFound,
     ItemNotFound,
@@ -629,11 +611,6 @@ impl IntoResponse for AdminError {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "server_not_ready",
                 "The server isn't fully configured yet.".to_string(),
-            ),
-            AdminError::Forbidden => (
-                StatusCode::FORBIDDEN,
-                "forbidden",
-                "This account is not an administrator.".to_string(),
             ),
             AdminError::ProviderNotFound => (
                 StatusCode::NOT_FOUND,

@@ -14,15 +14,18 @@
 //! same header; that's a web-client implementation detail the Rust side
 //! neither knows nor cares about.
 
+use std::net::SocketAddr;
+
 use axum::Json;
-use axum::extract::State;
-use axum::http::{StatusCode, request::Parts};
+use axum::extract::{ConnectInfo, State};
+use axum::http::{HeaderMap, StatusCode, header, request::Parts};
 use axum::response::{IntoResponse, Response};
 
 use serde::{Deserialize, Serialize};
 
 use lisek_core::User;
 
+use crate::rate_limit;
 use crate::state::SharedState;
 
 /// A valid Argon2id hash of an arbitrary fixed password, computed once
@@ -51,20 +54,37 @@ pub struct LoginResponse {
     pub user: User,
 }
 
-#[utoipa::path(post,path="/api/auth/login",tag="auth",request_body=LoginRequest,responses((status=200,body=LoginResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)))]
+/// Failed attempts are limited per client address and per username (see
+/// `rate_limit`); a blocked client gets 429 with `Retry-After` before any
+/// password hashing happens.
+#[utoipa::path(post,path="/api/auth/login",tag="auth",request_body=LoginRequest,responses((status=200,body=LoginResponse),(status=400),(status=401),(status=429,description="Too many failed attempts; see Retry-After"),(status=500),(status=503)))]
 pub async fn login(
     State(state): State<SharedState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(req): Json<LoginRequest>,
 ) -> Result<AuthReply, AuthError> {
-    let pool = state.pool().await.ok_or(AuthError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AuthError::ServerNotReady)?;
 
     if req.password.len()>1024 || req.username.len()>128 || req.username.trim().is_empty() { return Err(AuthError::InvalidCredentials); }
+    // X-Forwarded-For is honoured only from the trusted proxies configured
+    // for playback, so a client cannot pick its own rate-limit bucket.
+    let trusted = lisek_db::playback::settings(&pool).await.map(|s| s.trusted_proxies).unwrap_or_default();
+    let forwarded = headers.get("x-forwarded-for").and_then(|h| h.to_str().ok());
+    let client = lisek_core::playback_settings::client_address(peer.ip(), forwarded, &trusted);
+    let limit_keys = rate_limit::login_keys(client, &req.username);
+    state.auth_failures.check(&limit_keys).map_err(AuthError::TooManyAttempts)?;
+
     let found = lisek_db::find_user_with_password_hash(&pool, req.username.trim()).await.map_err(|_| AuthError::Internal)?;
     let expected_hash = found.as_ref().map(|(_,hash)|hash.clone()).unwrap_or_else(||DUMMY_PASSWORD_HASH.to_owned());
     let check_hash=expected_hash.clone();
     let password=req.password;
     let password_ok=tokio::task::spawn_blocking(move ||lisek_auth::verify_password(&password,&check_hash).unwrap_or(false)).await.map_err(|_|AuthError::Internal)?;
-    let Some((user,_))=found.filter(|(u,_)|password_ok && !u.disabled) else { return Err(AuthError::InvalidCredentials); };
+    let Some((user,_))=found.filter(|(u,_)|password_ok && !u.disabled) else {
+        state.auth_failures.record_failure(&limit_keys);
+        tracing::warn!(%client, "failed login attempt");
+        return Err(AuthError::InvalidCredentials);
+    };
     let token=lisek_auth::generate_session_token();
     let created=lisek_db::users::login_session(&pool,user.id,&expected_hash,&lisek_auth::hash_session_token(&token),
         req.client.as_deref().unwrap_or("unknown"),req.device.as_deref().unwrap_or("unknown"),req.device_id.as_deref().unwrap_or("unknown"))
@@ -76,8 +96,10 @@ pub async fn login(
     Ok(no_store(LoginResponse { token, user }))
 }
 
-#[utoipa::path(get,path="/api/auth/me",tag="auth",responses((status=200,body=User),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
-pub async fn me(AuthUser { user, .. }: AuthUser) -> Json<User> {
+/// Also answers for a session that still has to change its temporary
+/// password, so the client can show the password form.
+#[utoipa::path(get,path="/api/auth/me",tag="auth",responses((status=200,body=User),(status=401),(status=500),(status=503)),security(("lisek_auth"=[])))]
+pub async fn me(SessionUser { user, .. }: SessionUser) -> Json<User> {
     Json(user)
 }
 
@@ -88,10 +110,10 @@ pub struct LogoutResponse {
 
 #[utoipa::path(post,path="/api/auth/logout",tag="auth",responses((status=200,body=LogoutResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn logout(
-    AuthUser { token_hash, .. }: AuthUser,
+    SessionUser { token_hash, .. }: SessionUser,
     State(state): State<SharedState>,
 ) -> Result<Json<LogoutResponse>, AuthError> {
-    let pool = state.pool().await.ok_or(AuthError::ServerNotReady)?;
+    let pool = state.pool().ok_or(AuthError::ServerNotReady)?;
 
     lisek_db::delete_session_by_token_hash(&pool, &token_hash)
         .await
@@ -100,40 +122,92 @@ pub async fn logout(
     Ok(Json(LogoutResponse { ok: true }))
 }
 
-/// Extractor that resolves the `Authorization` header to a logged-in user,
-/// or fails the whole request with [`AuthError`] before the handler body
-/// ever runs. Using this as a handler parameter — `async fn h(auth: AuthUser,
-/// ...)` — IS how a route requires authentication in this codebase; there's
-/// no separate `middleware::from_fn` layer to remember to add. Add every new
-/// data-serving route in `main.rs` to the protected group with `AuthUser` as
-/// its first parameter, the same way `me`/`logout` above do it.
+/// The three access levels, as extractors. Taking one as a handler
+/// parameter is how a handler requires it; the extractor rejects the
+/// request before the handler body runs.
+///
+/// - [`SessionUser`]: any valid session, including one that still has to
+///   replace its temporary password. Only `me`, `logout` and password
+///   change accept this.
+/// - [`AuthUser`]: a session with full access (password already changed).
+/// - [`AdminUser`]: an [`AuthUser`] with the administrator role. Every
+///   `/api/admin/*` route also sits behind this extractor as a router
+///   layer (see `routes.rs`), so a handler that forgets it is still
+///   protected.
+///
+/// The session is looked up once per request and cached in the request
+/// extensions, so the router layer and the handler share one query.
+pub struct SessionUser {
+    pub user: User,
+    pub(crate) token_hash: String,
+}
+
 pub struct AuthUser {
     pub user: User,
     pub(crate) token_hash: String,
 }
 
+pub struct AdminUser(pub AuthUser);
+
+#[derive(Clone)]
+struct ResolvedSession {
+    user: User,
+    token_hash: String,
+}
+
+async fn resolve_session(
+    parts: &mut Parts,
+    state: &SharedState,
+) -> Result<ResolvedSession, AuthError> {
+    if let Some(session) = parts.extensions.get::<ResolvedSession>() {
+        return Ok(session.clone());
+    }
+    let token = token_from_header(parts)
+        .or_else(|| is_image_path(parts.uri.path()).then(|| token_from_query(parts.uri.query())).flatten())
+        .ok_or(AuthError::MissingToken)?;
+    let token_hash = lisek_auth::hash_session_token(&token);
+
+    let pool = state.pool().ok_or(AuthError::ServerNotReady)?;
+    let user = lisek_db::find_user_by_session_token_hash(&pool, &token_hash)
+        .await
+        .map_err(|_| AuthError::Internal)?
+        .ok_or(AuthError::InvalidToken)?;
+
+    let session = ResolvedSession { user, token_hash };
+    parts.extensions.insert(session.clone());
+    Ok(session)
+}
+
+impl axum::extract::FromRequestParts<SharedState> for SessionUser {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &SharedState) -> Result<Self, Self::Rejection> {
+        let ResolvedSession { user, token_hash } = resolve_session(parts, state).await?;
+        Ok(SessionUser { user, token_hash })
+    }
+}
+
 impl axum::extract::FromRequestParts<SharedState> for AuthUser {
     type Rejection = AuthError;
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &SharedState,
-    ) -> Result<Self, Self::Rejection> {
-        let token = token_from_header(parts)
-            .or_else(|| is_image_path(parts.uri.path()).then(|| token_from_query(parts.uri.query())).flatten())
-            .ok_or(AuthError::MissingToken)?;
-        let token_hash = lisek_auth::hash_session_token(&token);
-
-        let pool = state.pool().await.ok_or(AuthError::ServerNotReady)?;
-        let user = lisek_db::find_user_by_session_token_hash(&pool, &token_hash)
-            .await
-            .map_err(|_| AuthError::Internal)?
-            .ok_or(AuthError::InvalidToken)?;
-
-        if user.must_change_password && !matches!(parts.uri.path(),"/api/auth/me"|"/api/auth/logout"|"/api/auth/password") {
+    async fn from_request_parts(parts: &mut Parts, state: &SharedState) -> Result<Self, Self::Rejection> {
+        let ResolvedSession { user, token_hash } = resolve_session(parts, state).await?;
+        if user.must_change_password {
             return Err(AuthError::PasswordChangeRequired);
         }
         Ok(AuthUser { user, token_hash })
+    }
+}
+
+impl axum::extract::FromRequestParts<SharedState> for AdminUser {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &SharedState) -> Result<Self, Self::Rejection> {
+        let user = AuthUser::from_request_parts(parts, state).await?;
+        if !user.user.is_admin {
+            return Err(AuthError::AdminRequired);
+        }
+        Ok(AdminUser(user))
     }
 }
 
@@ -185,6 +259,9 @@ fn is_image_path(path: &str) -> bool {
 #[derive(Debug)]
 pub enum AuthError {
     PasswordChangeRequired,
+    AdminRequired,
+    /// Carries how long until the limit window ends.
+    TooManyAttempts(std::time::Duration),
     MissingToken,
     InvalidToken,
     InvalidCredentials,
@@ -201,7 +278,20 @@ struct AuthErrorBody {
 impl IntoResponse for AuthError {
     fn into_response(self) -> Response {
         let (status, error_code, message) = match self {
+            AuthError::TooManyAttempts(retry_after) => {
+                let seconds = retry_after.as_secs().max(1).to_string();
+                let body = AuthErrorBody {
+                    error_code: "too_many_attempts",
+                    message: "Too many failed sign-in attempts. Try again later.",
+                };
+                return (StatusCode::TOO_MANY_REQUESTS, [(header::RETRY_AFTER, seconds)], Json(body)).into_response();
+            }
             AuthError::PasswordChangeRequired => (StatusCode::FORBIDDEN,"password_change_required","Set your own password before using the application."),
+            AuthError::AdminRequired => (
+                StatusCode::FORBIDDEN,
+                "admin_required",
+                "This account is not an administrator.",
+            ),
             AuthError::MissingToken => (
                 StatusCode::UNAUTHORIZED,
                 "missing_token",

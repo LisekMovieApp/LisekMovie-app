@@ -14,14 +14,39 @@ use crate::{DbError, PgPool};
 /// layer's job is just moving the JSONB in and out, not interpreting it.
 type ProviderConfigRow = (String, bool, i32, serde_json::Value);
 
-/// True when `settings` holds a non-empty `api_key` string — the only
-/// thing any client of [`list_provider_configs`] gets to know about a
-/// provider's settings; the raw value itself never leaves this function.
+/// `settings` key of an API key encrypted by `lisek_auth::secrets`.
+const SEALED_KEY: &str = "api_key_sealed";
+/// `settings` key of a plaintext API key written before encryption existed;
+/// [`seal_legacy_provider_keys`] converts it on startup.
+const LEGACY_KEY: &str = "api_key";
+
+/// True when `settings` holds a non-empty API key (sealed or legacy) — the
+/// only thing any client of [`list_provider_configs`] gets to know about a
+/// provider's settings; the raw value itself never leaves this module.
 fn settings_has_api_key(settings: &serde_json::Value) -> bool {
-    settings
-        .get("api_key")
-        .and_then(|value| value.as_str())
-        .is_some_and(|key| !key.is_empty())
+    stored_api_key(settings).is_some()
+}
+
+/// A provider API key as stored. `lisek-db` never decrypts: opening a
+/// sealed key needs the server's secret, which only `lisek-server` holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoredApiKey {
+    Sealed(String),
+    /// Written before keys were encrypted; still usable until sealed.
+    Plain(String),
+}
+
+fn stored_api_key(settings: &serde_json::Value) -> Option<StoredApiKey> {
+    let field = |name: &str| {
+        settings
+            .get(name)
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    };
+    field(SEALED_KEY)
+        .map(StoredApiKey::Sealed)
+        .or_else(|| field(LEGACY_KEY).map(StoredApiKey::Plain))
 }
 
 fn provider_config_from_row(row: ProviderConfigRow) -> ProviderConfig {
@@ -59,7 +84,9 @@ pub async fn list_provider_configs(pool: &PgPool) -> Result<Vec<ProviderConfig>,
 /// `lisek-server` actually build a `TmdbClient`/`TvdbClient` to call out to
 /// a provider on the admin's behalf; nothing here is ever serialized back
 /// to an HTTP response.
-pub async fn list_enabled_provider_keys(pool: &PgPool) -> Result<Vec<(String, String)>, DbError> {
+pub async fn list_enabled_provider_keys(
+    pool: &PgPool,
+) -> Result<Vec<(String, StoredApiKey)>, DbError> {
     let rows: Vec<(String, serde_json::Value)> = sqlx::query_as(
         r#"
         SELECT provider_key, settings
@@ -74,11 +101,7 @@ pub async fn list_enabled_provider_keys(pool: &PgPool) -> Result<Vec<(String, St
     Ok(rows
         .into_iter()
         .filter_map(|(provider_key, settings)| {
-            let api_key = settings.get("api_key")?.as_str()?;
-            if api_key.is_empty() {
-                return None;
-            }
-            Some((provider_key, api_key.to_string()))
+            stored_api_key(&settings).map(|key| (provider_key, key))
         })
         .collect())
 }
@@ -112,24 +135,26 @@ pub async fn set_provider_enabled_and_priority(
     Ok(())
 }
 
-/// Sets (or replaces) a provider's API key. Merges into the existing
-/// `settings` JSONB via `||` rather than overwriting it outright, so a
-/// future second settings field (a base URL, a region) set independently
-/// isn't clobbered by this call.
+/// Sets (or replaces) a provider's API key. `sealed_key` must already be
+/// encrypted (`SecretBox::seal`, with the provider key as context); any
+/// legacy plaintext key is dropped in the same statement. Merges into the
+/// existing `settings` JSONB via `||` rather than overwriting it outright,
+/// so a future second settings field (a base URL, a region) set
+/// independently isn't clobbered by this call.
 pub async fn set_provider_api_key(
     pool: &PgPool,
     provider_key: &str,
-    api_key: &str,
+    sealed_key: &str,
 ) -> Result<(), DbError> {
     let result = sqlx::query(
         r#"
         UPDATE provider_config
-        SET settings = settings || jsonb_build_object('api_key', $2::text)
+        SET settings = (settings - 'api_key') || jsonb_build_object('api_key_sealed', $2::text)
         WHERE provider_key = $1
         "#,
     )
     .bind(provider_key)
-    .bind(api_key)
+    .bind(sealed_key)
     .execute(pool)
     .await?;
 
@@ -139,13 +164,38 @@ pub async fn set_provider_api_key(
     Ok(())
 }
 
+/// Encrypts every plaintext API key left from before keys were sealed.
+/// `seal(provider_key, plaintext)` returns the sealed form. Idempotent;
+/// returns how many keys were converted.
+pub async fn seal_legacy_provider_keys(
+    pool: &PgPool,
+    seal: impl Fn(&str, &str) -> String,
+) -> Result<u64, DbError> {
+    let legacy: Vec<(String, String)> = sqlx::query_as(
+        "SELECT provider_key, settings->>'api_key' FROM provider_config \
+         WHERE settings->>'api_key' <> ''",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut sealed = 0;
+    for (provider_key, plaintext) in legacy {
+        set_provider_api_key(pool, &provider_key, &seal(&provider_key, &plaintext)).await?;
+        sealed += 1;
+    }
+    // Empty legacy values carry nothing worth sealing.
+    sqlx::query("UPDATE provider_config SET settings = settings - 'api_key' WHERE settings ? 'api_key'")
+        .execute(pool)
+        .await?;
+    Ok(sealed)
+}
+
 /// Removes a provider's API key (if any) without touching any other
 /// settings field, or its enabled/priority state.
 pub async fn clear_provider_api_key(pool: &PgPool, provider_key: &str) -> Result<(), DbError> {
     let result = sqlx::query(
         r#"
         UPDATE provider_config
-        SET settings = settings - 'api_key'
+        SET settings = settings - 'api_key' - 'api_key_sealed'
         WHERE provider_key = $1
         "#,
     )
@@ -216,6 +266,15 @@ mod tests {
         assert!(!settings_has_api_key(&serde_json::json!({})));
         assert!(!settings_has_api_key(&serde_json::json!({ "api_key": "" })));
         assert!(!settings_has_api_key(&serde_json::json!({ "other": "x" })));
+    }
+
+    #[test]
+    fn stored_api_key_prefers_the_sealed_value() {
+        let settings = serde_json::json!({ "api_key": "plain", "api_key_sealed": "v1:abc" });
+        assert_eq!(stored_api_key(&settings), Some(StoredApiKey::Sealed("v1:abc".into())));
+        let legacy = serde_json::json!({ "api_key": "plain" });
+        assert_eq!(stored_api_key(&legacy), Some(StoredApiKey::Plain("plain".into())));
+        assert!(settings_has_api_key(&serde_json::json!({ "api_key_sealed": "v1:x" })));
     }
 
     #[test]

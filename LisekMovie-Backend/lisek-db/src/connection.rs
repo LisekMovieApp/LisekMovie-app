@@ -76,10 +76,77 @@ where
 /// Applies every migration in `migrations/` that hasn't already run.
 /// Embedded at compile time — no filesystem access needed at runtime.
 pub async fn run_migrations(pool: &PgPool) -> Result<(), DbError> {
-    sqlx::migrate!("./migrations")
+    let migrator = sqlx::migrate!("./migrations");
+    let healed = heal_line_ending_checksums(pool, &migrator).await?;
+    if healed > 0 {
+        tracing::info!(
+            migrations = healed,
+            "updated checksums of applied migrations whose files differ only in line endings"
+        );
+    }
+    migrator
         .run(pool)
         .await
         .map_err(|err| DbError::MigrationFailed(err.to_string()))
+}
+
+/// sqlx checksums a migration file byte for byte, so the same migration
+/// checked out with CRLF (Windows `core.autocrlf`) and LF hashes
+/// differently, and the server would refuse to start ("migration was
+/// previously applied but has been modified"). For every applied migration
+/// whose stored checksum matches the current file with the other line
+/// ending, the stored checksum is updated. Any real content change still
+/// fails as before.
+async fn heal_line_ending_checksums(
+    pool: &PgPool,
+    migrator: &sqlx::migrate::Migrator,
+) -> Result<u64, DbError> {
+    let table_exists: bool =
+        sqlx::query_scalar("SELECT to_regclass('_sqlx_migrations') IS NOT NULL")
+            .fetch_one(pool)
+            .await?;
+    if !table_exists {
+        return Ok(0);
+    }
+    let applied: Vec<(i64, Vec<u8>)> =
+        sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations")
+            .fetch_all(pool)
+            .await?;
+
+    let mut healed = 0;
+    for migration in migrator.iter() {
+        let Some((_, stored)) = applied.iter().find(|(v, _)| *v == migration.version) else {
+            continue;
+        };
+        if stored.as_slice() == &*migration.checksum {
+            continue;
+        }
+        let lf = migration.sql.as_str().replace("\r\n", "\n");
+        let crlf = lf.replace('\n', "\r\n");
+        if [lf, crlf].into_iter().any(|sql| sql_checksum(migration, sql) == *stored) {
+            sqlx::query("UPDATE _sqlx_migrations SET checksum = $1 WHERE version = $2")
+                .bind(&*migration.checksum)
+                .bind(migration.version)
+                .execute(pool)
+                .await?;
+            healed += 1;
+        }
+    }
+    Ok(healed)
+}
+
+/// The checksum sqlx would store for `migration` if its file contained `sql`.
+fn sql_checksum(migration: &sqlx::migrate::Migration, sql: String) -> Vec<u8> {
+    use sqlx::SqlSafeStr;
+    sqlx::migrate::Migration::new(
+        migration.version,
+        migration.description.clone(),
+        migration.migration_type,
+        sqlx::AssertSqlSafe(sql).into_sql_str(),
+        migration.no_tx,
+    )
+    .checksum
+    .into_owned()
 }
 
 #[cfg(test)]

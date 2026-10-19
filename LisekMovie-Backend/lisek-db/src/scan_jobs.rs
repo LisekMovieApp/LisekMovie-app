@@ -13,9 +13,9 @@ use crate::{DbError, PgPool};
 pub struct ScanJob {
     pub id: Uuid,
     pub library_id: Uuid,
-    /// `queued` | `running` | `completed` | `failed`
+    #[schema(value_type = ScanStatus)]
     pub status: String,
-    /// `queued` | `walking` | `saving` | `enriching` | `probing` | `done`
+    #[schema(value_type = ScanPhase)]
     pub phase: String,
     pub phase_done: i32,
     pub phase_total: i32,
@@ -31,6 +31,31 @@ pub struct ScanJob {
     pub created_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
+}
+
+/// Documents the values of [`ScanJob::status`] in the API schema (the
+/// column itself is plain text, constrained by a CHECK).
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum ScanStatus {
+    Queued,
+    Running,
+    Completed,
+    Failed,
+}
+
+/// Documents the values of [`ScanJob::phase`] in the API schema.
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum ScanPhase {
+    Queued,
+    Walking,
+    Saving,
+    Enriching,
+    Probing,
+    Done,
 }
 
 impl ScanJob {

@@ -1,0 +1,4351 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "LisekMovie",
+    "description": "Main binary: Axum routing, middleware, startup.",
+    "license": {
+      "name": "PolyForm-Noncommercial-1.0.0",
+      "identifier": "PolyForm-Noncommercial-1.0.0"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/admin/games": {
+      "get": {
+        "operationId": "admin_list",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Game"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/games/{key}": {
+      "put": {
+        "operationId": "configure",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GameConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/libraries": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "list_libraries",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LibraryResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "create_library",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLibraryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/libraries/{library_id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "delete_library",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/libraries/{library_id}/items": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Every item in one library, for the Admin Panel's browse view that opens\nthe metadata editor (see `lisek_db::MediaItemSummary`'s own doc comment\nfor exactly what rides along).",
+        "operationId": "list_library_items",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MediaItemSummary"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/libraries/{library_id}/provider-order/{item_type}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "A library's saved custom provider order for one item type\n(`\"movie\"`/`\"episode\"`) — the Admin Panel's drag-and-drop reordering UI.\nAn empty `provider_order` (never saved, or explicitly cleared) means\n\"use the admin's global priority order\" — see `apply_provider_order`.",
+        "operationId": "get_provider_order",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "item_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderOrderPayload"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "set_provider_order",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "item_type",
+            "in": "path",
+            "description": "movie | episode",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderOrderPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/libraries/{library_id}/reorder": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Nudges one library up or down in the shared display order — the \"W\ngórę\"/\"W dół\" buttons the libraries tab asked for (Runda 9). See\n`lisek_db::move_library`'s own doc comment for exactly what \"up\"/\"down\"\ndo (a swap with the immediate neighbor, not a full reorder) and why this\nordering is global rather than per-account.",
+        "operationId": "move_library",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveLibraryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/libraries/{library_id}/scan": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Queues a scan of one library. Returns the job immediately (202); an\nalready pending scan of the same library is returned instead of a\nsecond one. Follow progress via `GET /api/admin/scan-jobs/{id}` or the\n`scan_progress` events on `/api/notifications/socket`.",
+        "operationId": "scan_library",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanJob"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/media/fallback": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Every item currently flagged `metadata_fallback` — the Admin Panel's\nwarning view.",
+        "operationId": "list_fallback_items",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FallbackItem"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/media/{item_id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "One item's full editable shape, for the metadata editor to load when\nit opens.",
+        "operationId": "get_media_item",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaItemDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The metadata editor's save action — see `lisek_db::update_media_item`'s\nown doc comment for why this is the one write in the whole admin\nsurface that's never gated on `locked_fields` (an admin's own edit\nalways applies) and the one place `locked_fields` itself, plus\n`metadata_locked`/`forced_provider`, actually get written.",
+        "operationId": "update_media_item",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMediaItemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/media/{item_id}/migrate-to-media-folder": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The fallback warning view's \"Przenieś do folderu mediów\" action: copies\nwhichever of this item's poster/backdrop currently only exist in the\nlocal `config_dir` cache into its media folder (right next to the\nvideo file, same `poster.jpg`/`backdrop.jpg` naming\n`metadata_enrichment::enrich_item_cached` already uses), then clears\n`metadata_fallback` once at least one image actually made it across —\na partial success (say, the destination folder only just got its write\npermission fixed for one of the two files) still counts as real\nprogress worth reflecting in the flag.",
+        "operationId": "migrate_fallback_item",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrateFallbackResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/playback/capabilities": {
+      "post": {
+        "operationId": "capabilities",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaybackSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/playback/safety": {
+      "get": {
+        "operationId": "safety",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SafetyConfig"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "put": {
+        "operationId": "set_safety",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SafetyConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/playback/settings": {
+      "get": {
+        "operationId": "settings",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaybackSettings"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "put": {
+        "operationId": "set_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaybackSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/providers": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "list_providers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderConfigResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/providers/{provider_key}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "update_provider",
+        "parameters": [
+          {
+            "name": "provider_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/providers/{provider_key}/key": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Sets a provider's API key. Deliberately has no matching \"get the current\nkey\" endpoint — [`list_providers`]'s `is_configured` flag is the only\nthing a client ever learns about a stored key without setting a new one.",
+        "operationId": "set_provider_key",
+        "parameters": [
+          {
+            "name": "provider_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetProviderKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "clear_provider_key",
+        "parameters": [
+          {
+            "name": "provider_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/scan-jobs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The 50 most recent scan jobs, newest first.",
+        "operationId": "list",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScanJob"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/scan-jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanJob"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/stats/users": {
+      "get": {
+        "operationId": "stats",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/users": {
+      "get": {
+        "operationId": "list",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/User"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUser"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/users/{id}": {
+      "put": {
+        "operationId": "edit",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditUser"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/users/{id}/password": {
+      "post": {
+        "operationId": "reset",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemporaryPassword"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/webhooks": {
+      "get": {
+        "operationId": "list",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Endpoint"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/webhooks/deliveries": {
+      "get": {
+        "operationId": "deliveries",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/webhooks/{id}": {
+      "delete": {
+        "operationId": "delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Failed attempts are limited per client address and per username (see\n`rate_limit`); a blocked client gets 429 with `Retry-After` before any\npassword hashing happens.",
+        "operationId": "login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "429": {
+            "description": "Too many failed attempts; see Retry-After"
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "logout",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogoutResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Also answers for a session that still has to change its temporary\npassword, so the client can show the password form.",
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Accepts a restricted session (temporary password) — that is how the\ntemporary password gets replaced. Wrong current passwords are limited\nper account (`rate_limit::MAX_PASSWORD_CHANGE_FAILURES` per window).",
+        "operationId": "change",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "429": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/games": {
+      "get": {
+        "operationId": "list",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Game"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/games/{key}/leaderboard": {
+      "get": {
+        "operationId": "leaderboard",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Score"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/games/{key}/scores": {
+      "post": {
+        "operationId": "save",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": [
+          "setup"
+        ],
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/home": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Everything the home page needs in one round trip — see `lisek-db`'s\n`get_hero_item`/`list_recently_added`/`list_top_today`/\n`list_recommended`/`list_popular` doc comments for exactly what each row\nmeans and, for `top10`/`recommended`/`popular`, the honest placeholder\nranking each uses in the absence of any real watch-history/popularity\ntracking (not yet built — see the roadmap).",
+        "operationId": "home_feed",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeFeedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/libraries": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Every configured library, in the admin's shared display order — the\nNavbar's data source (Runda 9), and how the `/library/[id]` grid's own\n\"which library is this\" title/name gets resolved. Public, same as every\nother route in this module; reads through the exact same\n`lisek_db::list_libraries` (`ORDER BY sort_order, name`) that\n`admin::list_libraries` already used for the Admin Panel — one query,\ntwo response shapes, so the Navbar can never disagree with the admin's\nown reorder buttons about which library comes first.",
+        "operationId": "list_libraries",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PublicLibraryResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/libraries/{library_id}/items": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "One page of one library's browsable contents — the `/library/[id]`\npage's \"all items\" grid data source. Runda 9 introduced this endpoint as\na flat, unpaginated, 500-item-capped fetch; Runda 10 adds real\npagination, sorting and an optional starts-with-letter filter (see\n`lisek_db::list_items_by_library_page`/`count_items_by_library`), and\nchanges the response shape to carry `total`/`page`/`page_size` alongside\n`items` so the frontend can render a \"1–100 z 765\"-style counter and\nprev/next controls without a second request. This is a breaking change\nto last round's response shape; `library_items` had no other known\ncaller besides this exact page, so changing it in place (rather than\nversioning the route) is safe.",
+        "description": "Bundles the library's own name/type alongside its items in one response\nso the page can render its title without a second round trip. A library\nid that doesn't exist (deleted, or simply wrong) is a real 404\n([`MediaError::LibraryNotFound`]) — unlike [`media_item_seasons`]'s\nempty-array contract, there's a meaningful difference here between \"this\nlibrary exists and has nothing in it yet\" and \"this library doesn't\nexist\", and the frontend needs to tell those apart to show the right\nmessage.",
+        "operationId": "library_items",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "letter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryItemsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/libraries/{library_id}/popular": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "`/library/[id]`'s \"Popularne teraz\" row — `lisek_db::list_popular` scoped\nto this library. Same honest \"no real popularity tracking yet\" caveat as\nthe home feed's own popular row.",
+        "operationId": "library_popular",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryRowResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/libraries/{library_id}/recent": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "`/library/[id]`'s \"Ostatnio dodane\" row — `lisek_db::list_recently_added`\nscoped to this library, reusing the exact same query (and therefore the\nexact same `home_candidates` grouping and `created_at DESC` ordering) the\nhome feed's own \"recently added\" row already uses.",
+        "operationId": "library_recent",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryRowResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/libraries/{library_id}/recommended": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "`/library/[id]`'s \"Polecane dla Ciebie\" row — `lisek_db::list_recommended`\nscoped to this library, so a Filmy library never recommends a series and\nvice versa. Same honest \"no real taste model yet\" caveat as the home\nfeed's own recommended row.",
+        "operationId": "library_recommended",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryRowResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/me/list": {
+      "get": {
+        "operationId": "my_list",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/media/{item_id}": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "One item's full detail — the \"Movie Detail View\" the admin asked for\nonce cards became clickable. Public (any signed-in account, not just\nadmins — see this module's own doc comment), and deliberately reuses\n[`MediaItemResponse`] rather than a bespoke type: the home feed already\ncarries everything this view shows (title/year/overview/season/episode\nplus every image URL), so a separate response shape would just be the\nsame fields under different names. A dedicated route exists at all\nbecause the home feed only ever returns a handful of rows — an item\nreached by direct link (or simply not among the home feed's most-recent\npicks) still needs to be fetchable on its own.",
+        "operationId": "media_item_detail",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaItemResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/media/{item_id}/backdrop": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Same as [`poster_image`] for the backdrop image.",
+        "operationId": "backdrop_image",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Image bytes"
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/media/{item_id}/logo": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Same as [`poster_image`] for the transparent title-logo image — `.png`\nmedia-folder filename and `image/png` content type, matching\n`lisek_metadata::image_cache::logo_cache_path`'s own `.png` convention\n(see that function's doc comment for why: real transparency, and every\nlogo this app downloads has already been filtered to PNG at the\nprovider layer). A 404 here just means this item has no logo — a very\ncommon, unremarkable case (most titles don't have one cataloged, and\nTVDB-only items never will yet — see `lisek_plugin_api::ProviderMatch`'s\nown doc comment), which is exactly why the frontend treats it the same\nas a missing poster: an `<img onerror>` fallback, not an error state.",
+        "operationId": "logo_image",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Image bytes"
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/media/{item_id}/playback": {
+      "post": {
+        "operationId": "start",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/media/{item_id}/poster": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Serves one item's poster. `AuthUser` accepts a `?token=` query param\nspecifically so a plain `<img src>` can hit this route — see\n`auth.rs::token_from_query`'s doc comment.",
+        "operationId": "poster_image",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Image bytes"
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/media/{item_id}/seasons": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "The \"Sezony\" section's own data — every season, and every season's\nepisodes, for the show `item_id` resolves to. Public, same as every\nother route in this module; an empty array (not a 404) for an id that\ndoesn't exist, isn't a `media_items` row, or names a movie — see\n`lisek_db::list_series_seasons`'s own doc comment on why that's the\nright response rather than a distinct error case here.",
+        "operationId": "media_item_seasons",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SeriesSeasonResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/media/{item_id}/state": {
+      "get": {
+        "operationId": "media_state",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "put": {
+        "operationId": "set_flags",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlagsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/notifications/socket": {
+      "get": {
+        "operationId": "socket",
+        "responses": {
+          "101": {
+            "description": "WebSocket. First frame: JSON {token:string}. Server sends ready, then library_changed with items; administrators also receive scan_progress with the full scan job. Requires an active login; closes when revoked."
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/playback/{session_id}": {
+      "delete": {
+        "operationId": "stop",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/playback/{session_id}/hls/{file}": {
+      "get": {
+        "operationId": "hls",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "file",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ticket",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HLS manifest or segment"
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/playback/{session_id}/progress": {
+      "put": {
+        "operationId": "progress",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgressRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/playback/{session_id}/stream": {
+      "get": {
+        "operationId": "stream",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "ticket",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Video bytes"
+          },
+          "206": {
+            "description": "Partial video bytes"
+          },
+          "401": {
+            "description": ""
+          },
+          "416": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/setup/database/test": {
+      "post": {
+        "tags": [
+          "setup"
+        ],
+        "operationId": "test_database",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatabaseConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestConnectionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/setup/finish": {
+      "post": {
+        "tags": [
+          "setup"
+        ],
+        "operationId": "finish",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinishResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/status": {
+      "get": {
+        "tags": [
+          "setup"
+        ],
+        "summary": "Always reachable, in every server mode — this is the first thing the\nfrontend calls on every page load to decide whether to redirect to\n`/setup`.",
+        "operationId": "status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ChangePassword": {
+        "type": "object",
+        "required": [
+          "new_password"
+        ],
+        "properties": {
+          "current_password": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "new_password": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateLibraryRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "library_type",
+          "root_paths"
+        ],
+        "properties": {
+          "library_type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "root_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "save_metadata_in_media_folder": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CreateUser": {
+        "type": "object",
+        "required": [
+          "username"
+        ],
+        "properties": {
+          "is_admin": {
+            "type": "boolean"
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ui_language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "CreatedUser": {
+        "type": "object",
+        "required": [
+          "user",
+          "temporary_password"
+        ],
+        "properties": {
+          "temporary_password": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        }
+      },
+      "DatabaseConfig": {
+        "type": "object",
+        "description": "Discrete connection fields, as collected by the First-Run Wizard form.\nKept separate from a raw connection-string type so the wizard never has\nto build (or the frontend parse) a `postgres://` URL by hand.",
+        "required": [
+          "host",
+          "port",
+          "database",
+          "username",
+          "password"
+        ],
+        "properties": {
+          "database": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "EditUser": {
+        "type": "object",
+        "required": [
+          "username",
+          "is_admin",
+          "disabled",
+          "ui_language"
+        ],
+        "properties": {
+          "disabled": {
+            "type": "boolean"
+          },
+          "is_admin": {
+            "type": "boolean"
+          },
+          "ui_language": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "Endpoint": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "url",
+          "destination_type",
+          "subscribed_events",
+          "enabled"
+        ],
+        "properties": {
+          "destination_type": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "subscribed_events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "EndpointInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "url",
+          "destination_type",
+          "subscribed_events",
+          "enabled"
+        ],
+        "properties": {
+          "destination_type": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "subscribed_events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "FallbackItem": {
+        "type": "object",
+        "description": "Every item currently flagged `metadata_fallback` — the Admin Panel's\nwarning view (see the Faza 5-completion roadmap item) lists these with\na \"move to the media folder\" action per row, so the admin doesn't have\nto `SELECT` the database by hand to find out which items only ever got\ntheir poster/backdrop into the local cache. `file_path` rides along so\nthe caller (`lisek-server`) can derive the exact media-folder\ndestination the same way `metadata_enrichment::media_folder_destination`\nalready does, without a second lookup.",
+        "required": [
+          "id",
+          "library_id",
+          "title",
+          "file_path"
+        ],
+        "properties": {
+          "file_path": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "library_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "FinishRequest": {
+        "type": "object",
+        "required": [
+          "database",
+          "admin_username",
+          "admin_password",
+          "ui_language"
+        ],
+        "properties": {
+          "admin_password": {
+            "type": "string"
+          },
+          "admin_username": {
+            "type": "string"
+          },
+          "database": {
+            "$ref": "#/components/schemas/DatabaseConfig"
+          },
+          "ui_language": {
+            "type": "string"
+          }
+        }
+      },
+      "FinishResponse": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "FlagsRequest": {
+        "type": "object",
+        "properties": {
+          "favorite": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "watched": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        }
+      },
+      "Game": {
+        "type": "object",
+        "required": [
+          "game_key",
+          "name",
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "game_key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "GameConfig": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "service"
+        ],
+        "properties": {
+          "service": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "HomeFeedResponse": {
+        "type": "object",
+        "required": [
+          "recently_added",
+          "top10",
+          "recommended",
+          "popular"
+        ],
+        "properties": {
+          "hero": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MediaItemResponse"
+              }
+            ]
+          },
+          "popular": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaItemResponse"
+            }
+          },
+          "recently_added": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaItemResponse"
+            }
+          },
+          "recommended": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaItemResponse"
+            }
+          },
+          "top10": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaItemResponse"
+            }
+          }
+        }
+      },
+      "LibraryItemsResponse": {
+        "type": "object",
+        "required": [
+          "library",
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaItemResponse"
+            }
+          },
+          "library": {
+            "$ref": "#/components/schemas/PublicLibraryResponse"
+          },
+          "page": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "page_size": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "LibraryResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "library_type",
+          "sort_order",
+          "root_paths",
+          "save_metadata_in_media_folder"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "library_type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "root_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "save_metadata_in_media_folder": {
+            "type": "boolean"
+          },
+          "sort_order": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "LibraryRowResponse": {
+        "type": "object",
+        "description": "Response shape shared by [`library_recent`]/[`library_recommended`]/\n[`library_popular`] (Runda 10) — deliberately identical to\n[`LibraryItemsResponse`]'s `library`+`items` fields minus the pagination\nones, since these three are small curated rows, not a paginated grid.\nEach of the three handlers independently looks up the library (rather\nthan sharing one earlier lookup) so a failure in one section's request\ncan never take another section down with it — see the Runda 10 plan's\nreasoning for three separate endpoints instead of one bundled response.",
+        "required": [
+          "library",
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaItemResponse"
+            }
+          },
+          "library": {
+            "$ref": "#/components/schemas/PublicLibraryResponse"
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "client": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Free-text identity for the `sessions` table (a future \"your active\nsessions\" screen), never validated against anything — absent fields\njust fall back to \"unknown\"."
+          },
+          "device": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "device_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "password": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "required": [
+          "token",
+          "user"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        }
+      },
+      "LogoutResponse": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MediaItemDetail": {
+        "type": "object",
+        "description": "One item's full editable shape — what the metadata editor loads and\nwhat it hands back for [`update_media_item`]. `original_title` reads\nstraight from `metadata->>'original_title'` (see the Faza\n5-completion migration's doc comment for why that's a JSONB key, not a\ncolumn) and `overview` from the same `provider_data` slot the home feed\nalready reads (a manual edit and a provider match both land there —\nsee [`update_media_item`]). `locked_fields` names, verbatim, whichever\nof `\"title\"`/`\"original_title\"`/`\"year\"`/`\"overview\"` the admin has\nindividually protected — the same identifiers the editor's own\ncheckboxes use, so the frontend never needs a translation table.",
+        "required": [
+          "id",
+          "library_id",
+          "item_type",
+          "title",
+          "metadata_locked",
+          "locked_fields"
+        ],
+        "properties": {
+          "episode": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "forced_provider": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "item_type": {
+            "type": "string"
+          },
+          "library_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locked_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metadata_locked": {
+            "type": "boolean"
+          },
+          "original_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "overview": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "season": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "MediaItemResponse": {
+        "type": "object",
+        "description": "One item as the frontend consumes it: `lisek_core::MediaItem` plus its\nimage URLs, which aren't stored anywhere — they're just this item's id\nslotted into the routes below. Always present, even for an item with no\ncached image of that kind yet; the routes themselves 404 rather than\nthis struct trying to know in advance whether a file exists on disk —\nmirrors the poster/backdrop `<img onerror>` pattern already established\non the frontend (see `MediaCard.svelte`/`HeroBanner.svelte`), which\n`logo_url` reuses as-is: a card or the Detail View just tries loading it\nand falls back to the plain text title if that 404s, exactly like a\nmissing poster falls back to nothing.\n\n`item_type` is `\"movie\"` or `\"series\"` as of Runda 8 — never a bare\n`\"episode\"` any more (see `lisek_db`'s `home_candidates` CTE doc\ncomment): every response this module hands out already represents\nsomething browsable on its own, not one file out of a season.",
+        "required": [
+          "id",
+          "item_type",
+          "title",
+          "poster_url",
+          "backdrop_url",
+          "logo_url"
+        ],
+        "properties": {
+          "backdrop_url": {
+            "type": "string"
+          },
+          "badge": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`\"new_series\"` / `\"new_season\"` / `\"new_episodes\"` for a `\"series\"`\nrow (see `lisek_db::classify_series_badge`'s doc comment), or\n`\"new_movie\"` for a `\"movie\"` row added within\n`lisek_db::RECENT_BADGE_DAYS` (Runda 9 — see [`is_recently_added`]),\nor `None`. Only ever set by [`to_response`], for whichever row it's\ngiven; the plain [`From`] impl below always leaves it `None`, which\nis what [`media_item_detail`] (the single-item Detail View endpoint)\nreturns as-is — the badge is a browse-card affordance (home feed,\nand as of Runda 9 the `/library/[id]` grid too — both go through\n[`to_response`]/[`to_responses`]), not something the Detail View\nitself was ever asked to show."
+          },
+          "episode": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "item_type": {
+            "type": "string"
+          },
+          "logo_url": {
+            "type": "string"
+          },
+          "overview": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "poster_url": {
+            "type": "string"
+          },
+          "season": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "MediaItemSummary": {
+        "type": "object",
+        "description": "Every item in one library, for the Admin Panel's browse view that opens\nthe metadata editor — deliberately not paginated yet (a self-hosted\nlibrary's realistic size doesn't need it at Faza 5's scope; revisit if\nthat stops being true). `metadata_locked`/`metadata_fallback` ride\nalong so the browse list itself can show a lock/warning badge without a\nsecond request per row.",
+        "required": [
+          "id",
+          "item_type",
+          "title",
+          "metadata_locked",
+          "metadata_fallback"
+        ],
+        "properties": {
+          "episode": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "item_type": {
+            "type": "string"
+          },
+          "metadata_fallback": {
+            "type": "boolean"
+          },
+          "metadata_locked": {
+            "type": "boolean"
+          },
+          "season": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "MigrateFallbackResponse": {
+        "type": "object",
+        "required": [
+          "poster_migrated",
+          "backdrop_migrated"
+        ],
+        "properties": {
+          "backdrop_migrated": {
+            "type": "boolean"
+          },
+          "poster_migrated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MoveLibraryRequest": {
+        "type": "object",
+        "required": [
+          "direction"
+        ],
+        "properties": {
+          "direction": {
+            "type": "string",
+            "description": "`\"up\"` or `\"down\"` — anything else is [`AdminError::InvalidInput`],\nsame validate-before-any-query discipline as [`create_library`]'s\nown `library_type` check."
+          }
+        }
+      },
+      "PlaybackSettings": {
+        "type": "object",
+        "properties": {
+          "audio_bitrate_kbps": {
+            "type": "integer",
+            "format": "int32",
+            "default": 128,
+            "minimum": 0
+          },
+          "audio_vbr": {
+            "type": "boolean",
+            "default": false
+          },
+          "decode_hevc_10bit": {
+            "type": "boolean",
+            "default": true
+          },
+          "decode_vp9_10bit": {
+            "type": "boolean",
+            "default": true
+          },
+          "deinterlace_double_rate": {
+            "type": "boolean",
+            "default": false
+          },
+          "deinterlace_method": {
+            "type": "string",
+            "default": "yadif"
+          },
+          "downmix_audio_boost": {
+            "type": "number",
+            "format": "double",
+            "default": 2.0
+          },
+          "encoder_preset": {
+            "type": "string",
+            "default": "veryfast"
+          },
+          "encoding_threads": {
+            "type": "integer",
+            "format": "int32",
+            "default": 0,
+            "minimum": 0
+          },
+          "enhanced_nvdec": {
+            "type": "boolean",
+            "default": true
+          },
+          "ffmpeg_path": {
+            "type": "string",
+            "default": ""
+          },
+          "h264_crf": {
+            "type": "integer",
+            "format": "int32",
+            "default": 23,
+            "minimum": 0
+          },
+          "hardware_acceleration": {
+            "type": "string",
+            "default": "none"
+          },
+          "hardware_decoding_codecs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "h264",
+              "hevc",
+              "mpeg2video",
+              "mpeg4",
+              "vc1",
+              "vp8",
+              "vp9"
+            ]
+          },
+          "hardware_encoding": {
+            "type": "boolean",
+            "default": true
+          },
+          "local_networks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "127.0.0.0/8",
+              "::1/128",
+              "10.0.0.0/8",
+              "172.16.0.0/12",
+              "192.168.0.0/16",
+              "fc00::/7"
+            ]
+          },
+          "max_muxing_queue_size": {
+            "type": "integer",
+            "format": "int32",
+            "default": 2048,
+            "minimum": 0
+          },
+          "max_output_height": {
+            "type": "integer",
+            "format": "int32",
+            "default": 720,
+            "minimum": 0
+          },
+          "max_resume_percentage": {
+            "type": "number",
+            "format": "double",
+            "default": 90.0
+          },
+          "min_resume_duration_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "default": 300,
+            "minimum": 0
+          },
+          "min_resume_percentage": {
+            "type": "number",
+            "format": "double",
+            "default": 5.0
+          },
+          "streaming_bitrate_limit_mbps": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "default": null
+          },
+          "tonemapping": {
+            "type": "boolean",
+            "default": false
+          },
+          "tonemapping_algorithm": {
+            "type": "string",
+            "default": "hable"
+          },
+          "tonemapping_desat": {
+            "type": "number",
+            "format": "double",
+            "default": 0.0
+          },
+          "tonemapping_param": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "default": null
+          },
+          "tonemapping_peak": {
+            "type": "number",
+            "format": "double",
+            "default": 100.0
+          },
+          "transcoding_temp_path": {
+            "type": "string",
+            "default": ""
+          },
+          "trusted_proxies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "video_bitrate_kbps": {
+            "type": "integer",
+            "format": "int32",
+            "default": 2500,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProgressRequest": {
+        "type": "object",
+        "required": [
+          "position_seconds",
+          "duration_seconds",
+          "paused"
+        ],
+        "properties": {
+          "duration_seconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "ended": {
+            "type": "boolean"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "position_seconds": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "ProviderConfigResponse": {
+        "type": "object",
+        "required": [
+          "provider_key",
+          "display_name",
+          "enabled",
+          "priority",
+          "is_configured"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "is_configured": {
+            "type": "boolean"
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "provider_key": {
+            "type": "string"
+          }
+        }
+      },
+      "ProviderOrderPayload": {
+        "type": "object",
+        "required": [
+          "provider_order"
+        ],
+        "properties": {
+          "provider_order": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "PublicLibraryResponse": {
+        "type": "object",
+        "description": "One library as the Navbar/`/library/[id]` grid consume it — deliberately\nthinner than `admin::LibraryResponse`: `root_paths` are absolute\nfilesystem paths on the machine the server runs on, and have no business\nreaching a non-admin browser tab (Runda 9). Every signed-in account gets\nto see *that* a library exists and what the admin named it, never where\nits files actually live.",
+        "required": [
+          "id",
+          "name",
+          "library_type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "library_type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "ResetPassword": {
+        "type": "object",
+        "properties": {
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "SafetyConfig": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "max_width",
+          "max_height"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "max_bitrate_kbps": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "max_height": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "max_width": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "ScanJob": {
+        "type": "object",
+        "description": "One scan, as stored and as reported to clients (HTTP and WebSocket).",
+        "required": [
+          "id",
+          "library_id",
+          "status",
+          "phase",
+          "phase_done",
+          "phase_total",
+          "files_found",
+          "movies_found",
+          "episodes_found",
+          "unrecognized",
+          "probed",
+          "probe_failed",
+          "metadata_matched",
+          "images_saved",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "episodes_found": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "files_found": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "images_saved": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "library_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "metadata_matched": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "movies_found": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/ScanPhase"
+          },
+          "phase_done": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "phase_total": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "probe_failed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "probed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ScanStatus"
+          },
+          "unrecognized": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "ScanPhase": {
+        "type": "string",
+        "description": "Documents the values of [`ScanJob::phase`] in the API schema.",
+        "enum": [
+          "queued",
+          "walking",
+          "saving",
+          "enriching",
+          "probing",
+          "done"
+        ]
+      },
+      "ScanStatus": {
+        "type": "string",
+        "description": "Documents the values of [`ScanJob::status`] in the API schema (the\ncolumn itself is plain text, constrained by a CHECK).",
+        "enum": [
+          "queued",
+          "running",
+          "completed",
+          "failed"
+        ]
+      },
+      "Score": {
+        "type": "object",
+        "required": [
+          "username",
+          "score"
+        ],
+        "properties": {
+          "score": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "ScoreRequest": {
+        "type": "object",
+        "required": [
+          "score"
+        ],
+        "properties": {
+          "score": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "SeriesEpisodeResponse": {
+        "type": "object",
+        "description": "One episode, as the \"Sezony\" section renders it — see\n`lisek_db::list_series_seasons`'s doc comment for exactly why this is\nthis thin (no title/thumbnail/runtime/overview: none of it exists\nanywhere in this app yet). `poster_url`/`backdrop_url` reuse the exact\nsame `/api/media/{id}/...` routes as [`MediaItemResponse`] — `id` here\nis a real `media_items` row, so they resolve the same way.",
+        "required": [
+          "id",
+          "episode",
+          "poster_url",
+          "backdrop_url"
+        ],
+        "properties": {
+          "backdrop_url": {
+            "type": "string"
+          },
+          "end_episode": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "episode": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "poster_url": {
+            "type": "string"
+          }
+        }
+      },
+      "SeriesSeasonResponse": {
+        "type": "object",
+        "required": [
+          "season",
+          "episodes"
+        ],
+        "properties": {
+          "episodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SeriesEpisodeResponse"
+            }
+          },
+          "season": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "SetProviderKeyRequest": {
+        "type": "object",
+        "required": [
+          "api_key"
+        ],
+        "properties": {
+          "api_key": {
+            "type": "string"
+          }
+        }
+      },
+      "StartResponse": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "item_id",
+          "title",
+          "stream_url",
+          "position_seconds",
+          "time_offset_seconds",
+          "mode"
+        ],
+        "properties": {
+          "duration_seconds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "item_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "position_seconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream_url": {
+            "type": "string"
+          },
+          "time_offset_seconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "StatusResponse": {
+        "type": "object",
+        "required": [
+          "setup_required",
+          "database_connected"
+        ],
+        "properties": {
+          "database_connected": {
+            "type": "boolean"
+          },
+          "setup_required": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TemporaryPassword": {
+        "type": "object",
+        "required": [
+          "temporary_password"
+        ],
+        "properties": {
+          "temporary_password": {
+            "type": "string"
+          }
+        }
+      },
+      "TestConnectionResponse": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "UpdateMediaItemRequest": {
+        "type": "object",
+        "required": [
+          "title",
+          "metadata_locked",
+          "locked_fields"
+        ],
+        "properties": {
+          "forced_provider": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "locked_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metadata_locked": {
+            "type": "boolean"
+          },
+          "original_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "overview": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "UpdateProviderRequest": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "priority"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "description": "A local account. Never carries the password hash — that stays inside the\ndb/auth layers and must never be serialized back to a client.\n\nDeliberately has no sqlx dependency or derive: lisek-db maps database rows\nonto this struct field by field, so this crate stays free of any notion\nof Postgres or SQL (see the architecture plan's crate boundaries).",
+        "required": [
+          "id",
+          "username",
+          "is_admin",
+          "must_change_password",
+          "disabled",
+          "ui_language",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_admin": {
+            "type": "boolean"
+          },
+          "must_change_password": {
+            "type": "boolean"
+          },
+          "ui_language": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "lisek_auth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "LisekMovie Client=\"web\", Device=\"Browser\", DeviceId=\"...\", Version=\"0.1.0\", Token=\"...\""
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "setup",
+      "description": "Health and the First-Run Wizard"
+    },
+    {
+      "name": "auth",
+      "description": "Sessions and passwords"
+    },
+    {
+      "name": "media",
+      "description": "Browsing the catalog"
+    },
+    {
+      "name": "admin",
+      "description": "Administration (administrators only)"
+    }
+  ]
+}

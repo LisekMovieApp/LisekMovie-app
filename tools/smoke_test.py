@@ -132,6 +132,17 @@ def main():
             spec = ok_json("/api/openapi.json")
             assert "/api/auth/login" in spec["paths"]
             assert "/api/media/{item_id}/playback" in spec["paths"]
+            assert "post" in spec["paths"]["/api/admin/libraries"] and "put" in spec["paths"]["/api/admin/media/{item_id}"]
+            # Provider API keys are stored sealed, never as plaintext.
+            ok_json('/api/admin/providers/tmdb/key','PUT',{'api_key':'smoke-secret-key'},token)
+            stored=sql("SELECT settings::text FROM provider_config WHERE provider_key='tmdb'")
+            assert 'smoke-secret-key' not in stored and '"api_key_sealed": "v1:' in stored, stored
+            assert any(p['provider_key']=='tmdb' and p['is_configured'] for p in ok_json('/api/admin/providers',token=token))
+            ok_json('/api/admin/providers/tmdb/key','DELETE',token=token)
+            assert sql("SELECT settings::text FROM provider_config WHERE provider_key='tmdb'") == '{}'
+            # CORS is closed unless LISEK_CORS_ORIGINS lists an origin.
+            _,_,cors_headers=request('/api/health',headers={'Origin':'http://evil.example'})
+            assert 'Access-Control-Allow-Origin' not in cors_headers
             settings=ok_json('/api/admin/playback/settings',token=token)
             assert settings['min_resume_percentage']==5 and settings['max_resume_percentage']==90 and settings['min_resume_duration_seconds']==300
             invalid=dict(settings,min_resume_percentage=95)
@@ -298,11 +309,19 @@ def main():
                 assert event['type']=='closed',event
             assert request(resumed["stream_url"])[0] == 401
             assert request("/api/auth/me",token=token)[0] == 401
+            # Failed logins are limited per address; once blocked, even the
+            # right password gets 429 with Retry-After (no hashing done).
+            for _ in range(15):
+                status=request('/api/auth/login','POST',{'username':'nobody','password':'wrong-password'})[0]
+                if status==429: break
+                assert status==401,status
+            status,body,headers=request('/api/auth/login','POST',{'username':config['admin_username'],'password':config['admin_password']})
+            assert status==429 and int(headers['Retry-After'])>0,(status,body)
             server.terminate()
             server.wait(timeout=10)
             log.close()
             server = None
-            print("PASS: migrations, concurrent setup, auth, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, browser notifications")
+            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, browser notifications")
     finally:
         if server:
             server.terminate()

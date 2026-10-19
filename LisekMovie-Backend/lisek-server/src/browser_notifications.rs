@@ -31,7 +31,7 @@ pub async fn socket(
         }))
 }
 async fn run(mut socket: WebSocket, state: SharedState) {
-    let Some(pool) = state.pool().await else {
+    let Some(pool) = state.pool() else {
         return;
     };
     let Ok(Some(Ok(Message::Text(text)))) =

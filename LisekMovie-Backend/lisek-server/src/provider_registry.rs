@@ -26,6 +26,35 @@ pub fn build_provider(provider_key: &str, api_key: &str) -> Option<Box<dyn Metad
     }
 }
 
+/// Enabled providers that have a key, in the admin's priority order, with
+/// each key decrypted. A key that cannot be opened (the secret key changed
+/// or was lost) is skipped with a warning; the admin re-enters it.
+pub async fn enabled_provider_keys(
+    pool: &lisek_db::PgPool,
+    secrets: &lisek_auth::secrets::SecretBox,
+) -> Result<Vec<(String, String)>, lisek_db::DbError> {
+    use lisek_db::StoredApiKey;
+    Ok(lisek_db::list_enabled_provider_keys(pool)
+        .await?
+        .into_iter()
+        .filter_map(|(provider, stored)| match stored {
+            StoredApiKey::Plain(key) => Some((provider, key)),
+            StoredApiKey::Sealed(sealed) => match secrets.open(&sealed, &provider) {
+                Ok(key) => Some((provider, key)),
+                Err(err) => {
+                    tracing::warn!(
+                        provider,
+                        %err,
+                        "cannot decrypt this provider's API key (was LISEK_SECRET_KEY changed?) \
+                         — enter it again under Admin Panel \u{2192} Plugins"
+                    );
+                    None
+                }
+            },
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -7,6 +7,8 @@
 //! here, storage/lookup in `lisek-db`, and the actual HTTP extractor in
 //! `lisek-server`, which is the only crate that knows about Axum.
 
+pub mod secrets;
+
 use std::time::Duration;
 
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash};
