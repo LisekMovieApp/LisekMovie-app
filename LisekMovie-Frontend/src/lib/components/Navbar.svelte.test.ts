@@ -52,12 +52,13 @@ function librariesFixture(): LibrarySummary[] {
 	];
 }
 
-/** Active items carry the shared `bg-white/15` pill background (see
- * `Navbar.svelte`'s own `NAV_ITEM_ACTIVE`); inactive ones never do. A class
- * check, not a computed-style one, matching how this project's other
- * component tests assert on rendered markup. */
+/** Active items carry `aria-current="page"` (Faza 4: the white text and
+ * gold underline are `aria-current` variants, see `Navbar.svelte`'s own
+ * `NAV_ITEM`); inactive ones never do. An attribute check, not a
+ * computed-style one, matching how this project's other component tests
+ * assert on rendered markup. */
 function isActive(el: Element | null): boolean {
-	return !!el && el.className.includes('bg-white/15');
+	return !!el && el.getAttribute('aria-current') === 'page';
 }
 
 describe('Navbar active item', () => {

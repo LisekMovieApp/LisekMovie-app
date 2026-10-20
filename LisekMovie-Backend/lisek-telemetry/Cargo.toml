@@ -1,9 +1,16 @@
 [package]
 name = "lisek-telemetry"
-description = "Native playback event collection and stats aggregation."
+description = "Playback progress reports: validation and the rules for resume, viewing time and quality counters."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.20"
+utoipa = { version = "5.5", features = ["uuid", "chrono"] }
+uuid = { version = "1.26.0", features = ["serde"] }
+
+[dev-dependencies]
+serde_json = "1.0.151"

@@ -336,6 +336,15 @@ def main():
             ok_json(f"/api/playback/{sid}/progress","PUT",progress,token)
             resumed = ok_json(f"/api/media/{item_id}/playback","POST",{},token)
             assert resumed["position_seconds"] == 50
+            # Telemetry (Faza 4): the player's report saves the resume point and quality counters.
+            telemetry={"session_id":resumed["session_id"],"position_seconds":45,"duration_seconds":100,"paused":False,
+                "event":"heartbeat","stalls":2,"stall_seconds":1.5,"dropped_frames":3,"bandwidth_kbps":12000}
+            ack=ok_json("/api/telemetry/playback-progress","POST",telemetry,token)
+            assert ack["resume_position_seconds"]==45 and ack["next_report_seconds"]==15 and not ack["watched"],ack
+            quality=[q for q in ok_json("/api/admin/stats/playback?limit=5",token=token) if q["id"]==resumed["session_id"]]
+            assert quality and quality[0]["stall_count"]==2 and quality[0]["bandwidth_kbps"]==12000,quality
+            assert request("/api/telemetry/playback-progress","POST",dict(telemetry,position_seconds=-1),token)[0]==400
+            assert ok_json(f"/api/media/{item_id}/state",token=token)["position_seconds"]==45
             ok_json(f"/api/media/{item_id}/state","PUT",{"favorite":True},token)
             assert ok_json("/api/me/list",token=token)[0]["favorite"]
             assert len(ok_json("/api/admin/stats/users",token=token)) == 1
@@ -410,6 +419,8 @@ def main():
             ok_json(f"/api/playback/{unloaded['session_id']}","DELETE",token=token)
             assert request(unloaded['stream_url'])[0]==401
             assert request("/api/admin/stats/users",token=other_token)[0] == 403
+            assert request("/api/admin/stats/playback",token=other_token)[0] == 403
+            assert request("/api/telemetry/playback-progress","POST",telemetry,other_token)[0] == 404
             assert request('/api/admin/playback/settings',token=other_token)[0]==403
             assert request('/api/admin/playback/settings','PUT',settings,other_token)[0]==403
             assert ok_json("/api/me/list",token=other_token) == []

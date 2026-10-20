@@ -1198,6 +1198,49 @@
         ]
       }
     },
+    "/api/admin/stats/playback": {
+      "get": {
+        "operationId": "recent_sessions",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1-500, default 50",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionQuality"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/admin/stats/users": {
       "get": {
         "operationId": "stats",
@@ -2696,7 +2739,7 @@
     },
     "/api/playback/{session_id}/progress": {
       "put": {
-        "operationId": "progress",
+        "operationId": "legacy_progress",
         "parameters": [
           {
             "name": "session_id",
@@ -2957,6 +3000,47 @@
             "description": ""
           }
         }
+      }
+    },
+    "/api/telemetry/playback-progress": {
+      "post": {
+        "operationId": "playback_progress",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaybackProgress"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stored; when to report next",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressAck"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_progress / invalid_quality"
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": "The session is not the caller's, has ended or expired"
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
       }
     }
   },
@@ -3986,6 +4070,72 @@
           }
         }
       },
+      "PlaybackProgress": {
+        "type": "object",
+        "description": "One progress report (`POST /api/telemetry/playback-progress`).",
+        "required": [
+          "session_id",
+          "position_seconds",
+          "duration_seconds"
+        ],
+        "properties": {
+          "bandwidth_kbps": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The player's current bandwidth estimate.",
+            "minimum": 0
+          },
+          "buffered_seconds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Media buffered ahead of the position."
+          },
+          "dropped_frames": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Totals since playback started (`getVideoPlaybackQuality()`).",
+            "minimum": 0
+          },
+          "duration_seconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "event": {
+            "$ref": "#/components/schemas/ProgressEvent"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "position_seconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stall_seconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "stalls": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Rebuffering since the previous report (not counting seeks).",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "PlaybackSettings": {
         "type": "object",
         "properties": {
@@ -4227,8 +4377,46 @@
         },
         "additionalProperties": false
       },
+      "ProgressAck": {
+        "type": "object",
+        "description": "What the server answers a report with.",
+        "required": [
+          "resume_position_seconds",
+          "watched",
+          "next_report_seconds"
+        ],
+        "properties": {
+          "next_report_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "resume_position_seconds": {
+            "type": "number",
+            "format": "double",
+            "description": "Where playback resumes next time (0 = from the start)."
+          },
+          "watched": {
+            "type": "boolean",
+            "description": "The item now counts as watched."
+          }
+        }
+      },
+      "ProgressEvent": {
+        "type": "string",
+        "description": "Why the player sent a report. Heartbeats arrive on a timer; the\nothers when the state changes, so the stored position is never more\nthan one heartbeat behind.",
+        "enum": [
+          "heartbeat",
+          "play",
+          "pause",
+          "seek",
+          "ended",
+          "stop"
+        ]
+      },
       "ProgressRequest": {
         "type": "object",
+        "description": "The older per-session endpoint, kept for clients built against it.",
         "required": [
           "position_seconds",
           "duration_seconds",
@@ -4240,7 +4428,8 @@
             "format": "double"
           },
           "ended": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "The viewer left (not: played to the end)."
           },
           "paused": {
             "type": "boolean"
@@ -4553,6 +4742,83 @@
           "season": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "SessionQuality": {
+        "type": "object",
+        "description": "One playback session as the admin quality view shows it.",
+        "required": [
+          "id",
+          "started_at",
+          "username",
+          "title",
+          "play_method",
+          "client_name",
+          "device_name",
+          "position_seconds",
+          "watched_seconds",
+          "stall_count",
+          "stall_seconds",
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "Reported within the last two minutes and not ended."
+          },
+          "bandwidth_kbps": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "device_name": {
+            "type": "string"
+          },
+          "dropped_frames": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "play_method": {
+            "type": "string"
+          },
+          "position_seconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "stall_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "stall_seconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "title": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "watched_seconds": {
+            "type": "number",
+            "format": "double"
           }
         }
       },

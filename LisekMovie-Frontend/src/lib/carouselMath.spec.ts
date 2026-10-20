@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clampOffset, computeMaxOffset, pageOffset } from './carouselMath';
+import { clampOffset, computeMaxOffset, pageOffset, revealOffset } from './carouselMath';
 
 describe('clampOffset', () => {
 	it('keeps an in-range value unchanged', () => {
@@ -45,5 +45,24 @@ describe('pageOffset', () => {
 
 	it('clamps a backward page past the start to zero', () => {
 		expect(pageOffset(50, -1, 1000, 5000, 0.9)).toBe(0);
+	});
+});
+
+describe('revealOffset', () => {
+	it('leaves a card that is already visible alone', () => {
+		expect(revealOffset(100, 300, 500, 1000, 2000)).toBe(100);
+	});
+
+	it('slides right just enough to show a card past the right edge, plus a peek of the next', () => {
+		expect(revealOffset(0, 900, 1100, 1000, 2000, 48)).toBe(148);
+	});
+
+	it('slides left to a card before the left edge, clamped at the start', () => {
+		expect(revealOffset(600, 400, 600, 1000, 2000, 48)).toBe(352);
+		expect(revealOffset(600, 10, 210, 1000, 2000, 48)).toBe(0);
+	});
+
+	it('never passes the end of the track', () => {
+		expect(revealOffset(0, 2900, 3100, 1000, 2000)).toBe(2000);
 	});
 });

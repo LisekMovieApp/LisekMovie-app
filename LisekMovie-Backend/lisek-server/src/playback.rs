@@ -740,30 +740,6 @@ pub async fn stream(State(state): State<SharedState>, Path(id): Path<Uuid>, Quer
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
-pub struct ProgressRequest {
-    position_seconds: f64,
-    duration_seconds: f64,
-    paused: bool,
-    #[serde(default)]
-    ended: bool,
-}
-#[utoipa::path(put,path="/api/playback/{session_id}/progress",params(("session_id"=Uuid,Path)),request_body=ProgressRequest,responses((status=204),(status=400),(status=401),(status=404)),security(("lisek_auth"=[])))]
-pub async fn progress(auth: AuthUser, State(state): State<SharedState>, Path(id): Path<Uuid>, Json(req): Json<ProgressRequest>) -> Result<StatusCode, PlaybackError> {
-    if !req.position_seconds.is_finite() || !req.duration_seconds.is_finite() || req.position_seconds < 0.0 || req.duration_seconds < 0.0 || req.duration_seconds > 604800.0 || req.position_seconds > req.duration_seconds + 1.0 {
-        return Err(PlaybackError(StatusCode::BAD_REQUEST, "invalid_progress"));
-    }
-    if !db::heartbeat(&pool(&state).await?, auth.user.id, id, req.position_seconds, req.duration_seconds, req.paused, req.ended).await? {
-        return Err(PlaybackError(StatusCode::NOT_FOUND, "playback_not_found"));
-    }
-    if req.ended {
-        session::stop(&id.to_string()).await;
-    } else {
-        session::touch(&id.to_string());
-    }
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
 pub struct FlagsRequest {
     watched: Option<bool>,
     favorite: Option<bool>,

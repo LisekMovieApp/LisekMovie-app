@@ -11,6 +11,12 @@
   (nothing scanned into any library yet) replaces the whole page body with
   a friendly "add a library" message instead of an indefinite skeleton —
   the skeleton means "loading", not "empty forever".
+
+  Faza 4: the hero rotates through the feed's hero plus the top
+  recommendations, a "continue watching" row (from `/api/me/list`, fed by
+  the player's telemetry) leads the rows, and the rows overlap the hero's
+  bottom fade like VOD home screens do. A failed list fetch only hides
+  that row.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -18,7 +24,9 @@
 	import { page } from '$app/state';
 	import { t } from '$lib/i18n';
 	import { getSessionCookieClientSide } from '$lib/auth';
-	import { fetchHomeFeed, type HomeFeed } from '$lib/media/api';
+	import { fetchHomeFeed, type HomeFeed, type MediaItem } from '$lib/media/api';
+	import { fetchMyList, type ListEntry } from '$lib/playback/api';
+	import ContinueRow from '$lib/components/ContinueRow.svelte';
 	import HeroBanner from '$lib/components/HeroBanner.svelte';
 	import MediaRow from '$lib/components/MediaRow.svelte';
 	import Top10Row from '$lib/components/Top10Row.svelte';
@@ -26,6 +34,10 @@
 	let feed: HomeFeed | null = $state(null);
 	let loadFailed = $state(false);
 	let token = $state('');
+	let continuing: ListEntry[] = $state([]);
+
+	/** How many items the hero rotates through. */
+	const HERO_ITEMS = 5;
 
 	async function load() {
 		const sessionToken = getSessionCookieClientSide();
@@ -33,12 +45,31 @@
 		token = sessionToken;
 
 		loadFailed = false;
+		fetchMyList(sessionToken)
+			.then((entries) => (continuing = entries))
+			.catch(() => (continuing = []));
 		try {
 			feed = await fetchHomeFeed(sessionToken);
 		} catch {
 			loadFailed = true;
 		}
 	}
+
+	/** The feed's hero first, then distinct recommendations (popular, recent as fallbacks). */
+	let heroItems = $derived.by((): MediaItem[] | null => {
+		if (feed === null) return null;
+		const picked: MediaItem[] = [];
+		for (const candidate of [
+			feed.hero,
+			...feed.recommended,
+			...feed.popular,
+			...feed.recently_added
+		]) {
+			if (picked.length >= HERO_ITEMS) break;
+			if (candidate && !picked.some((p) => p.id === candidate.id)) picked.push(candidate);
+		}
+		return picked;
+	});
 
 	onMount(load);
 
@@ -83,9 +114,10 @@
 	</main>
 {:else}
 	<main class="min-h-screen bg-base pb-16">
-		<HeroBanner item={feed?.hero ?? null} {token} />
+		<HeroBanner items={heroItems} {token} />
 
-		<div class="mt-8 flex flex-col gap-8">
+		<div class="relative z-10 -mt-20 flex flex-col gap-6 md:-mt-32 md:gap-9">
+			<ContinueRow entries={continuing} {token} />
 			<MediaRow titleKey="home.row_recently_added" items={feed?.recently_added ?? null} {token} />
 			<Top10Row items={feed?.top10 ?? null} {token} />
 			<MediaRow titleKey="home.row_recommended" items={feed?.recommended ?? null} {token} />

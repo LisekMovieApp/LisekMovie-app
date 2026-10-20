@@ -364,6 +364,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/stats/playback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["recent_sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/stats/users": {
         parameters: {
             query?: never;
@@ -992,7 +1008,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put: operations["progress"];
+        put: operations["legacy_progress"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1079,6 +1095,22 @@ export interface paths {
         get: operations["status"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/telemetry/playback-progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["playback_progress"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1480,6 +1512,39 @@ export interface components {
              */
             direction: string;
         };
+        /** @description One progress report (`POST /api/telemetry/playback-progress`). */
+        PlaybackProgress: {
+            /**
+             * Format: int32
+             * @description The player's current bandwidth estimate.
+             */
+            bandwidth_kbps?: number | null;
+            /**
+             * Format: double
+             * @description Media buffered ahead of the position.
+             */
+            buffered_seconds?: number | null;
+            /**
+             * Format: int32
+             * @description Totals since playback started (`getVideoPlaybackQuality()`).
+             */
+            dropped_frames?: number | null;
+            /** Format: double */
+            duration_seconds: number;
+            event?: components["schemas"]["ProgressEvent"];
+            paused?: boolean;
+            /** Format: double */
+            position_seconds: number;
+            /** Format: uuid */
+            session_id: string;
+            /** Format: double */
+            stall_seconds?: number;
+            /**
+             * Format: int32
+             * @description Rebuffering since the previous report (not counting seeks).
+             */
+            stalls?: number;
+        };
         PlaybackSettings: {
             /**
              * @description Copy a compatible video stream into HLS instead of re-encoding it.
@@ -1673,9 +1738,30 @@ export interface components {
              */
             video_bitrate_kbps?: number;
         };
+        /** @description What the server answers a report with. */
+        ProgressAck: {
+            /** Format: int32 */
+            next_report_seconds: number;
+            /**
+             * Format: double
+             * @description Where playback resumes next time (0 = from the start).
+             */
+            resume_position_seconds: number;
+            /** @description The item now counts as watched. */
+            watched: boolean;
+        };
+        /**
+         * @description Why the player sent a report. Heartbeats arrive on a timer; the
+         *     others when the state changes, so the stored position is never more
+         *     than one heartbeat behind.
+         * @enum {string}
+         */
+        ProgressEvent: "heartbeat" | "play" | "pause" | "seek" | "ended" | "stop";
+        /** @description The older per-session endpoint, kept for clients built against it. */
         ProgressRequest: {
             /** Format: double */
             duration_seconds: number;
+            /** @description The viewer left (not: played to the end). */
             ended?: boolean;
             paused: boolean;
             /** Format: double */
@@ -1796,6 +1882,32 @@ export interface components {
             episodes: components["schemas"]["SeriesEpisodeResponse"][];
             /** Format: int32 */
             season: number;
+        };
+        /** @description One playback session as the admin quality view shows it. */
+        SessionQuality: {
+            /** @description Reported within the last two minutes and not ended. */
+            active: boolean;
+            /** Format: int32 */
+            bandwidth_kbps?: number | null;
+            client_name: string;
+            device_name: string;
+            /** Format: int32 */
+            dropped_frames?: number | null;
+            /** Format: uuid */
+            id: string;
+            play_method: string;
+            /** Format: double */
+            position_seconds: number;
+            /** Format: int32 */
+            stall_count: number;
+            /** Format: double */
+            stall_seconds: number;
+            /** Format: date-time */
+            started_at: string;
+            title: string;
+            username: string;
+            /** Format: double */
+            watched_seconds: number;
         };
         SetProviderKeyRequest: {
             api_key: string;
@@ -3158,6 +3270,40 @@ export interface operations {
                 content?: never;
             };
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    recent_sessions: {
+        parameters: {
+            query?: {
+                /** @description 1-500, default 50 */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionQuality"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4644,7 +4790,7 @@ export interface operations {
             };
         };
     };
-    progress: {
+    legacy_progress: {
         parameters: {
             query?: never;
             header?: never;
@@ -4934,6 +5080,50 @@ export interface operations {
                 content?: never;
             };
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    playback_progress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaybackProgress"];
+            };
+        };
+        responses: {
+            /** @description Stored; when to report next */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressAck"];
+                };
+            };
+            /** @description invalid_progress / invalid_quality */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The session is not the caller's, has ended or expired */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

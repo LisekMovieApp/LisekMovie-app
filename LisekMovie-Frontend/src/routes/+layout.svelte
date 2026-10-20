@@ -2,7 +2,9 @@
 	import './layout.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import Navbar from '$lib/components/Navbar.svelte';
+	import { page } from '$app/state';
 	import { setLocale } from '$lib/i18n';
+	import { initSpatialNavigation } from '$lib/spatial/spatial';
 	import type { LayoutProps } from './$types';
 
 	let { children, data }: LayoutProps = $props();
@@ -33,6 +35,14 @@
 	$effect(() => {
 		setLocale(data.locale);
 	});
+
+	// Arrow keys / TV remote D-pad move focus between cards, rows and
+	// buttons on every page (see `$lib/spatial/spatial.ts`).
+	$effect(() => initSpatialNavigation());
+
+	// The player covers the whole screen; the navbar behind it would only
+	// catch Tab focus.
+	const watching = $derived(page.route.id?.startsWith('/watch/') ?? false);
 </script>
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
@@ -42,7 +52,7 @@
   has confirmed one — which also means it's naturally absent on /setup and
   /login, with no route-based check needed here.
 -->
-{#if data.user && !data.user.must_change_password}
+{#if data.user && !data.user.must_change_password && !watching}
 	<Navbar username={data.user.username} isAdmin={data.user.is_admin} />
 {/if}
 {@render children()}

@@ -36,10 +36,18 @@
   capturing element per the Pointer Events spec — so the `click` never
   reached a card's own `<a>` at all, on every single press. See the
   `onPointerDown`/`onPointerMove`/`endDrag` comments below for the fix.
+
+  Faza 4 (TV): the row is a spatial-navigation group (`navGroup`):
+  left/right stay inside it, and coming back into the row lands on the
+  card it was left on. Focus slides the track (`onFocusIn`) so a card
+  reached by keyboard or remote is always fully in view, and focused cards
+  scale up inside the vertical padding the viewport keeps for them.
 -->
 <script lang="ts">
 	import { t } from '$lib/i18n';
-	import { clampOffset, computeMaxOffset, pageOffset } from '$lib/carouselMath';
+	import { clampOffset, computeMaxOffset, pageOffset, revealOffset } from '$lib/carouselMath';
+	import { navGroup } from '$lib/spatial/spatial';
+	import Icon from './Icon.svelte';
 	import type { Snippet } from 'svelte';
 
 	interface Props {
@@ -61,10 +69,34 @@
 	let atStart = $derived(offset <= 0);
 	let atEnd = $derived(offset >= maxOffset);
 
+	/** The viewport's width minus its side padding: what the track shows. */
+	function visibleWidth(): number {
+		if (!viewportEl) return 0;
+		const style = getComputedStyle(viewportEl);
+		return viewportEl.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+	}
+
 	function recomputeMaxOffset() {
 		if (!viewportEl || !trackEl) return;
-		maxOffset = computeMaxOffset(trackEl.scrollWidth, viewportEl.clientWidth);
+		// Against the padded width, so at the end the last card stops at the
+		// right padding instead of being cut off by the viewport's edge.
+		maxOffset = computeMaxOffset(trackEl.scrollWidth, visibleWidth());
 		offset = clampOffset(offset, maxOffset);
+	}
+
+	/** Keyboard / remote focus: slide the focused card into view. */
+	function onFocusIn(event: FocusEvent) {
+		if (!viewportEl || !trackEl || !(event.target instanceof HTMLElement)) return;
+		// Tab focus may scroll the clipped viewport natively; the track's
+		// transform is the only scroll position this carousel uses.
+		viewportEl.scrollLeft = 0;
+		let card: HTMLElement | null = event.target;
+		while (card && card.parentElement !== trackEl) card = card.parentElement;
+		if (!card) return;
+		const track = trackEl.getBoundingClientRect();
+		const rect = card.getBoundingClientRect();
+		const start = rect.left - track.left;
+		offset = revealOffset(offset, start, start + rect.width, visibleWidth(), maxOffset);
 	}
 
 	function scrollByPage(direction: 1 | -1) {
@@ -163,7 +195,7 @@
 	});
 </script>
 
-<div class="relative">
+<div class="relative -my-4" use:navGroup={{ contain: 'horizontal' }}>
 	<!--
 	  role="presentation": the pointer handlers below are a drag-to-scroll
 	  convenience layered on top of the fully keyboard-accessible arrow
@@ -175,8 +207,9 @@
 	<div
 		bind:this={viewportEl}
 		role="presentation"
-		class="touch-pan-y overflow-hidden px-4 md:px-8"
+		class="touch-pan-y overflow-hidden px-4 py-4 md:px-8"
 		onwheel={onWheel}
+		onfocusin={onFocusIn}
 		onpointerdown={onPointerDown}
 		onpointermove={onPointerMove}
 		onpointerup={endDrag}
@@ -196,26 +229,24 @@
 	<button
 		type="button"
 		aria-label={t('home.scroll_left')}
+		data-nav-skip
 		onclick={() => scrollByPage(-1)}
-		class="absolute inset-y-0 left-0 hidden w-10 items-center justify-center bg-gradient-to-r from-base/80 to-transparent text-neutral-100 transition-opacity hover:text-gold md:flex md:w-14 {atStart
+		class="absolute inset-y-0 left-0 hidden w-10 items-center justify-center bg-gradient-to-r from-base/90 via-base/50 to-transparent text-neutral-100 transition-opacity hover:text-gold md:flex md:w-14 {atStart
 			? 'invisible'
 			: 'opacity-0 group-hover/row:opacity-100'}"
 	>
-		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="size-6">
-			<path d="M15 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round" />
-		</svg>
+		<Icon name="chevron_left" class="size-8 transition-transform hover:scale-125" />
 	</button>
 
 	<button
 		type="button"
 		aria-label={t('home.scroll_right')}
+		data-nav-skip
 		onclick={() => scrollByPage(1)}
-		class="absolute inset-y-0 right-0 hidden w-10 items-center justify-center bg-gradient-to-l from-base/80 to-transparent text-neutral-100 transition-opacity hover:text-gold md:flex md:w-14 {atEnd
+		class="absolute inset-y-0 right-0 hidden w-10 items-center justify-center bg-gradient-to-l from-base/90 via-base/50 to-transparent text-neutral-100 transition-opacity hover:text-gold md:flex md:w-14 {atEnd
 			? 'invisible'
 			: 'opacity-0 group-hover/row:opacity-100'}"
 	>
-		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="size-6">
-			<path d="M9 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round" />
-		</svg>
+		<Icon name="chevron_right" class="size-8 transition-transform hover:scale-125" />
 	</button>
 </div>

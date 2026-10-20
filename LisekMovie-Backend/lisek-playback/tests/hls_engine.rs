@@ -226,6 +226,12 @@ async fn remux_cuts_at_keyframes_throttles_seeks_and_exports_subtitles() {
     assert!((pts[0] - zero - map.start(target)).abs() < 0.03);
     let after_seek = s.subtitle_segment(TrackRef::Embedded(2), map.segment_at(62.5)).await.unwrap();
     assert!(after_seek.contains("Po przewinięciu"), "{after_seek}");
+    // A subtitle segment before the run's start that no run produced is
+    // answered empty after a short grace, not after hls.js gives up.
+    let asked = std::time::Instant::now();
+    let skipped = s.subtitle_segment(TrackRef::Embedded(2), target - 3).await.unwrap();
+    assert!(asked.elapsed() < Duration::from_secs(4), "waited {:?}", asked.elapsed());
+    assert!(!skipped.contains("-->"), "{skipped}");
     let produced = segment_files(&started.dir);
     assert!(!produced.contains(&0), "segments behind the retention window are deleted: {produced:?}");
 

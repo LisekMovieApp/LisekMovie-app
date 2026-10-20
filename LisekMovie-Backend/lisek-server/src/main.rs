@@ -26,6 +26,7 @@ mod routes;
 mod scan_jobs;
 mod setup;
 mod state;
+mod telemetry;
 
 use std::sync::Arc;
 use std::time::Duration;

@@ -1401,6 +1401,13 @@ dependencies = [
 [[package]]
 name = "lisek-telemetry"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "utoipa",
+ "uuid",
+]
 
 [[package]]
 name = "litemap"

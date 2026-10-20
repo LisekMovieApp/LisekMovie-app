@@ -44,6 +44,14 @@ const SEGMENT_TIMEOUT: Duration = Duration::from_secs(90);
 /// A segment this close after the one FFmpeg is writing is waited for
 /// rather than restarting FFmpeg at it.
 const WAIT_AHEAD_SECONDS: f64 = 20.0;
+/// Longest wait for a subtitle segment's cues. Shorter than hls.js's
+/// time-to-first-byte timeout (10 s): an empty answer leaves a gap, a
+/// timed-out one stalls the player's subtitle loading.
+const SUBTITLE_WAIT: Duration = Duration::from_secs(8);
+/// How long a subtitle segment no run is heading for waits for one to
+/// start (a seek back: the video request restarting FFmpeg there usually
+/// arrives together with the subtitle request).
+const SUBTITLE_GRACE: Duration = Duration::from_millis(1500);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionError {
@@ -358,7 +366,13 @@ impl Session {
                 }
                 // Cues up to a segment's end have been read once FFmpeg has
                 // moved past that segment. Never restart FFmpeg for them.
-                let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+                // A segment before the run's start (hls.js loads one segment
+                // before the start position) is never reached by this run:
+                // answer it empty after a short grace instead of making the
+                // player wait.
+                let started = tokio::time::Instant::now();
+                let deadline = started + SUBTITLE_WAIT;
+                let grace = started + SUBTITLE_GRACE;
                 loop {
                     let notified = self.changed.notified();
                     tokio::pin!(notified);
@@ -378,8 +392,13 @@ impl Session {
                             };
                             return Ok(document);
                         }
+                        let heading_there = state.run.as_ref().is_some_and(|r| r.start <= index && !r.finished);
+                        if !heading_there && tokio::time::Instant::now() >= grace {
+                            return Ok(subtitles::vtt_document(std::iter::empty(), Some(mpegts)));
+                        }
                     }
-                    if tokio::time::timeout_at(deadline, notified).await.is_err() {
+                    let wake = if tokio::time::Instant::now() < grace { grace.min(deadline) } else { deadline };
+                    if tokio::time::timeout_at(wake, notified).await.is_err() && wake == deadline {
                         return Ok(subtitles::vtt_document(std::iter::empty(), Some(mpegts)));
                     }
                 }

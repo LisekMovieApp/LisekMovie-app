@@ -28,7 +28,7 @@ use crate::openapi::ApiDoc;
 use crate::state::SharedState;
 use crate::{
     admin, auth, browser_notifications, games, media, notifications, playback, scan_jobs, setup,
-    users,
+    telemetry, users,
 };
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -81,7 +81,8 @@ fn user() -> OpenApiRouter<SharedState> {
         .routes(routes!(media::logo_image))
         .routes(routes!(playback::start))
         .routes(routes!(playback::stop))
-        .routes(routes!(playback::progress))
+        .routes(routes!(telemetry::legacy_progress))
+        .routes(routes!(telemetry::playback_progress))
         .routes(routes!(playback::media_state, playback::set_flags))
         .routes(routes!(playback::my_list))
         .routes(routes!(games::list))
@@ -117,6 +118,7 @@ fn admin() -> OpenApiRouter<SharedState> {
         .routes(routes!(games::admin_list))
         .routes(routes!(games::configure))
         .routes(routes!(playback::stats))
+        .routes(routes!(telemetry::recent_sessions))
         .routes(routes!(playback::settings, playback::set_settings))
         .routes(routes!(playback::capabilities))
         .routes(routes!(playback::safety, playback::set_safety))

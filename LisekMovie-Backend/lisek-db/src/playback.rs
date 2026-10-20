@@ -78,20 +78,58 @@ pub async fn ticket_source(pool: &PgPool, id: Uuid, ticket_hash: &str) -> Result
         .bind(id).bind(ticket_hash).fetch_optional(pool).await?)
 }
 
-/// Server elapsed time counts watching; seeking never adds to viewing statistics.
-pub async fn heartbeat(pool: &PgPool, user_id: Uuid, id: Uuid, position: f64, duration: f64, paused: bool, ended: bool) -> Result<bool, DbError> {
+/// One progress report, already validated by `lisek-telemetry`.
+#[derive(Debug, Clone, Default)]
+pub struct ProgressUpdate {
+    pub position: f64,
+    pub duration: f64,
+    /// The player is playing after this report.
+    pub playing: bool,
+    /// The report closes the session (ended or stopped).
+    pub ends_session: bool,
+    /// Played to the end: watched regardless of the resume thresholds.
+    pub played_to_end: bool,
+    /// Longest gap between reports that still counts as viewing time.
+    pub max_counted_gap: f64,
+    pub stalls: i32,
+    pub stall_seconds: f64,
+    pub dropped_frames: Option<i32>,
+    pub bandwidth_kbps: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProgressOutcome {
+    pub resume_position: f64,
+    pub watched: bool,
+}
+
+/// Applies a progress report to the caller's own open session and to the
+/// item's resume state. `None` when the session is not the caller's, has
+/// ended or expired. Time since the previous report counts as viewing
+/// time only if the player was playing in between, and at most
+/// `max_counted_gap`; seeking never adds to it.
+pub async fn record_progress(pool: &PgPool, user_id: Uuid, id: Uuid, update: &ProgressUpdate) -> Result<Option<ProgressOutcome>, DbError> {
     let config = settings(pool).await?;
-    let (position, completed) = config.resume_state(position, duration);
+    let (resume, completed) = config.resume_state(update.position, update.duration);
+    let watched_now = completed || update.played_to_end;
+    let resume = if watched_now { 0.0 } else { resume };
     let mut tx = pool.begin().await?;
-    let row: Option<(Uuid,)> = sqlx::query_as("UPDATE playback_sessions SET watched_seconds=watched_seconds + CASE WHEN paused THEN 0 ELSE LEAST(30.0,GREATEST(0.0,EXTRACT(EPOCH FROM now()-last_heartbeat_at))) END, last_heartbeat_at=now(), paused=$3, ended_at=CASE WHEN $4 THEN now() ELSE NULL END WHERE id=$1 AND user_id=$2 AND ended_at IS NULL AND expires_at>now() RETURNING item_id")
-        .bind(id).bind(user_id).bind(paused).bind(ended).fetch_optional(&mut *tx).await?;
-    let Some((item_id,)) = row else { return Ok(false); };
-    sqlx::query("INSERT INTO user_media_state (user_id,item_id,position_seconds,duration_seconds,watched) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(user_id,item_id) DO UPDATE SET position_seconds=$3,duration_seconds=$4,watched=user_media_state.watched OR $5,updated_at=now()")
-        .bind(user_id).bind(item_id).bind(position).bind(duration)
-        .bind(completed)
-        .execute(&mut *tx).await?;
+    let row: Option<(Uuid,)> = sqlx::query_as(
+        "UPDATE playback_sessions SET \
+            watched_seconds = watched_seconds + CASE WHEN paused THEN 0 ELSE LEAST($3, GREATEST(0.0, EXTRACT(EPOCH FROM now() - last_heartbeat_at))) END, \
+            last_heartbeat_at = now(), paused = NOT $4, ended_at = CASE WHEN $5 THEN now() ELSE NULL END, \
+            position_seconds = $6, stall_count = stall_count + $7, stall_seconds = stall_seconds + $8, \
+            dropped_frames = COALESCE($9, dropped_frames), bandwidth_kbps = COALESCE($10, bandwidth_kbps) \
+         WHERE id = $1 AND user_id = $2 AND ended_at IS NULL AND expires_at > now() RETURNING item_id")
+        .bind(id).bind(user_id).bind(update.max_counted_gap).bind(update.playing).bind(update.ends_session)
+        .bind(update.position).bind(update.stalls).bind(update.stall_seconds).bind(update.dropped_frames).bind(update.bandwidth_kbps)
+        .fetch_optional(&mut *tx).await?;
+    let Some((item_id,)) = row else { return Ok(None); };
+    let (watched,): (bool,) = sqlx::query_as("INSERT INTO user_media_state (user_id,item_id,position_seconds,duration_seconds,watched) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(user_id,item_id) DO UPDATE SET position_seconds=$3,duration_seconds=$4,watched=user_media_state.watched OR $5,updated_at=now() RETURNING watched")
+        .bind(user_id).bind(item_id).bind(resume).bind(update.duration).bind(watched_now)
+        .fetch_one(&mut *tx).await?;
     tx.commit().await?;
-    Ok(true)
+    Ok(Some(ProgressOutcome { resume_position: resume, watched }))
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -99,6 +137,8 @@ pub struct ListEntry {
     pub id: Uuid,
     pub title: String,
     pub item_type: String,
+    pub season: Option<i32>,
+    pub episode: Option<i32>,
     pub position_seconds: f64,
     pub duration_seconds: f64,
     pub watched: bool,
@@ -106,7 +146,7 @@ pub struct ListEntry {
 }
 
 pub async fn my_list(pool: &PgPool, user_id: Uuid) -> Result<Vec<ListEntry>, DbError> {
-    Ok(sqlx::query_as("SELECT m.id,m.title,m.item_type,u.position_seconds,u.duration_seconds,u.watched,u.favorite FROM user_media_state u JOIN media_items m ON m.id=u.item_id WHERE u.user_id=$1 ORDER BY u.updated_at DESC LIMIT 500")
+    Ok(sqlx::query_as("SELECT m.id,m.title,m.item_type,m.season_number AS season,m.episode_number AS episode,u.position_seconds,u.duration_seconds,u.watched,u.favorite FROM user_media_state u JOIN media_items m ON m.id=u.item_id WHERE u.user_id=$1 ORDER BY u.updated_at DESC LIMIT 500")
         .bind(user_id).fetch_all(pool).await?)
 }
 
@@ -122,6 +162,32 @@ pub async fn stats(pool: &PgPool) -> Result<Vec<UserStats>, DbError> {
         .fetch_all(pool).await?)
 }
 
+
+/// One playback session as the admin quality view shows it.
+#[derive(Debug, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct SessionQuality {
+    pub id: Uuid,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub username: String,
+    pub title: String,
+    pub play_method: String,
+    pub client_name: String,
+    pub device_name: String,
+    pub position_seconds: f64,
+    pub watched_seconds: f64,
+    pub stall_count: i32,
+    pub stall_seconds: f64,
+    pub dropped_frames: Option<i32>,
+    pub bandwidth_kbps: Option<i32>,
+    /// Reported within the last two minutes and not ended.
+    pub active: bool,
+}
+
+/// The most recent sessions, newest first.
+pub async fn recent_sessions(pool: &PgPool, limit: i64) -> Result<Vec<SessionQuality>, DbError> {
+    Ok(sqlx::query_as("SELECT p.id,p.started_at,u.username,m.title,p.play_method,p.client_name,p.device_name,p.position_seconds,p.watched_seconds,p.stall_count,p.stall_seconds,p.dropped_frames,p.bandwidth_kbps,(p.ended_at IS NULL AND p.last_heartbeat_at > now() - interval '2 minutes') AS active FROM playback_sessions p JOIN users u ON u.id=p.user_id JOIN media_items m ON m.id=p.item_id ORDER BY p.started_at DESC LIMIT $1")
+        .bind(limit).fetch_all(pool).await?)
+}
 
 pub async fn settings(pool: &PgPool) -> Result<lisek_core::playback_settings::PlaybackSettings, DbError> {
     let (sqlx::types::Json(config),): (sqlx::types::Json<lisek_core::playback_settings::PlaybackSettings>,) = sqlx::query_as("SELECT settings FROM playback_settings WHERE id=true").fetch_one(pool).await?;

@@ -76,15 +76,19 @@
 				{/each}
 			{:else}
 				{#each items as item, i (item.id)}
-					<a href={resolve('/media/[id]', { id: item.id })} class="flex shrink-0 items-center">
+					<a
+						href={resolve('/media/[id]', { id: item.id })}
+						class="group flex shrink-0 items-center outline-none"
+					>
 						<span
 							aria-hidden="true"
 							class="-mr-5 text-[6.5rem] leading-none font-black text-transparent select-none [-webkit-text-stroke:3px_var(--color-gold)] sm:-mr-7 sm:text-[8.5rem] md:-mr-9 md:text-[10rem]"
 						>
 							{i + 1}
 						</span>
+						<!-- Focus (keyboard, TV remote) lifts the poster with a gold ring, like MediaCard. -->
 						<div
-							class="relative aspect-[2/3] w-[127px] shrink-0 overflow-hidden rounded-md bg-surface sm:w-[168px] md:w-[192px]"
+							class="relative aspect-[2/3] w-[127px] shrink-0 overflow-hidden rounded-md bg-surface ring-gold transition-transform duration-200 group-hover:scale-[1.04] group-focus-visible:scale-[1.07] group-focus-visible:ring-[3px] sm:w-[168px] md:w-[192px]"
 						>
 							{#if !failedIds.has(item.id)}
 								<img
