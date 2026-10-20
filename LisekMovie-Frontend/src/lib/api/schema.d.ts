@@ -1016,6 +1016,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/playback/{session_id}/subtitles/{file}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["subtitles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/setup/database/test": {
         parameters: {
             query?: never;
@@ -1073,10 +1089,105 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AudioTrack: {
+            channel_layout?: string | null;
+            /** Format: int32 */
+            channels?: number | null;
+            codec?: string | null;
+            /** Format: int32 */
+            index: number;
+            is_default: boolean;
+            language?: string | null;
+            title?: string | null;
+        };
+        Capabilities: {
+            encoders: string[];
+            ffmpeg_path: string;
+            ffprobe_path: string;
+            filters: string[];
+            hwaccels: string[];
+            jellyfin_build: boolean;
+            /** @description A test frame encoded with `h264_nvenc` on the configured GPU. */
+            nvenc_available: boolean;
+            software_tonemapping: boolean;
+            /**
+             * @description Tone mapping backends usable with this build and hardware, fastest
+             *     first. `auto` takes the first one.
+             */
+            tonemapping_backends: string[];
+            version: string;
+            /** @description A Vulkan device opens, so `libplacebo` can tone map on the GPU. */
+            vulkan_available: boolean;
+        };
         ChangePassword: {
             current_password?: string | null;
             new_password: string;
         };
+        /**
+         * @description Decoding abilities of one client. Codec names are FFmpeg codec names;
+         *     a `_10bit` suffix adds 10-bit decoding of that codec.
+         */
+        ClientCapabilities: {
+            /**
+             * @description `aac`, `mp3`, `opus`, `flac`, `ac3`, `eac3`, `alac`, `dts`,
+             *     `truehd`, `vorbis`.
+             * @default [
+             *       "aac",
+             *       "mp3"
+             *     ]
+             */
+            audio_codecs?: string[];
+            /**
+             * @description Containers played from a plain URL: `mp4`, `webm`, `mkv`, `ts`.
+             * @default [
+             *       "mp4"
+             *     ]
+             */
+            containers?: string[];
+            /** @default unknown */
+            family?: components["schemas"]["ClientFamily"];
+            /**
+             * @description `hdr10`, `hlg`, `dolby_vision`. Empty on SDR displays.
+             * @default []
+             */
+            hdr_formats?: string[];
+            /** @default mse */
+            hls?: components["schemas"]["HlsSupport"];
+            /**
+             * @description Deinterlaces by itself (TVs do; browsers show combing).
+             * @default false
+             */
+            interlaced?: boolean;
+            /**
+             * Format: int32
+             * @description Channels the client outputs without downmixing (2 for most
+             *     browsers, 6 or 8 with a surround setup).
+             * @default 2
+             */
+            max_audio_channels?: number;
+            /**
+             * Format: int32
+             * @default 0
+             */
+            max_height?: number;
+            /**
+             * Format: int32
+             * @description Picture size worth sending when re-encoding (the screen), 0 for no
+             *     limit.
+             * @default 0
+             */
+            max_width?: number;
+            /**
+             * @description `h264`, `h264_10bit`, `hevc`, `hevc_10bit`, `av1`, `av1_10bit`,
+             *     `vp9`, `vp9_10bit`, `mpeg2video`, `vc1`, `mpeg4`.
+             * @default [
+             *       "h264"
+             *     ]
+             */
+            video_codecs?: string[];
+        };
+        /** @enum {string} */
+        ClientFamily: "chrome" | "edge" | "firefox" | "safari" | "tv" | "unknown";
         CreateLibraryRequest: {
             library_type: string;
             name: string;
@@ -1106,6 +1217,27 @@ export interface components {
             port: number;
             username: string;
         };
+        /** @description What actually reaches the client. */
+        DeliveredStreams: {
+            /** Format: int32 */
+            audio_channels?: number | null;
+            audio_codec?: string | null;
+            audio_copied: boolean;
+            downmix?: string | null;
+            /** Format: int32 */
+            height: number;
+            tone_mapped: boolean;
+            video_codec: string;
+            /** @description The video stream is passed through untouched. */
+            video_copied: boolean;
+            /** Format: int32 */
+            width: number;
+        };
+        /**
+         * @description What the client asked for. `Auto` lets the server choose.
+         * @enum {string}
+         */
+        DownmixPreference: "auto" | "standard" | "dialogue" | "night" | "pro_logic_ii";
         EditUser: {
             disabled: boolean;
             is_admin: boolean;
@@ -1171,6 +1303,11 @@ export interface components {
             service: string;
             status: string;
         };
+        /**
+         * @description How the client plays HLS.
+         * @enum {string}
+         */
+        HlsSupport: "native" | "mse" | "none";
         HomeFeedResponse: {
             hero?: null | components["schemas"]["MediaItemResponse"];
             popular: components["schemas"]["MediaItemResponse"][];
@@ -1345,43 +1482,56 @@ export interface components {
         };
         PlaybackSettings: {
             /**
+             * @description Copy a compatible video stream into HLS instead of re-encoding it.
+             * @default true
+             */
+            allow_remux?: boolean;
+            /**
              * Format: int32
              * @default 128
              */
-            audio_bitrate_kbps: number;
+            audio_bitrate_kbps?: number;
             /** @default false */
-            audio_vbr: boolean;
+            audio_vbr?: boolean;
             /** @default true */
-            decode_hevc_10bit: boolean;
+            decode_hevc_10bit?: boolean;
             /** @default true */
-            decode_vp9_10bit: boolean;
+            decode_vp9_10bit?: boolean;
             /** @default false */
-            deinterlace_double_rate: boolean;
+            deinterlace_double_rate?: boolean;
             /** @default yadif */
-            deinterlace_method: string;
+            deinterlace_method?: string;
+            /**
+             * @description Default stereo downmix of surround audio: `standard` (ITU-R
+             *     BS.775), `dialogue` (louder centre channel), `night` (dialogue plus
+             *     dynamic range compression) or `pro_logic_ii` (matrix-encoded for
+             *     receivers that decode Dolby Pro Logic II).
+             * @default standard
+             */
+            downmix_algorithm?: string;
             /**
              * Format: double
              * @default 2
              */
-            downmix_audio_boost: number;
+            downmix_audio_boost?: number;
             /** @default veryfast */
-            encoder_preset: string;
+            encoder_preset?: string;
             /**
              * Format: int32
              * @default 0
              */
-            encoding_threads: number;
+            encoding_threads?: number;
             /** @default true */
-            enhanced_nvdec: boolean;
+            enhanced_nvdec?: boolean;
             /** @default  */
-            ffmpeg_path: string;
+            ffmpeg_path?: string;
             /**
              * Format: int32
              * @default 23
              */
-            h264_crf: number;
+            h264_crf?: number;
             /** @default none */
-            hardware_acceleration: string;
+            hardware_acceleration?: string;
             /**
              * @default [
              *       "h264",
@@ -1393,9 +1543,29 @@ export interface components {
              *       "vp9"
              *     ]
              */
-            hardware_decoding_codecs: string[];
+            hardware_decoding_codecs?: string[];
+            /**
+             * Format: int32
+             * @description GPU used for decoding, filtering and encoding (CUDA device order,
+             *     see `nvidia-smi -L`).
+             * @default 0
+             */
+            hardware_device_index?: number;
             /** @default true */
-            hardware_encoding: boolean;
+            hardware_encoding?: boolean;
+            /**
+             * @description Encode HEVC instead of H.264 for clients that decode HEVC (NVENC
+             *     only). Same quality at a lower bitrate.
+             * @default false
+             */
+            hevc_encoding?: boolean;
+            /**
+             * Format: int32
+             * @description HLS segment length when the video is re-encoded, in seconds. A
+             *     copied video is cut at its own keyframes, close to this length.
+             * @default 4
+             */
+            hls_segment_seconds?: number;
             /**
              * @default [
              *       "127.0.0.0/8",
@@ -1406,65 +1576,102 @@ export interface components {
              *       "fc00::/7"
              *     ]
              */
-            local_networks: string[];
+            local_networks?: string[];
+            /**
+             * Format: int32
+             * @description Simultaneous video encodes. Remuxes (copied video) do not count.
+             * @default 2
+             */
+            max_concurrent_transcodes?: number;
             /**
              * Format: int32
              * @default 2048
              */
-            max_muxing_queue_size: number;
+            max_muxing_queue_size?: number;
             /**
              * Format: int32
              * @default 720
              */
-            max_output_height: number;
+            max_output_height?: number;
             /**
              * Format: double
              * @default 90
              */
-            max_resume_percentage: number;
+            max_resume_percentage?: number;
             /**
              * Format: int32
              * @default 300
              */
-            min_resume_duration_seconds: number;
+            min_resume_duration_seconds?: number;
             /**
              * Format: double
              * @default 5
              */
-            min_resume_percentage: number;
+            min_resume_percentage?: number;
+            /**
+             * Format: int32
+             * @description Segments further than this behind the player are deleted.
+             * @default 60
+             */
+            segment_retention_seconds?: number;
             /**
              * Format: double
              * @default null
              */
-            streaming_bitrate_limit_mbps: number | null;
+            streaming_bitrate_limit_mbps?: number | null;
+            /**
+             * @description Character set of external text subtitles that are not UTF-8 (Polish
+             *     `.srt` files are usually Windows-1250).
+             * @default CP1250
+             */
+            subtitle_fallback_charset?: string;
+            /**
+             * Format: int32
+             * @default 30
+             */
+            throttle_lead_seconds?: number;
+            /**
+             * @description Pause FFmpeg once it is this many seconds ahead of the segment the
+             *     player last asked for, and resume it at half of that. Until then
+             *     FFmpeg runs at full speed, so playback and seeking start at once.
+             * @default true
+             */
+            throttling?: boolean;
             /** @default false */
-            tonemapping: boolean;
-            /** @default hable */
-            tonemapping_algorithm: string;
+            tonemapping?: boolean;
+            /** @default bt2390 */
+            tonemapping_algorithm?: string;
+            /**
+             * @description Where HDR -> SDR tone mapping runs: `auto` picks the fastest one the
+             *     FFmpeg build supports (`cuda` > `libplacebo` > `opencl` >
+             *     `software`). `cuda` needs jellyfin-ffmpeg's `tonemap_cuda`.
+             * @default auto
+             */
+            tonemapping_backend?: string;
             /**
              * Format: double
              * @default 0
              */
-            tonemapping_desat: number;
+            tonemapping_desat?: number;
             /**
              * Format: double
              * @default null
              */
-            tonemapping_param: number | null;
+            tonemapping_param?: number | null;
             /**
              * Format: double
              * @default 100
              */
-            tonemapping_peak: number;
+            tonemapping_peak?: number;
             /** @default  */
-            transcoding_temp_path: string;
+            transcoding_temp_path?: string;
             /** @default [] */
-            trusted_proxies: string[];
+            trusted_proxies?: string[];
             /**
              * Format: int32
              * @default 2500
              */
-            video_bitrate_kbps: number;
+            video_bitrate_kbps?: number;
         };
         ProgressRequest: {
             /** Format: double */
@@ -1593,18 +1800,79 @@ export interface components {
         SetProviderKeyRequest: {
             api_key: string;
         };
+        /**
+         * @description The client's choices when starting playback. Every field is optional;
+         *     an empty body plays the default tracks the way the client's family
+         *     handles best.
+         */
+        StartRequest: {
+            /**
+             * Format: int32
+             * @description ffprobe index of the audio stream (see `audio_tracks`).
+             * @default null
+             */
+            audio_stream_index?: number | null;
+            /**
+             * @description Burn the subtitle into the picture even when it is text (keeps ASS
+             *     styling; costs a transcode). Picture subtitles are always burnt.
+             * @default false
+             */
+            burn_subtitle?: boolean;
+            /** @default null */
+            client?: null | components["schemas"]["ClientCapabilities"];
+            /** @default auto */
+            downmix?: components["schemas"]["DownmixPreference"];
+            /** @default false */
+            force_transcode?: boolean;
+            /**
+             * Format: int32
+             * @default null
+             */
+            max_bitrate_kbps?: number | null;
+            /**
+             * Format: int32
+             * @default null
+             */
+            max_height?: number | null;
+            /**
+             * Format: double
+             * @description Start here instead of at the saved resume position.
+             * @default null
+             */
+            start_position_seconds?: number | null;
+            /**
+             * @description Subtitle track id from `subtitle_tracks`: `s<index>` embedded,
+             *     `x<n>` a file next to the video.
+             * @default null
+             */
+            subtitle?: string | null;
+        };
         StartResponse: {
+            audio_tracks: components["schemas"]["AudioTrack"][];
+            delivered: components["schemas"]["DeliveredStreams"];
             /** Format: double */
             duration_seconds?: number | null;
+            hls: boolean;
             /** Format: uuid */
             item_id: string;
+            /** @description `direct_play`, `remux` or `transcode`. */
             mode: string;
             /** Format: double */
             position_seconds: number;
+            reasons: components["schemas"]["TranscodeReason"][];
+            /** Format: int32 */
+            selected_audio_stream_index?: number | null;
+            selected_subtitle?: string | null;
             /** Format: uuid */
             session_id: string;
+            /** @description The file (direct play) or the HLS master playlist. */
             stream_url: string;
-            /** Format: double */
+            subtitle_delivery?: null | components["schemas"]["SubtitleDelivery"];
+            subtitle_tracks: components["schemas"]["SubtitleTrack"][];
+            /**
+             * Format: double
+             * @description Always 0 now: HLS playlists cover the whole file.
+             */
             time_offset_seconds: number;
             title: string;
         };
@@ -1612,12 +1880,35 @@ export interface components {
             database_connected: boolean;
             setup_required: boolean;
         };
+        /** @enum {string} */
+        SubtitleDelivery: "external" | "hls" | "burn_in";
+        SubtitleTrack: {
+            codec?: string | null;
+            /** @description A file next to the video rather than a stream inside it. */
+            external: boolean;
+            forced: boolean;
+            /**
+             * Format: int32
+             * @description Position among the HLS subtitle renditions (hls.js
+             *     `subtitleTracks`), for switching without restarting playback.
+             */
+            hls_rendition?: number | null;
+            id: string;
+            is_default: boolean;
+            kind: string;
+            language?: string | null;
+            title?: string | null;
+            /** @description WebVTT for a `<track>` element (direct play only). */
+            url?: string | null;
+        };
         TemporaryPassword: {
             temporary_password: string;
         };
         TestConnectionResponse: {
             ok: boolean;
         };
+        /** @enum {string} */
+        TranscodeReason: "forced_by_client" | "container_not_supported" | "video_codec_not_supported" | "video_bit_depth_not_supported" | "video_profile_not_supported" | "hdr_not_supported" | "interlaced_not_supported" | "resolution_above_requested" | "bitrate_above_limit" | "audio_codec_not_supported" | "audio_channels_not_supported" | "audio_track_not_first" | "downmix_requested" | "subtitle_burn_in" | "subtitle_needs_hls" | "no_keyframe_index" | "remux_disabled";
         UpdateMediaItemRequest: {
             forced_provider?: string | null;
             locked_fields: string[];
@@ -2425,7 +2716,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Capabilities"];
                 };
             };
             400: {
@@ -4018,14 +4309,22 @@ export interface operations {
     };
     start: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Deprecated: use force_transcode */
+                transcode?: boolean;
+            };
             header?: never;
             path: {
                 item_id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        /** @description Optional; an empty body plays the default tracks */
+        requestBody?: {
+            content: {
+                "application/json": null | components["schemas"]["StartRequest"];
+            };
+        };
         responses: {
             200: {
                 headers: {
@@ -4035,13 +4334,31 @@ export interface operations {
                     "application/json": components["schemas"]["StartResponse"];
                 };
             };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4293,13 +4610,14 @@ export interface operations {
             header?: never;
             path: {
                 session_id: string;
+                /** @description master.m3u8, video.m3u8, init.mp4, seg-<n>.m4s, subs-<track>.m3u8, subs-<track>-<n>.vtt */
                 file: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description HLS manifest or segment */
+            /** @description HLS playlist, segment or WebVTT */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4401,6 +4719,48 @@ export interface operations {
                 content?: never;
             };
             416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    subtitles: {
+        parameters: {
+            query: {
+                ticket: string;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+                /** @description x<n>.vtt */
+                file: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description WebVTT */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

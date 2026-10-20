@@ -63,12 +63,12 @@ pub async fn save_probe(
             media_item_id, stream_index, stream_type, codec, profile, language, title,
             is_default, is_forced, width, height, bit_depth, pixel_format, color_transfer,
             color_primaries, color_space, field_order, frame_rate, channels, channel_layout,
-            sample_rate, bitrate_kbps)
+            sample_rate, bitrate_kbps, dovi_profile)
         SELECT $1, * FROM UNNEST(
             $2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[],
             $8::bool[], $9::bool[], $10::int[], $11::int[], $12::int[], $13::text[], $14::text[],
             $15::text[], $16::text[], $17::text[], $18::float8[], $19::int[], $20::text[],
-            $21::int[], $22::int[])
+            $21::int[], $22::int[], $23::int[])
         ON CONFLICT (media_item_id, stream_index) DO NOTHING
         "#,
     )
@@ -94,6 +94,7 @@ pub async fn save_probe(
     .bind(col_text(|x| x.channel_layout.as_deref()))
     .bind(col_i32(|x| x.sample_rate))
     .bind(col_i32(|x| x.bitrate_kbps))
+    .bind(col_i32(|x| x.dovi_profile))
     .execute(&mut *tx)
     .await?;
 
@@ -106,7 +107,10 @@ pub async fn save_probe(
             probed_at = now(),
             probe_error = NULL,
             file_size = CASE WHEN $5 THEN $6 ELSE file_size END,
-            file_modified_at = CASE WHEN $5 THEN $7 ELSE file_modified_at END
+            file_modified_at = CASE WHEN $5 THEN $7 ELSE file_modified_at END,
+            -- 0 when ffprobe reported none, so the row no longer looks
+            -- like a pre-0015 probe.
+            start_time_seconds = COALESCE($8, 0)
         WHERE id = $1
         "#,
     )
@@ -117,6 +121,7 @@ pub async fn save_probe(
     .bind(stamp.is_some())
     .bind(stamp.and_then(|s| s.size))
     .bind(stamp.and_then(|s| s.modified))
+    .bind(probe.start_time_seconds)
     .execute(&mut *tx)
     .await?;
 
@@ -141,6 +146,7 @@ struct ProbeFacts {
     container: Option<String>,
     duration_seconds: Option<f64>,
     bitrate_kbps: Option<i32>,
+    start_time_seconds: Option<f64>,
     file_size: Option<i64>,
     file_modified_at: Option<DateTime<Utc>>,
 }
@@ -168,6 +174,7 @@ struct StreamRow {
     channel_layout: Option<String>,
     sample_rate: Option<i32>,
     bitrate_kbps: Option<i32>,
+    dovi_profile: Option<i32>,
 }
 
 impl From<StreamRow> for MediaStream {
@@ -194,6 +201,7 @@ impl From<StreamRow> for MediaStream {
             channel_layout: r.channel_layout,
             sample_rate: r.sample_rate,
             bitrate_kbps: r.bitrate_kbps,
+            dovi_profile: r.dovi_profile,
         }
     }
 }
@@ -207,7 +215,8 @@ pub async fn stored_probe(
 ) -> Result<Option<(MediaProbe, FileStamp)>, DbError> {
     let facts: Option<ProbeFacts> = sqlx::query_as(
         r#"
-        SELECT container, duration_seconds, bitrate_kbps, file_size, file_modified_at
+        SELECT container, duration_seconds, bitrate_kbps, start_time_seconds, file_size,
+               file_modified_at
         FROM media_items
         WHERE id = $1 AND probed_at IS NOT NULL AND probe_error IS NULL
         "#,
@@ -224,7 +233,7 @@ pub async fn stored_probe(
         SELECT stream_index, stream_type, codec, profile, language, title, is_default, is_forced,
                width, height, bit_depth, pixel_format, color_transfer, color_primaries,
                color_space, field_order, frame_rate, channels, channel_layout, sample_rate,
-               bitrate_kbps
+               bitrate_kbps, dovi_profile
         FROM media_streams
         WHERE media_item_id = $1
         ORDER BY stream_index
@@ -239,6 +248,7 @@ pub async fn stored_probe(
             container: facts.container,
             duration_seconds: facts.duration_seconds,
             bitrate_kbps: facts.bitrate_kbps,
+            start_time_seconds: facts.start_time_seconds,
             streams: streams.into_iter().map(MediaStream::from).collect(),
         },
         FileStamp {
@@ -246,6 +256,54 @@ pub async fn stored_probe(
             modified: facts.file_modified_at,
         },
     )))
+}
+
+/// Keyframe timestamps stored by [`save_keyframes`], if the file still
+/// matches `stamp`. An unknown stamp on either side is trusted, as for
+/// probes.
+pub async fn stored_keyframes(
+    pool: &PgPool,
+    item_id: Uuid,
+    stamp: Option<FileStamp>,
+) -> Result<Option<Vec<f64>>, DbError> {
+    type Row = (Option<i64>, Option<DateTime<Utc>>, Vec<f64>);
+    let row: Option<Row> = sqlx::query_as(
+        "SELECT file_size, file_modified_at, keyframes FROM media_keyframes WHERE media_item_id = $1",
+    )
+    .bind(item_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.and_then(|(size, modified, keyframes)| {
+        let stored = FileStamp { size, modified };
+        (!stamp.is_some_and(|s| s.differs_from(&stored))).then_some(keyframes)
+    }))
+}
+
+/// Stores the keyframe timestamps of an item's video, replacing older ones.
+pub async fn save_keyframes(
+    pool: &PgPool,
+    item_id: Uuid,
+    stamp: Option<FileStamp>,
+    keyframes: &[f64],
+) -> Result<(), DbError> {
+    sqlx::query(
+        r#"
+        INSERT INTO media_keyframes (media_item_id, file_size, file_modified_at, keyframes)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (media_item_id) DO UPDATE SET
+            file_size = EXCLUDED.file_size,
+            file_modified_at = EXCLUDED.file_modified_at,
+            keyframes = EXCLUDED.keyframes,
+            scanned_at = now()
+        "#,
+    )
+    .bind(item_id)
+    .bind(stamp.and_then(|s| s.size))
+    .bind(stamp.and_then(|s| s.modified))
+    .bind(keyframes)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 #[cfg(test)]

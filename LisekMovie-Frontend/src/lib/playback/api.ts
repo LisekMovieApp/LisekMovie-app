@@ -1,15 +1,11 @@
 import { buildAuthHeader } from '$lib/auth';
+import type { components } from '$lib/api/schema';
 
-export interface PlaybackSession {
-    session_id: string;
-    item_id: string;
-    title: string;
-    stream_url: string;
-    position_seconds: number;
-    time_offset_seconds: number;
-    duration_seconds: number | null;
-    mode: string;
-}
+export type PlaybackSession = components['schemas']['StartResponse'];
+export type StartRequest = components['schemas']['StartRequest'];
+export type AudioTrack = components['schemas']['AudioTrack'];
+export type SubtitleTrack = components['schemas']['SubtitleTrack'];
+export type DownmixPreference = components['schemas']['DownmixPreference'];
 export interface MediaState {
     position_seconds: number;
     duration_seconds: number;
@@ -31,8 +27,9 @@ export async function api<T>(token: string, path: string, method = 'GET', body?:
     if (!response.ok) throw new Error(`Request failed: ${response.status}`);
     return response.status === 204 ? undefined as T : await response.json() as T;
 }
-export function startPlayback(token: string, id: string, transcode = false) {
-    return api<PlaybackSession>(token, `/api/media/${encodeURIComponent(id)}/playback?transcode=${transcode}`, 'POST');
+/** Starts playback; the server decides direct play, remux or transcode from `request.client`. */
+export function startPlayback(token: string, id: string, request: StartRequest = {}) {
+    return api<PlaybackSession>(token, `/api/media/${encodeURIComponent(id)}/playback`, 'POST', request);
 }
 export function saveProgress(token: string, sessionId: string, position: number, duration: number, paused: boolean, ended = false) {
     if (!Number.isFinite(position) || !Number.isFinite(duration) || duration <= 0) return Promise.resolve();

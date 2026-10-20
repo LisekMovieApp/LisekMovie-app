@@ -14,6 +14,10 @@ pub struct MediaProbe {
     pub container: Option<String>,
     pub duration_seconds: Option<f64>,
     pub bitrate_kbps: Option<i32>,
+    /// ffprobe's `format.start_time`: the timestamp playback time zero
+    /// corresponds to. Near zero for Matroska/MP4, often hundreds of
+    /// seconds for MPEG-TS/M2TS. `None` for probes stored before 0015.
+    pub start_time_seconds: Option<f64>,
     pub streams: Vec<MediaStream>,
 }
 
@@ -44,6 +48,61 @@ pub struct MediaStream {
     pub channel_layout: Option<String>,
     pub sample_rate: Option<i32>,
     pub bitrate_kbps: Option<i32>,
+    /// Dolby Vision profile from the stream's DOVI configuration record
+    /// (5, 7, 8 ...), `None` for streams without Dolby Vision.
+    pub dovi_profile: Option<i32>,
+}
+
+/// The high dynamic range format of a video stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HdrFormat {
+    /// PQ transfer (HDR10, HDR10+).
+    Hdr10,
+    /// Hybrid log-gamma.
+    Hlg,
+    /// Dolby Vision. Profiles 7 and 8 carry an HDR10-compatible base
+    /// layer; profile 5 does not, and only a Dolby Vision aware decoder or
+    /// tone mapper shows correct colours.
+    DolbyVision { profile: i32 },
+}
+
+impl MediaStream {
+    /// `None` for SDR video and for non-video streams.
+    pub fn hdr_format(&self) -> Option<HdrFormat> {
+        if self.kind != StreamKind::Video {
+            return None;
+        }
+        if let Some(profile) = self.dovi_profile {
+            return Some(HdrFormat::DolbyVision { profile });
+        }
+        match self.color_transfer.as_deref() {
+            Some("smpte2084") => Some(HdrFormat::Hdr10),
+            Some("arib-std-b67") => Some(HdrFormat::Hlg),
+            _ => None,
+        }
+    }
+
+    /// Bits per sample, from the probe or, when ffprobe left it out, from
+    /// the pixel format name (`yuv420p10le` -> 10).
+    pub fn effective_bit_depth(&self) -> u32 {
+        if let Some(depth) = self.bit_depth.and_then(|d| u32::try_from(d).ok()).filter(|d| *d > 0) {
+            return depth;
+        }
+        let format = self.pixel_format.as_deref().unwrap_or_default();
+        if format.contains("12") {
+            12
+        } else if format.contains("10") || format.starts_with("p010") {
+            10
+        } else {
+            8
+        }
+    }
+
+    /// Interlaced field order reported by ffprobe.
+    pub fn is_interlaced(&self) -> bool {
+        matches!(self.field_order.as_deref(), Some("tt" | "bb" | "tb" | "bt"))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
@@ -96,6 +155,17 @@ impl MediaProbe {
         let first = audio.clone().next();
         audio.find(|s| s.is_default).or(first)
     }
+
+    /// The stream with ffprobe index `index`.
+    pub fn stream(&self, index: i32) -> Option<&MediaStream> {
+        self.streams.iter().find(|s| s.index == index)
+    }
+
+    /// The audio stream a player picks when it plays the file directly:
+    /// the first one in file order.
+    pub fn first_audio(&self) -> Option<&MediaStream> {
+        self.streams.iter().find(|s| s.kind == StreamKind::Audio)
+    }
 }
 
 /// MKV/MP4 files often carry a poster as a one-frame "video" stream.
@@ -130,6 +200,7 @@ mod tests {
             channel_layout: None,
             sample_rate: None,
             bitrate_kbps: None,
+            dovi_profile: None,
         }
     }
 
@@ -139,6 +210,7 @@ mod tests {
             container: None,
             duration_seconds: None,
             bitrate_kbps: None,
+            start_time_seconds: None,
             streams: vec![stream(0, StreamKind::Video, "mjpeg"), stream(1, StreamKind::Video, "hevc")],
         };
         assert_eq!(probe.primary_video().unwrap().index, 1);
@@ -152,9 +224,27 @@ mod tests {
             container: None,
             duration_seconds: None,
             bitrate_kbps: None,
+            start_time_seconds: None,
             streams: vec![stream(1, StreamKind::Audio, "aac"), second],
         };
         assert_eq!(probe.primary_audio().unwrap().index, 2);
+    }
+
+    #[test]
+    fn hdr_format_and_bit_depth_come_from_the_probe() {
+        let mut video = stream(0, StreamKind::Video, "hevc");
+        assert_eq!(video.hdr_format(), None);
+        video.color_transfer = Some("smpte2084".into());
+        assert_eq!(video.hdr_format(), Some(HdrFormat::Hdr10));
+        video.dovi_profile = Some(8);
+        assert_eq!(video.hdr_format(), Some(HdrFormat::DolbyVision { profile: 8 }));
+        video.pixel_format = Some("yuv420p10le".into());
+        assert_eq!(video.effective_bit_depth(), 10);
+        video.bit_depth = Some(12);
+        assert_eq!(video.effective_bit_depth(), 12);
+        let mut audio = stream(1, StreamKind::Audio, "aac");
+        audio.color_transfer = Some("smpte2084".into());
+        assert_eq!(audio.hdr_format(), None);
     }
 
     #[test]

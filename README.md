@@ -58,6 +58,12 @@ cargo sqlx prepare --workspace
 
 Database-backed tests (`lisek-db/tests/`) run when `LISEK_TEST_DATABASE_URL` points at a PostgreSQL role allowed to create databases, e.g. `postgres://lisekmovie:lisekmovie@localhost/postgres`; otherwise they are skipped.
 
+### Playback and FFmpeg
+
+Each playback is planned per stream: direct play, remux (video copied into HLS, only incompatible audio converted) or transcode. Any FFmpeg 6.1 or newer works. For HDR tone mapping on an NVIDIA GPU (`tonemap_cuda`, BT.2390, Dolby Vision), set the FFmpeg path in Admin → Playback to [jellyfin-ffmpeg](https://github.com/jellyfin/jellyfin-ffmpeg), e.g. `/usr/lib/jellyfin-ffmpeg`; builds with libplacebo can tone map through Vulkan instead. The capability check on that page lists what the configured build supports.
+
+`lisek-playback/tests/hls_engine.rs` exercises the HLS engine against the `ffmpeg` on `PATH` and is skipped without it. `tools/smoke_test.py` covers the whole server; with `--ffmpeg`, `--ffprobe`, `--node` and `--hlsjs LisekMovie-Frontend/node_modules/hls.js/dist/hls.min.js` it also plays a remuxed stream with hls.js in headless Chromium (needs the `playwright` package).
+
 ## License
 
 LisekMovie is licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)**, with an additional attribution requirement.

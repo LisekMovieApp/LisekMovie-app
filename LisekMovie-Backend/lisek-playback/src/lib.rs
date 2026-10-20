@@ -1,4 +1,19 @@
-//! Playback policy and HTTP byte ranges, independent of the transport and database.
+//! Playback: what to send each client (direct play, remux, transcode),
+//! the FFmpeg command lines for it, and the HLS session engine.
+//!
+//! Independent of the HTTP framework and the database: the server feeds
+//! in stored probes and settings and serves what [`session`] produces.
+pub mod command;
+pub mod decision;
+pub mod downmix;
+pub mod filters;
+pub mod fmp4;
+pub mod hls;
+pub mod keyframes;
+pub mod profile;
+pub mod session;
+pub mod subtitles;
+pub mod tonemap;
 pub mod transcode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

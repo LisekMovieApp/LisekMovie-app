@@ -12,8 +12,14 @@
         video_bitrate_kbps: number; audio_bitrate_kbps: number; audio_vbr: boolean; downmix_audio_boost: number;
         max_muxing_queue_size: number; deinterlace_method: string; deinterlace_double_rate: boolean;
         tonemapping: boolean; tonemapping_algorithm: string; tonemapping_desat: number; tonemapping_peak: number; tonemapping_param: number | null;
+        tonemapping_backend: string; hardware_device_index: number; hevc_encoding: boolean; allow_remux: boolean;
+        hls_segment_seconds: number; throttling: boolean; throttle_lead_seconds: number; segment_retention_seconds: number;
+        max_concurrent_transcodes: number; downmix_algorithm: string; subtitle_fallback_charset: string;
     }
-    interface Caps { ffmpeg_path: string; ffprobe_path: string; version: string; nvenc_available: boolean; software_tonemapping: boolean }
+    interface Caps {
+        ffmpeg_path: string; ffprobe_path: string; version: string; nvenc_available: boolean; software_tonemapping: boolean;
+        jellyfin_build: boolean; vulkan_available: boolean; tonemapping_backends: string[];
+    }
     let config = $state<Config>();
     let networks = $state(''), proxies = $state('');
     let remoteLimit = $state<number | undefined>(), toneParam = $state<number | undefined>();
@@ -72,21 +78,24 @@
             <label>{t('playback_settings.ffmpeg_executable_or_folder')}<input bind:value={config.ffmpeg_path} placeholder={t('playback_settings.server_environment_path')} /></label>
             <label>{t('playback_settings.temporary_files_folder')}<input bind:value={config.transcoding_temp_path} placeholder={t('playback_settings.default_server_folder')} /></label>
             <button type="button" class="secondary" disabled={checking} onclick={check}>{checking ? t('playback_settings.checking') : t('playback_settings.check_ffmpeg_and_nvidia_gpu')}</button>
-            {#if caps}<div role="status" class="break-all rounded bg-white/5 p-3 text-sm">{caps.version}<br />{t('playback_settings.ffmpeg_label')} {caps.ffmpeg_path}<br />{t('playback_settings.ffprobe_label')} {caps.ffprobe_path}<br />{t('playback_settings.nvenc_label')} {caps.nvenc_available ? t('playback_settings.encoding_test_passed') : t('playback_settings.unavailable')}<br />{t('playback_settings.hdr_sdr_label')} {caps.software_tonemapping ? t('playback_settings.filters_available') : t('playback_settings.filters_unavailable')}</div>{/if}
+            {#if caps}<div role="status" class="break-all rounded bg-white/5 p-3 text-sm">{caps.version}<br />{t('playback_settings.ffmpeg_label')} {caps.ffmpeg_path}<br />{t('playback_settings.ffprobe_label')} {caps.ffprobe_path}<br />{t('playback_settings.nvenc_label')} {caps.nvenc_available ? t('playback_settings.encoding_test_passed') : t('playback_settings.unavailable')}<br />{t('playback_settings.hdr_sdr_label')} {caps.tonemapping_backends.length ? caps.tonemapping_backends.join(', ') : t('playback_settings.filters_unavailable')}<br />{t('playback_settings.vulkan_label')} {caps.vulkan_available ? t('playback_settings.available') : t('playback_settings.unavailable')}{#if caps.jellyfin_build}<br />{t('playback_settings.jellyfin_build')}{/if}</div>{/if}
             {#if checkFailed}<p role="alert">{t('playback_settings.ffmpeg_check_failed')}</p>{/if}
             <label>{t('playback_settings.hardware_acceleration')}<select bind:value={config.hardware_acceleration}><option value="none">{t('playback_settings.none_cpu')}</option><option value="nvenc">{t('playback_settings.nvidia_nvenc_nvdec')}</option></select></label>
             {#if config.hardware_acceleration === 'nvenc'}
                 <label class="check"><input type="checkbox" bind:checked={config.hardware_encoding} />{t('playback_settings.hardware_encoding')}</label>
                 <p>{t('playback_settings.hardware_decoding_for')}</p>
-                <div class="flex flex-wrap gap-4">{#each ['h264','hevc','mpeg2video','mpeg4','vc1','vp8','vp9','av1'] as codec}<label class="check"><input type="checkbox" value={codec} bind:group={config.hardware_decoding_codecs} />{codec.toUpperCase()}</label>{/each}</div>
+                <div class="flex flex-wrap gap-4">{#each ['h264','hevc','mpeg2video','mpeg4','vc1','vp8','vp9','av1'] as codec (codec)}<label class="check"><input type="checkbox" value={codec} bind:group={config.hardware_decoding_codecs} />{codec.toUpperCase()}</label>{/each}</div>
                 <label class="check"><input type="checkbox" bind:checked={config.decode_hevc_10bit} />{t('playback_settings.hevc_10bit')}</label>
                 <label class="check"><input type="checkbox" bind:checked={config.decode_vp9_10bit} />{t('playback_settings.vp9_10bit')}</label>
                 <label class="check"><input type="checkbox" bind:checked={config.enhanced_nvdec} />{t('playback_settings.enhanced_nvdec_disable_to_use_cuvid')}</label>
+                <label>{t('playback_settings.gpu_index')}<input type="number" min="0" max="15" required bind:value={config.hardware_device_index} /></label>
+                <p>{t('playback_settings.gpu_index_hint')}</p>
+                <label class="check"><input type="checkbox" bind:checked={config.hevc_encoding} />{t('playback_settings.hevc_encoding')}</label>
             {/if}
-            <label>{t('playback_settings.maximum_output_height')}<select bind:value={config.max_output_height}>{#each [360,480,720,1080,1440,2160,4320] as height}<option value={height}>{t('playback_settings.height_option', { height })}</option>{/each}</select></label>
+            <label>{t('playback_settings.maximum_output_height')}<select bind:value={config.max_output_height}>{#each [360,480,720,1080,1440,2160,4320] as height (height)}<option value={height}>{t('playback_settings.height_option', { height })}</option>{/each}</select></label>
             <label>{t('playback_settings.maximum_video_bitrate_kbps')}<input type="number" min="100" max="200000" required bind:value={config.video_bitrate_kbps} /></label>
             <label>{t('playback_settings.thread_count_0_automatic')}<input type="number" min="0" max="256" required bind:value={config.encoding_threads} /></label>
-            <label>{t('playback_settings.encoder_preset')}<select bind:value={config.encoder_preset}>{#each ['ultrafast','superfast','veryfast','faster','fast','medium','slow','slower','veryslow'] as preset}<option value={preset}>{t(`playback_settings.presets.${preset}`)}</option>{/each}</select></label>
+            <label>{t('playback_settings.encoder_preset')}<select bind:value={config.encoder_preset}>{#each ['ultrafast','superfast','veryfast','faster','fast','medium','slow','slower','veryslow'] as preset (preset)}<option value={preset}>{t(`playback_settings.presets.${preset}`)}</option>{/each}</select></label>
             <p>{t('playback_settings.encoder_preset_hint')}</p>
             <label>{t('playback_settings.h264_crf')}<input type="number" min="0" max="51" required bind:value={config.h264_crf} /></label>
             <p>{t('playback_settings.crf_hint')}</p>
@@ -99,11 +108,27 @@
             <label class="check"><input type="checkbox" bind:checked={config.tonemapping} />{t('playback_settings.hdr10_hlg_sdr_tone_mapping')}</label>
             {#if config.tonemapping}
                 <p>{t('playback_settings.tonemapping_hint')}</p>
-                <label>{t('playback_settings.algorithm')}<select bind:value={config.tonemapping_algorithm}>{#each ['hable','reinhard','mobius','clip','linear','gamma'] as algorithm}<option value={algorithm}>{t(`playback_settings.algorithms.${algorithm}`)}</option>{/each}</select></label>
+                <label>{t('playback_settings.tonemapping_backend')}<select bind:value={config.tonemapping_backend}>{#each ['auto','cuda','libplacebo','opencl','software'] as backend (backend)}<option value={backend}>{t(`playback_settings.backends.${backend}`)}</option>{/each}</select></label>
+                <label>{t('playback_settings.algorithm')}<select bind:value={config.tonemapping_algorithm}>{#each ['bt2390','hable','reinhard','mobius','clip','linear','gamma'] as algorithm (algorithm)}<option value={algorithm}>{t(`playback_settings.algorithms.${algorithm}`)}</option>{/each}</select></label>
                 <label>{t('playback_settings.desaturation')}<input type="number" min="0" max="100" step="0.00001" required bind:value={config.tonemapping_desat} /></label>
                 <label>{t('playback_settings.signal_peak_0_automatic')}<input type="number" min="0" max="10000" step="0.00001" required bind:value={config.tonemapping_peak} /></label>
                 <label>{t('playback_settings.algorithm_parameter_optional')}<input type="number" min="0" max="100" step="0.00001" bind:value={toneParam} /></label>
             {/if}
+        </fieldset>
+        <fieldset>
+            <legend>{t('playback_settings.hls')}</legend>
+            <label class="check"><input type="checkbox" bind:checked={config.allow_remux} />{t('playback_settings.allow_remux')}</label>
+            <p>{t('playback_settings.allow_remux_hint')}</p>
+            <label>{t('playback_settings.segment_seconds')}<input type="number" min="2" max="10" required bind:value={config.hls_segment_seconds} /></label>
+            <label class="check"><input type="checkbox" bind:checked={config.throttling} />{t('playback_settings.throttling')}</label>
+            <label>{t('playback_settings.throttle_lead_seconds')}<input type="number" min="10" max="600" required bind:value={config.throttle_lead_seconds} /></label>
+            <p>{t('playback_settings.throttling_hint')}</p>
+            <label>{t('playback_settings.segment_retention_seconds')}<input type="number" min="10" max="3600" required bind:value={config.segment_retention_seconds} /></label>
+            <label>{t('playback_settings.max_concurrent_transcodes')}<input type="number" min="1" max="32" required bind:value={config.max_concurrent_transcodes} /></label>
+            <label>{t('playback_settings.downmix_algorithm')}<select bind:value={config.downmix_algorithm}>{#each ['standard','dialogue','night','pro_logic_ii'] as mode (mode)}<option value={mode}>{t(`player.downmix_modes.${mode}`)}</option>{/each}</select></label>
+            <p>{t('playback_settings.downmix_hint')}</p>
+            <label>{t('playback_settings.subtitle_charset')}<input required maxlength="32" pattern="[A-Za-z0-9_\-]+" bind:value={config.subtitle_fallback_charset} /></label>
+            <p>{t('playback_settings.subtitle_charset_hint')}</p>
         </fieldset>
         <button disabled={busy} class="rounded bg-gold px-4 py-3 text-black disabled:opacity-50">{busy ? t('playback_settings.saving') : t('playback_settings.save_playback_settings')}</button>
     </form>

@@ -103,7 +103,9 @@ async fn main() {
     tokio::spawn(async {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-            lisek_playback::transcode::cleanup().await;
+            // Players report progress every 10 s; 90 s of silence means the
+            // tab is gone.
+            lisek_playback::session::stop_idle(std::time::Duration::from_secs(90)).await;
         }
     });
 

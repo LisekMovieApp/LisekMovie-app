@@ -1,24 +1,16 @@
-//! Bounded FFmpeg jobs. Configuration is snapshotted when each job starts.
+//! FFmpeg and ffprobe binaries: locating them, probing files, and finding
+//! out what the installed build can do. The HLS engine itself lives in
+//! [`crate::session`].
 use lisek_core::media_probe::{MediaProbe, MediaStream, StreamKind};
 use lisek_core::playback_settings::PlaybackSettings;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     path::{Path, PathBuf},
-    sync::LazyLock,
+    sync::{LazyLock, Mutex},
     time::{Duration, Instant},
 };
-use tokio::{
-    process::{Child, Command},
-    sync::Mutex,
-};
-
-struct Job {
-    child: Child,
-    directory: PathBuf,
-    touched: Instant,
-}
-static JOBS: LazyLock<Mutex<HashMap<String, Job>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+use tokio::process::Command;
 
 #[derive(Debug, Clone)]
 pub struct SourceInfo {
@@ -67,12 +59,20 @@ struct Stream {
     disposition: HashMap<String, i64>,
     #[serde(default)]
     tags: HashMap<String, String>,
+    #[serde(default)]
+    side_data_list: Vec<SideData>,
 }
 #[derive(Deserialize)]
+struct SideData {
+    side_data_type: Option<String>,
+    dv_profile: Option<i32>,
+}
+#[derive(Deserialize, Default)]
 struct Format {
     format_name: Option<String>,
     duration: Option<String>,
     bit_rate: Option<String>,
+    start_time: Option<String>,
 }
 
 pub fn binary_path(name: &str, config: &PlaybackSettings) -> PathBuf {
@@ -104,21 +104,174 @@ pub fn binary_path(name: &str, config: &PlaybackSettings) -> PathBuf {
         path
     }
 }
-fn command(name: &str, config: &PlaybackSettings) -> Command {
+pub(crate) fn command(name: &str, config: &PlaybackSettings) -> Command {
     let mut command = Command::new(binary_path(name, config));
     command.kill_on_drop(true);
     #[cfg(windows)]
     command.creation_flags(0x08000000);
     command
 }
-#[derive(Serialize)]
+
+/// The parts of an FFmpeg build the planner chooses between. Filled by
+/// [`tools`] from `ffmpeg -filters/-encoders/-hwaccels`.
+#[derive(Debug, Clone, Default, Serialize, utoipa::ToSchema)]
+pub struct FfmpegTools {
+    pub version: String,
+    /// jellyfin-ffmpeg (adds `tonemap_cuda` with BT.2390 and Dolby Vision).
+    pub jellyfin_build: bool,
+    pub filters: BTreeSet<String>,
+    pub encoders: BTreeSet<String>,
+    pub hwaccels: BTreeSet<String>,
+}
+
+/// Filters, encoders and hardware methods the planner may use. Anything
+/// else in the build is irrelevant and left out of [`FfmpegTools`].
+const INTERESTING_FILTERS: &[&str] = &[
+    "tonemap_cuda",
+    "tonemap_opencl",
+    "libplacebo",
+    "zscale",
+    "tonemap",
+    "scale_cuda",
+    "yadif_cuda",
+    "bwdif_cuda",
+    "overlay_cuda",
+    "subtitles",
+    "hwupload_cuda",
+];
+const INTERESTING_ENCODERS: &[&str] = &[
+    "libx264", "libx265", "h264_nvenc", "hevc_nvenc", "aac", "libfdk_aac", "ac3", "eac3",
+    "webvtt",
+];
+
+impl FfmpegTools {
+    pub fn has_filter(&self, name: &str) -> bool {
+        self.filters.contains(name)
+    }
+    pub fn has_encoder(&self, name: &str) -> bool {
+        self.encoders.contains(name)
+    }
+
+    /// Parses `ffmpeg -version`, `-filters`, `-encoders` and `-hwaccels`
+    /// output. Pure, for tests.
+    pub fn parse(version: &str, filters: &str, encoders: &str, hwaccels: &str) -> Self {
+        let names = |text: &str, wanted: &[&str]| -> BTreeSet<String> {
+            text.lines()
+                // " T.C tonemap_cuda  V->V  ..." / " V....D h264_nvenc  NVIDIA ..."
+                .filter_map(|line| line.split_whitespace().nth(1))
+                .filter(|name| wanted.contains(name))
+                .map(str::to_owned)
+                .collect()
+        };
+        let first = version.lines().next().unwrap_or_default().to_owned();
+        Self {
+            jellyfin_build: version.to_ascii_lowercase().contains("jellyfin"),
+            version: first,
+            filters: names(filters, INTERESTING_FILTERS),
+            encoders: names(encoders, INTERESTING_ENCODERS),
+            hwaccels: hwaccels
+                .lines()
+                .skip_while(|l| !l.starts_with("Hardware acceleration methods"))
+                .skip(1)
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(str::to_owned)
+                .collect(),
+        }
+    }
+}
+
+struct CachedTools {
+    binary: PathBuf,
+    at: Instant,
+    tools: FfmpegTools,
+}
+static TOOLS: LazyLock<Mutex<Option<CachedTools>>> = LazyLock::new(|| Mutex::new(None));
+const TOOLS_TTL: Duration = Duration::from_secs(600);
+
+async fn ffmpeg_output(config: &PlaybackSettings, args: &[&str]) -> Option<String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(10),
+        command("ffmpeg", config).args(["-hide_banner"]).args(args).output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// What the configured FFmpeg build supports, cached for ten minutes per
+/// binary. An unreachable binary yields an empty set (everything falls
+/// back to software, and starting FFmpeg reports the real error).
+pub async fn tools(config: &PlaybackSettings) -> FfmpegTools {
+    let binary = binary_path("ffmpeg", config);
+    if let Some(cached) = TOOLS.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
+        && cached.binary == binary
+        && cached.at.elapsed() < TOOLS_TTL
+    {
+        return cached.tools.clone();
+    }
+    let (version, filters, encoders, hwaccels) = tokio::join!(
+        ffmpeg_output(config, &["-version"]),
+        ffmpeg_output(config, &["-filters"]),
+        ffmpeg_output(config, &["-encoders"]),
+        ffmpeg_output(config, &["-hwaccels"]),
+    );
+    let tools = FfmpegTools::parse(
+        version.as_deref().unwrap_or_default(),
+        filters.as_deref().unwrap_or_default(),
+        encoders.as_deref().unwrap_or_default(),
+        hwaccels.as_deref().unwrap_or_default(),
+    );
+    if version.is_some() {
+        *TOOLS.lock().unwrap_or_else(|e| e.into_inner()) = Some(CachedTools {
+            binary,
+            at: Instant::now(),
+            tools: tools.clone(),
+        });
+    }
+    tools
+}
+
+/// Forgets the cached [`tools`] (after the administrator changed the
+/// FFmpeg path or installed a new build).
+pub fn forget_tools() {
+    *TOOLS.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct Capabilities {
     pub ffmpeg_path: String,
     pub ffprobe_path: String,
     pub version: String,
+    pub jellyfin_build: bool,
+    /// A test frame encoded with `h264_nvenc` on the configured GPU.
     pub nvenc_available: bool,
+    /// A Vulkan device opens, so `libplacebo` can tone map on the GPU.
+    pub vulkan_available: bool,
     pub software_tonemapping: bool,
+    /// Tone mapping backends usable with this build and hardware, fastest
+    /// first. `auto` takes the first one.
+    pub tonemapping_backends: Vec<String>,
+    pub filters: Vec<String>,
+    pub encoders: Vec<String>,
+    pub hwaccels: Vec<String>,
 }
+
+async fn succeeds(config: &PlaybackSettings, args: &[&str]) -> bool {
+    tokio::time::timeout(
+        Duration::from_secs(15),
+        command("ffmpeg", config).args(args).output(),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .is_some_and(|o| o.status.success())
+}
+
 pub async fn capabilities(config: &PlaybackSettings) -> Result<Capabilities, String> {
     let output = tokio::time::timeout(
         Duration::from_secs(10),
@@ -140,50 +293,37 @@ pub async fn capabilities(config: &PlaybackSettings) -> Result<Capabilities, Str
     if !probe.status.success() {
         return Err("ffprobe_unavailable".into());
     }
-    let nvenc = tokio::time::timeout(
-        Duration::from_secs(15),
-        command("ffmpeg", config)
-            .args([
-                "-v",
-                "error",
-                "-f",
-                "lavfi",
-                "-i",
-                "color=size=320x240:rate=24",
-                "-frames:v",
-                "1",
-                "-c:v",
-                "h264_nvenc",
-                "-f",
-                "null",
-                "-",
-            ])
-            .output(),
-    )
-    .await;
-    let filters = tokio::time::timeout(
-        Duration::from_secs(10),
-        command("ffmpeg", config).args(["-filters"]).output(),
-    )
-    .await;
-    let filters = filters
-        .ok()
-        .and_then(Result::ok)
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .unwrap_or_default();
+    forget_tools();
+    let tools = tools(config).await;
+    let device = config.hardware_device_index.to_string();
+    let cuda = format!("cuda=cu:{device}");
+    let vulkan = format!("vulkan=vk:{device}");
+    let nvenc_args = [
+        "-v", "error", "-init_hw_device", &cuda, "-f", "lavfi", "-i", "color=size=320x240:rate=24",
+        "-frames:v", "1", "-c:v", "h264_nvenc", "-gpu", &device, "-f", "null", "-",
+    ];
+    let vulkan_args = [
+        "-v", "error", "-init_hw_device", &vulkan, "-f", "lavfi", "-i", "nullsrc=size=16x16",
+        "-frames:v", "1", "-f", "null", "-",
+    ];
+    let (nvenc, vulkan_ok) =
+        tokio::join!(succeeds(config, &nvenc_args), succeeds(config, &vulkan_args));
+    let backends = crate::tonemap::available_backends(&tools, nvenc, vulkan_ok)
+        .into_iter()
+        .map(|b| b.as_str().to_owned())
+        .collect();
     Ok(Capabilities {
         ffmpeg_path: binary_path("ffmpeg", config).display().to_string(),
         ffprobe_path: binary_path("ffprobe", config).display().to_string(),
-        version: String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .next()
-            .unwrap_or_default()
-            .to_owned(),
-        nvenc_available: nvenc
-            .ok()
-            .and_then(Result::ok)
-            .is_some_and(|o| o.status.success()),
-        software_tonemapping: filters.contains(" zscale ") && filters.contains(" tonemap "),
+        version: tools.version.clone(),
+        jellyfin_build: tools.jellyfin_build,
+        nvenc_available: nvenc,
+        vulkan_available: vulkan_ok,
+        software_tonemapping: tools.has_filter("zscale") && tools.has_filter("tonemap"),
+        tonemapping_backends: backends,
+        filters: tools.filters.iter().cloned().collect(),
+        encoders: tools.encoders.iter().cloned().collect(),
+        hwaccels: tools.hwaccels.iter().cloned().collect(),
     })
 }
 /// Probes `path` and derives the transcoder's view of it. Kept for callers
@@ -213,11 +353,7 @@ pub async fn probe_media(path: &Path, config: &PlaybackSettings) -> Result<Media
 /// Pure JSON-to-domain conversion, split out for unit tests.
 pub fn parse_probe(json: &[u8]) -> Result<MediaProbe, String> {
     let probe: Probe = serde_json::from_slice(json).map_err(|_| "probe_failed")?;
-    let format = probe.format.unwrap_or(Format {
-        format_name: None,
-        duration: None,
-        bit_rate: None,
-    });
+    let format = probe.format.unwrap_or_default();
     let streams = probe
         .streams
         .into_iter()
@@ -231,6 +367,15 @@ pub fn parse_probe(json: &[u8]) -> Result<MediaProbe, String> {
                     .map(|(_, v)| v.clone())
                     .filter(|v| !v.is_empty())
             };
+            let dovi_profile = s
+                .side_data_list
+                .iter()
+                .filter(|d| {
+                    d.side_data_type
+                        .as_deref()
+                        .is_some_and(|t| t.contains("DOVI configuration"))
+                })
+                .find_map(|d| d.dv_profile);
             MediaStream {
                 index: s.index.unwrap_or(position as i32),
                 kind: StreamKind::parse(s.codec_type.as_deref().unwrap_or("data")),
@@ -257,6 +402,7 @@ pub fn parse_probe(json: &[u8]) -> Result<MediaProbe, String> {
                 channel_layout: s.channel_layout,
                 sample_rate: s.sample_rate.and_then(|v| v.parse().ok()),
                 bitrate_kbps: s.bit_rate.as_deref().and_then(kbps),
+                dovi_profile,
             }
         })
         .collect();
@@ -267,6 +413,13 @@ pub fn parse_probe(json: &[u8]) -> Result<MediaProbe, String> {
             .and_then(|v| v.parse::<f64>().ok())
             .filter(|v| v.is_finite() && *v > 0.0),
         bitrate_kbps: format.bit_rate.as_deref().and_then(kbps),
+        start_time_seconds: Some(
+            format
+                .start_time
+                .and_then(|v| v.parse::<f64>().ok())
+                .filter(|v| v.is_finite())
+                .unwrap_or(0.0),
+        ),
         streams,
     })
 }
@@ -290,14 +443,8 @@ pub fn source_info(probe: &MediaProbe) -> Result<SourceInfo, String> {
         duration,
         codec: video.codec.clone().unwrap_or_default(),
         pixel_format: video.pixel_format.clone().unwrap_or_default(),
-        hdr: matches!(
-            video.color_transfer.as_deref(),
-            Some("smpte2084" | "arib-std-b67")
-        ),
-        interlaced: matches!(
-            video.field_order.as_deref(),
-            Some("tt" | "bb" | "tb" | "bt")
-        ),
+        hdr: video.hdr_format().is_some(),
+        interlaced: video.is_interlaced(),
         audio_channels: probe
             .primary_audio()
             .and_then(|a| a.channels)
@@ -318,350 +465,31 @@ fn kbps(bits_per_second: &str) -> Option<i32> {
     Some((bps / 1000).min(i32::MAX as u64) as i32)
 }
 
-fn encode_command(
-    path: &Path,
-    directory: &Path,
-    offset: f64,
-    config: &PlaybackSettings,
-    source: &SourceInfo,
-    remote_limit: Option<u32>,
-) -> Result<Command, String> {
-    if !config.validate() {
-        return Err("invalid_playback_settings".into());
-    }
-    // Reserve headroom for the container and constrain audio as well as video.
-    let total = remote_limit.map(|n| n.saturating_mul(90) / 100);
-    let audio = config.audio_bitrate_kbps.min(
-        total
-            .map(|n| (n / 4).clamp(32, 128))
-            .unwrap_or(config.audio_bitrate_kbps),
-    );
-    let video = total
-        .map(|n| n.saturating_sub(audio))
-        .unwrap_or(config.video_bitrate_kbps)
-        .min(config.video_bitrate_kbps);
-    if video < 100 {
-        return Err("streaming_limit_too_low".into());
-    }
-    let mut cmd = command("ffmpeg", config);
-    cmd.args([
-        "-hide_banner",
-        "-loglevel",
-        "warning",
-        "-nostdin",
-        "-y",
-        "-ss",
-        &offset.to_string(),
-        "-re",
-    ]);
-    let ten_bit = source.pixel_format.contains("10");
-    let decode = config.hardware_acceleration == "nvenc"
-        && config.hardware_decoding_codecs.contains(&source.codec)
-        && !source.pixel_format.contains("12")
-        && !source.pixel_format.contains("422")
-        && !source.pixel_format.contains("444")
-        && !(ten_bit && source.codec == "hevc" && !config.decode_hevc_10bit)
-        && !(ten_bit && source.codec == "vp9" && !config.decode_vp9_10bit);
-    if decode {
-        cmd.args(["-hwaccel", "cuda"]);
-        if !config.enhanced_nvdec {
-            let codec = match source.codec.as_str() {
-                "mpeg2video" => "mpeg2",
-                s => s,
-            };
-            cmd.args(["-c:v", &format!("{codec}_cuvid")]);
-        }
-    }
-    cmd.args(["-threads", &config.encoding_threads.to_string(), "-i"])
-        .arg(path)
-        .args([
-            "-map",
-            &source
-                .video_index
-                .map_or_else(|| "0:v:0".to_owned(), |index| format!("0:{index}")),
-            "-map",
-            "0:a:0?",
-            "-sn",
-        ]);
-    if config.hardware_acceleration == "nvenc" && config.hardware_encoding {
-        let preset = match config.encoder_preset.as_str() {
-            "ultrafast" | "superfast" => "p1",
-            "veryfast" | "faster" => "p2",
-            "fast" => "p3",
-            "medium" => "p4",
-            "slow" => "p5",
-            "slower" => "p6",
-            _ => "p7",
-        };
-        cmd.args([
-            "-c:v",
-            "h264_nvenc",
-            "-preset",
-            preset,
-            "-rc",
-            "vbr",
-            "-b:v",
-            &format!("{video}k"),
-        ]);
-    } else {
-        cmd.args([
-            "-c:v",
-            "libx264",
-            "-preset",
-            &config.encoder_preset,
-            "-crf",
-            &config.h264_crf.to_string(),
-        ]);
-    }
-    let mut filters = Vec::new();
-    if source.interlaced && config.deinterlace_method != "none" {
-        filters.push(format!(
-            "{}=mode={}:parity=auto:deint=interlaced",
-            config.deinterlace_method,
-            if config.deinterlace_double_rate {
-                "send_field"
-            } else {
-                "send_frame"
-            }
-        ));
-    }
-    if source.hdr && config.tonemapping {
-        let mut tonemap = format!(
-            "tonemap=tonemap={}:desat={}:peak={}",
-            config.tonemapping_algorithm, config.tonemapping_desat, config.tonemapping_peak
-        );
-        if let Some(param) = config.tonemapping_param {
-            tonemap.push_str(&format!(":param={param}"));
-        }
-        filters.extend([
-            "zscale=transfer=linear:npl=100".into(),
-            "format=gbrpf32le".into(),
-            "zscale=primaries=bt709".into(),
-            tonemap,
-            "zscale=transfer=bt709:matrix=bt709:range=limited".into(),
-        ]);
-        cmd.args([
-            "-color_primaries",
-            "bt709",
-            "-color_trc",
-            "bt709",
-            "-colorspace",
-            "bt709",
-            "-color_range",
-            "tv",
-        ]);
-    }
-    // Fit a 16:9 bounding box without enlarging small sources; preserve portrait aspect ratios.
-    let height = config.max_output_height.min(source.height).max(2);
-    let width = (config.max_output_height * 16 / 9).min(source.width).max(2);
-    filters.push(format!(
-        "scale=w={width}:h={height}:force_original_aspect_ratio=decrease:force_divisible_by=2"
-    ));
-    cmd.args([
-        "-vf",
-        &filters.join(","),
-        "-pix_fmt",
-        "yuv420p",
-        "-threads",
-        &config.encoding_threads.to_string(),
-        "-maxrate",
-        &format!("{video}k"),
-        "-bufsize",
-        &format!("{}k", video * 2),
-        "-c:a",
-        "aac",
-        "-ac",
-        "2",
-    ]);
-    if config.audio_vbr && remote_limit.is_none() {
-        cmd.args(["-q:a", "2"]);
-    } else {
-        cmd.args(["-b:a", &format!("{audio}k")]);
-    }
-    if source.audio_channels > 2 {
-        cmd.args(["-af", &format!("volume={}", config.downmix_audio_boost)]);
-    }
-    cmd.args([
-        "-max_muxing_queue_size",
-        &config.max_muxing_queue_size.to_string(),
-        "-force_key_frames",
-        "expr:gte(t,n_forced*4)",
-        "-f",
-        "hls",
-        "-hls_time",
-        "4",
-        "-hls_list_size",
-        "0",
-        "-hls_playlist_type",
-        "event",
-        "-hls_flags",
-        "temp_file",
-        "-hls_segment_filename",
-    ])
-    .arg(directory.join("segment-%06d.ts"))
-    .arg(directory.join("index.m3u8"));
-    Ok(cmd)
-}
-pub async fn start(
-    id: &str,
-    path: &Path,
-    directory: &Path,
-    offset: f64,
-    config: &PlaybackSettings,
-    source: &SourceInfo,
-    remote_limit: Option<u32>,
-) -> Result<(), String> {
-    let mut jobs = JOBS.lock().await;
-    let active = jobs
-        .values_mut()
-        .map(|job| usize::from(job.child.try_wait().ok().flatten().is_none()))
-        .sum::<usize>();
-    if active >= 2 {
-        return Err("transcode_capacity_reached".into());
-    }
-    let mut cmd = encode_command(path, directory, offset, config, source, remote_limit)?;
-    tokio::fs::create_dir_all(directory)
-        .await
-        .map_err(|_| "transcode_directory_unavailable")?;
-    let log = std::fs::File::create(directory.join("ffmpeg.log"))
-        .map_err(|_| "transcode_log_unavailable")?;
-    cmd.stdout(std::process::Stdio::null()).stderr(log);
-    let child = cmd.spawn().map_err(|_| "ffmpeg_unavailable")?;
-    jobs.insert(
-        id.to_owned(),
-        Job {
-            child,
-            directory: directory.to_owned(),
-            touched: Instant::now(),
-        },
-    );
-    Ok(())
-}
-pub async fn file_path(id: &str, file: &str) -> Option<PathBuf> {
-    if !valid_file(file) {
-        return None;
-    }
-    JOBS.lock().await.get(id).map(|j| j.directory.join(file))
-}
-pub async fn failed(id: &str) -> bool {
-    JOBS.lock().await.get_mut(id).is_none_or(|j| {
-        j.child
-            .try_wait()
-            .ok()
-            .flatten()
-            .is_some_and(|s| !s.success())
-    })
-}
-pub async fn touch(id: &str) -> bool {
-    if let Some(job) = JOBS.lock().await.get_mut(id) {
-        job.touched = Instant::now();
-        true
-    } else {
-        false
-    }
-}
-pub async fn exists(id: &str) -> bool {
-    JOBS.lock().await.contains_key(id)
-}
-pub async fn stop(id: &str) {
-    if let Some(mut job) = JOBS.lock().await.remove(id) {
-        let _ = job.child.kill().await;
-        let _ = job.child.wait().await;
-        let _ = tokio::fs::remove_dir_all(&job.directory).await;
-    }
-}
-pub async fn cleanup() {
-    let ids: Vec<String> = JOBS
-        .lock()
-        .await
-        .iter()
-        .filter(|(_, job)| job.touched.elapsed() > Duration::from_secs(90))
-        .map(|(id, _)| id.clone())
-        .collect();
-    for id in ids {
-        stop(&id).await;
-    }
-}
-pub fn valid_file(name: &str) -> bool {
-    name == "index.m3u8"
-        || name
-            .strip_prefix("segment-")
-            .and_then(|s| s.strip_suffix(".ts"))
-            .is_some_and(|n| n.len() == 6 && n.bytes().all(|b| b.is_ascii_digit()))
-}
 #[cfg(test)]
-mod tests {
+mod tools_tests {
     use super::*;
+
     #[test]
-    fn only_allows_generated_media_filenames() {
-        for name in ["index.m3u8", "segment-000012.ts"] {
-            assert!(valid_file(name));
-        }
-        for name in [
-            "../index.m3u8",
-            "segment-../../secret.ts",
-            "anything.ts",
-            "segment-1.ts",
-            "/index.m3u8",
-            "ffmpeg.log",
-        ] {
-            assert!(!valid_file(name));
-        }
-    }
-    #[test]
-    fn remote_budget_overrides_vbr_and_config_reaches_encoder() {
-        let config = PlaybackSettings {
-            audio_vbr: true,
-            encoding_threads: 3,
-            encoder_preset: "slow".into(),
-            h264_crf: 20,
-            ..Default::default()
-        };
-        let source = SourceInfo {
-            width: 1920,
-            height: 1080,
-            bitrate_kbps: 8000,
-            duration: 600.0,
-            codec: "h264".into(),
-            pixel_format: "yuv420p".into(),
-            hdr: false,
-            interlaced: false,
-            audio_channels: 6,
-            video_index: None,
-        };
-        let cmd = encode_command(
-            Path::new("input.mp4"),
-            Path::new("output"),
-            5.0,
-            &config,
-            &source,
-            Some(1000),
-        )
-        .unwrap();
-        let args: Vec<_> = cmd
-            .as_std()
-            .get_args()
-            .map(|s| s.to_string_lossy().to_string())
-            .collect();
-        let value = |key: &str| args[args.iter().position(|s| s == key).unwrap() + 1].clone();
-        assert_eq!(value("-maxrate"), "772k");
-        assert_eq!(value("-b:a"), "128k");
-        assert!(!args.contains(&"-q:a".to_owned()));
-        assert_eq!(value("-crf"), "20");
-        assert_eq!(value("-threads"), "3");
-        assert_eq!(value("-preset"), "slow");
-        assert_eq!(value("-af"), "volume=2");
-        assert!(
-            encode_command(
-                Path::new("in"),
-                Path::new("out"),
-                0.0,
-                &config,
-                &source,
-                Some(100)
-            )
-            .is_err()
+    fn parses_ffmpeg_listings() {
+        let filters = " ... aresample         A->A       Resample audio data.\n \
+            ..C libplacebo        N->V       Apply various GPU filters\n \
+            ... tonemap_cuda      V->V       GPU accelerated HDR to SDR tonemapping\n \
+            .S. tonemap           V->V       Conversion to/from different dynamic ranges.\n";
+        let encoders = " V....D h264_nvenc           NVIDIA NVENC H.264 encoder (codec h264)\n \
+            A....D aac                  AAC (Advanced Audio Coding)\n";
+        let hwaccels = "Hardware acceleration methods:\ncuda\nvulkan\n\n";
+        let tools = FfmpegTools::parse(
+            "ffmpeg version 7.1.2-Jellyfin Copyright (c) 2000-2025\nbuilt with gcc",
+            filters,
+            encoders,
+            hwaccels,
         );
+        assert!(tools.jellyfin_build);
+        assert_eq!(tools.version, "ffmpeg version 7.1.2-Jellyfin Copyright (c) 2000-2025");
+        assert!(tools.has_filter("tonemap_cuda") && tools.has_filter("libplacebo"));
+        assert!(!tools.has_filter("aresample"), "only filters the planner uses are kept");
+        assert!(tools.has_encoder("h264_nvenc") && tools.has_encoder("aac"));
+        assert_eq!(tools.hwaccels.iter().collect::<Vec<_>>(), ["cuda", "vulkan"]);
     }
 }
 
@@ -676,7 +504,8 @@ mod probe_tests {
         {"index":1,"codec_type":"video","codec_name":"hevc","profile":"Main 10","width":3840,"height":2160,
          "pix_fmt":"yuv420p10le","color_transfer":"smpte2084","color_primaries":"bt2020","color_space":"bt2020nc",
          "field_order":"progressive","avg_frame_rate":"24000/1001","r_frame_rate":"24000/1001",
-         "bits_per_raw_sample":"10","disposition":{"default":1}},
+         "bits_per_raw_sample":"10","disposition":{"default":1},
+         "side_data_list":[{"side_data_type":"DOVI configuration record","dv_version_major":1,"dv_profile":8}]},
         {"index":2,"codec_type":"audio","codec_name":"aac","channels":2,"sample_rate":"48000",
          "bit_rate":"192000","tags":{"language":"eng"},"disposition":{"default":0}},
         {"index":3,"codec_type":"audio","codec_name":"eac3","channels":6,"channel_layout":"5.1(side)",
@@ -684,7 +513,7 @@ mod probe_tests {
         {"index":4,"codec_type":"subtitle","codec_name":"subrip","tags":{"LANGUAGE":"pol"},
          "disposition":{"default":0,"forced":1}}
       ],
-      "format": {"format_name":"matroska,webm","duration":"5421.120000","bit_rate":"24500123"}
+      "format": {"format_name":"matroska,webm","duration":"5421.120000","bit_rate":"24500123","start_time":"-0.021000"}
     }"#;
 
     #[test]
@@ -693,9 +522,11 @@ mod probe_tests {
         assert_eq!(probe.container.as_deref(), Some("matroska,webm"));
         assert_eq!(probe.duration_seconds, Some(5421.12));
         assert_eq!(probe.bitrate_kbps, Some(24500));
+        assert_eq!(probe.start_time_seconds, Some(-0.021));
         assert_eq!(probe.streams.len(), 5);
         let video = &probe.streams[1];
         assert_eq!(video.bit_depth, Some(10));
+        assert_eq!(video.dovi_profile, Some(8));
         assert!((video.frame_rate.unwrap() - 23.976).abs() < 0.001);
         let lektor = &probe.streams[3];
         assert_eq!(lektor.language.as_deref(), Some("pol"));

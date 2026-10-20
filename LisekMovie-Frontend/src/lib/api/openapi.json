@@ -766,7 +766,9 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Capabilities"
+                }
               }
             }
           },
@@ -2355,8 +2357,34 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "transcode",
+            "in": "query",
+            "description": "Deprecated: use force_transcode",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
+        "requestBody": {
+          "description": "Optional; an empty body plays the default tracks",
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/StartRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "",
@@ -2368,10 +2396,19 @@
               }
             }
           },
+          "400": {
+            "description": ""
+          },
           "401": {
             "description": ""
           },
+          "403": {
+            "description": ""
+          },
           "404": {
+            "description": ""
+          },
+          "503": {
             "description": ""
           }
         },
@@ -2626,6 +2663,7 @@
           {
             "name": "file",
             "in": "path",
+            "description": "master.m3u8, video.m3u8, init.mp4, seg-<n>.m4s, subs-<track>.m3u8, subs-<track>-<n>.vtt",
             "required": true,
             "schema": {
               "type": "string"
@@ -2642,7 +2680,7 @@
         ],
         "responses": {
           "200": {
-            "description": "HLS manifest or segment"
+            "description": "HLS playlist, segment or WebVTT"
           },
           "401": {
             "description": ""
@@ -2734,6 +2772,53 @@
             "description": ""
           },
           "416": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/playback/{session_id}/subtitles/{file}": {
+      "get": {
+        "operationId": "subtitles",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "file",
+            "in": "path",
+            "description": "x<n>.vtt",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ticket",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "WebVTT"
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "503": {
             "description": ""
           }
         }
@@ -2877,6 +2962,119 @@
   },
   "components": {
     "schemas": {
+      "AudioTrack": {
+        "type": "object",
+        "required": [
+          "index",
+          "is_default"
+        ],
+        "properties": {
+          "channel_layout": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "channels": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "codec": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "index": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Capabilities": {
+        "type": "object",
+        "required": [
+          "ffmpeg_path",
+          "ffprobe_path",
+          "version",
+          "jellyfin_build",
+          "nvenc_available",
+          "vulkan_available",
+          "software_tonemapping",
+          "tonemapping_backends",
+          "filters",
+          "encoders",
+          "hwaccels"
+        ],
+        "properties": {
+          "encoders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ffmpeg_path": {
+            "type": "string"
+          },
+          "ffprobe_path": {
+            "type": "string"
+          },
+          "filters": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "hwaccels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "jellyfin_build": {
+            "type": "boolean"
+          },
+          "nvenc_available": {
+            "type": "boolean",
+            "description": "A test frame encoded with `h264_nvenc` on the configured GPU."
+          },
+          "software_tonemapping": {
+            "type": "boolean"
+          },
+          "tonemapping_backends": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tone mapping backends usable with this build and hardware, fastest\nfirst. `auto` takes the first one."
+          },
+          "version": {
+            "type": "string"
+          },
+          "vulkan_available": {
+            "type": "boolean",
+            "description": "A Vulkan device opens, so `libplacebo` can tone map on the GPU."
+          }
+        }
+      },
       "ChangePassword": {
         "type": "object",
         "required": [
@@ -2893,6 +3091,104 @@
             "type": "string"
           }
         }
+      },
+      "ClientCapabilities": {
+        "type": "object",
+        "description": "Decoding abilities of one client. Codec names are FFmpeg codec names;\na `_10bit` suffix adds 10-bit decoding of that codec.",
+        "properties": {
+          "audio_codecs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`aac`, `mp3`, `opus`, `flac`, `ac3`, `eac3`, `alac`, `dts`,\n`truehd`, `vorbis`.",
+            "default": [
+              "aac",
+              "mp3"
+            ]
+          },
+          "containers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Containers played from a plain URL: `mp4`, `webm`, `mkv`, `ts`.",
+            "default": [
+              "mp4"
+            ]
+          },
+          "family": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ClientFamily"
+              }
+            ],
+            "default": "unknown"
+          },
+          "hdr_formats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`hdr10`, `hlg`, `dolby_vision`. Empty on SDR displays.",
+            "default": []
+          },
+          "hls": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HlsSupport"
+              }
+            ],
+            "default": "mse"
+          },
+          "interlaced": {
+            "type": "boolean",
+            "description": "Deinterlaces by itself (TVs do; browsers show combing).",
+            "default": false
+          },
+          "max_audio_channels": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Channels the client outputs without downmixing (2 for most\nbrowsers, 6 or 8 with a surround setup).",
+            "default": 2,
+            "minimum": 0
+          },
+          "max_height": {
+            "type": "integer",
+            "format": "int32",
+            "default": 0,
+            "minimum": 0
+          },
+          "max_width": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Picture size worth sending when re-encoding (the screen), 0 for no\nlimit.",
+            "default": 0,
+            "minimum": 0
+          },
+          "video_codecs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`h264`, `h264_10bit`, `hevc`, `hevc_10bit`, `av1`, `av1_10bit`,\n`vp9`, `vp9_10bit`, `mpeg2video`, `vc1`, `mpeg4`.",
+            "default": [
+              "h264"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ClientFamily": {
+        "type": "string",
+        "enum": [
+          "chrome",
+          "edge",
+          "firefox",
+          "safari",
+          "tv",
+          "unknown"
+        ]
       },
       "CreateLibraryRequest": {
         "type": "object",
@@ -2989,6 +3285,74 @@
             "type": "string"
           }
         }
+      },
+      "DeliveredStreams": {
+        "type": "object",
+        "description": "What actually reaches the client.",
+        "required": [
+          "video_codec",
+          "width",
+          "height",
+          "video_copied",
+          "tone_mapped",
+          "audio_copied"
+        ],
+        "properties": {
+          "audio_channels": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "audio_codec": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "audio_copied": {
+            "type": "boolean"
+          },
+          "downmix": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "tone_mapped": {
+            "type": "boolean"
+          },
+          "video_codec": {
+            "type": "string"
+          },
+          "video_copied": {
+            "type": "boolean",
+            "description": "The video stream is passed through untouched."
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "DownmixPreference": {
+        "type": "string",
+        "description": "What the client asked for. `Auto` lets the server choose.",
+        "enum": [
+          "auto",
+          "standard",
+          "dialogue",
+          "night",
+          "pro_logic_ii"
+        ]
       },
       "EditUser": {
         "type": "object",
@@ -3199,6 +3563,15 @@
             "type": "string"
           }
         }
+      },
+      "HlsSupport": {
+        "type": "string",
+        "description": "How the client plays HLS.",
+        "enum": [
+          "native",
+          "mse",
+          "none"
+        ]
       },
       "HomeFeedResponse": {
         "type": "object",
@@ -3616,6 +3989,11 @@
       "PlaybackSettings": {
         "type": "object",
         "properties": {
+          "allow_remux": {
+            "type": "boolean",
+            "description": "Copy a compatible video stream into HLS instead of re-encoding it.",
+            "default": true
+          },
           "audio_bitrate_kbps": {
             "type": "integer",
             "format": "int32",
@@ -3641,6 +4019,11 @@
           "deinterlace_method": {
             "type": "string",
             "default": "yadif"
+          },
+          "downmix_algorithm": {
+            "type": "string",
+            "description": "Default stereo downmix of surround audio: `standard` (ITU-R\nBS.775), `dialogue` (louder centre channel), `night` (dialogue plus\ndynamic range compression) or `pro_logic_ii` (matrix-encoded for\nreceivers that decode Dolby Pro Logic II).",
+            "default": "standard"
           },
           "downmix_audio_boost": {
             "type": "number",
@@ -3690,9 +4073,28 @@
               "vp9"
             ]
           },
+          "hardware_device_index": {
+            "type": "integer",
+            "format": "int32",
+            "description": "GPU used for decoding, filtering and encoding (CUDA device order,\nsee `nvidia-smi -L`).",
+            "default": 0,
+            "minimum": 0
+          },
           "hardware_encoding": {
             "type": "boolean",
             "default": true
+          },
+          "hevc_encoding": {
+            "type": "boolean",
+            "description": "Encode HEVC instead of H.264 for clients that decode HEVC (NVENC\nonly). Same quality at a lower bitrate.",
+            "default": false
+          },
+          "hls_segment_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "HLS segment length when the video is re-encoded, in seconds. A\ncopied video is cut at its own keyframes, close to this length.",
+            "default": 4,
+            "minimum": 0
           },
           "local_networks": {
             "type": "array",
@@ -3707,6 +4109,13 @@
               "192.168.0.0/16",
               "fc00::/7"
             ]
+          },
+          "max_concurrent_transcodes": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Simultaneous video encodes. Remuxes (copied video) do not count.",
+            "default": 2,
+            "minimum": 0
           },
           "max_muxing_queue_size": {
             "type": "integer",
@@ -3736,6 +4145,13 @@
             "format": "double",
             "default": 5.0
           },
+          "segment_retention_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Segments further than this behind the player are deleted.",
+            "default": 60,
+            "minimum": 0
+          },
           "streaming_bitrate_limit_mbps": {
             "type": [
               "number",
@@ -3744,13 +4160,34 @@
             "format": "double",
             "default": null
           },
+          "subtitle_fallback_charset": {
+            "type": "string",
+            "description": "Character set of external text subtitles that are not UTF-8 (Polish\n`.srt` files are usually Windows-1250).",
+            "default": "CP1250"
+          },
+          "throttle_lead_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "default": 30,
+            "minimum": 0
+          },
+          "throttling": {
+            "type": "boolean",
+            "description": "Pause FFmpeg once it is this many seconds ahead of the segment the\nplayer last asked for, and resume it at half of that. Until then\nFFmpeg runs at full speed, so playback and seeking start at once.",
+            "default": true
+          },
           "tonemapping": {
             "type": "boolean",
             "default": false
           },
           "tonemapping_algorithm": {
             "type": "string",
-            "default": "hable"
+            "default": "bt2390"
+          },
+          "tonemapping_backend": {
+            "type": "string",
+            "description": "Where HDR -> SDR tone mapping runs: `auto` picks the fastest one the\nFFmpeg build supports (`cuda` > `libplacebo` > `opencl` >\n`software`). `cuda` needs jellyfin-ffmpeg's `tonemap_cuda`.",
+            "default": "auto"
           },
           "tonemapping_desat": {
             "type": "number",
@@ -4130,6 +4567,86 @@
           }
         }
       },
+      "StartRequest": {
+        "type": "object",
+        "description": "The client's choices when starting playback. Every field is optional;\nan empty body plays the default tracks the way the client's family\nhandles best.",
+        "properties": {
+          "audio_stream_index": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "ffprobe index of the audio stream (see `audio_tracks`).",
+            "default": null
+          },
+          "burn_subtitle": {
+            "type": "boolean",
+            "description": "Burn the subtitle into the picture even when it is text (keeps ASS\nstyling; costs a transcode). Picture subtitles are always burnt.",
+            "default": false
+          },
+          "client": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ClientCapabilities",
+                "description": "What the client decodes. Omitted: the preset of its browser/TV\nfamily, recognised from the User-Agent."
+              }
+            ],
+            "default": null
+          },
+          "downmix": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DownmixPreference"
+              }
+            ],
+            "default": "auto"
+          },
+          "force_transcode": {
+            "type": "boolean",
+            "default": false
+          },
+          "max_bitrate_kbps": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "default": null,
+            "minimum": 0
+          },
+          "max_height": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "default": null,
+            "minimum": 0
+          },
+          "start_position_seconds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Start here instead of at the saved resume position.",
+            "default": null
+          },
+          "subtitle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Subtitle track id from `subtitle_tracks`: `s<index>` embedded,\n`x<n>` a file next to the video.",
+            "default": null
+          }
+        },
+        "additionalProperties": false
+      },
       "StartResponse": {
         "type": "object",
         "required": [
@@ -4139,9 +4656,23 @@
           "stream_url",
           "position_seconds",
           "time_offset_seconds",
-          "mode"
+          "mode",
+          "hls",
+          "reasons",
+          "delivered",
+          "audio_tracks",
+          "subtitle_tracks"
         ],
         "properties": {
+          "audio_tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AudioTrack"
+            }
+          },
+          "delivered": {
+            "$ref": "#/components/schemas/DeliveredStreams"
+          },
           "duration_seconds": {
             "type": [
               "number",
@@ -4149,27 +4680,68 @@
             ],
             "format": "double"
           },
+          "hls": {
+            "type": "boolean"
+          },
           "item_id": {
             "type": "string",
             "format": "uuid"
           },
           "mode": {
-            "type": "string"
+            "type": "string",
+            "description": "`direct_play`, `remux` or `transcode`."
           },
           "position_seconds": {
             "type": "number",
             "format": "double"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TranscodeReason"
+            }
+          },
+          "selected_audio_stream_index": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "selected_subtitle": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "session_id": {
             "type": "string",
             "format": "uuid"
           },
           "stream_url": {
-            "type": "string"
+            "type": "string",
+            "description": "The file (direct play) or the HLS master playlist."
+          },
+          "subtitle_delivery": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SubtitleDelivery"
+              }
+            ]
+          },
+          "subtitle_tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubtitleTrack"
+            }
           },
           "time_offset_seconds": {
             "type": "number",
-            "format": "double"
+            "format": "double",
+            "description": "Always 0 now: HLS playlists cover the whole file."
           },
           "title": {
             "type": "string"
@@ -4188,6 +4760,76 @@
           },
           "setup_required": {
             "type": "boolean"
+          }
+        }
+      },
+      "SubtitleDelivery": {
+        "type": "string",
+        "enum": [
+          "external",
+          "hls",
+          "burn_in"
+        ]
+      },
+      "SubtitleTrack": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "forced",
+          "is_default",
+          "external"
+        ],
+        "properties": {
+          "codec": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "external": {
+            "type": "boolean",
+            "description": "A file next to the video rather than a stream inside it."
+          },
+          "forced": {
+            "type": "boolean"
+          },
+          "hls_rendition": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Position among the HLS subtitle renditions (hls.js\n`subtitleTracks`), for switching without restarting playback.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "WebVTT for a `<track>` element (direct play only)."
           }
         }
       },
@@ -4212,6 +4854,28 @@
             "type": "boolean"
           }
         }
+      },
+      "TranscodeReason": {
+        "type": "string",
+        "enum": [
+          "forced_by_client",
+          "container_not_supported",
+          "video_codec_not_supported",
+          "video_bit_depth_not_supported",
+          "video_profile_not_supported",
+          "hdr_not_supported",
+          "interlaced_not_supported",
+          "resolution_above_requested",
+          "bitrate_above_limit",
+          "audio_codec_not_supported",
+          "audio_channels_not_supported",
+          "audio_track_not_first",
+          "downmix_requested",
+          "subtitle_burn_in",
+          "subtitle_needs_hls",
+          "no_keyframe_index",
+          "remux_disabled"
+        ]
       },
       "UpdateMediaItemRequest": {
         "type": "object",

@@ -21,6 +21,113 @@ import threading
 import queue
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+SRT = ("1\n00:00:01,000 --> 00:00:03,000\nPierwszy napis\n\n"
+       "2\n00:00:21,500 --> 00:00:23,000\nZażółć gęślą jaźń\n\n"
+       "3\n00:00:42,000 --> 00:00:45,000\nPo przewinięciu\n")
+CHROME = {"containers":["mp4"],"video_codecs":["h264","vp9","av1"],"audio_codecs":["aac","mp3","opus","flac"],
+          "max_audio_channels":2,"hls":"mse"}
+
+def scan_library(request,ok_json,token,name,folder):
+    library=ok_json("/api/admin/libraries","POST",{"name":name,"library_type":"movies","root_paths":[str(folder)],
+        "save_metadata_in_media_folder":False},token)
+    status,body,_=request(f"/api/admin/libraries/{library['id']}/scan","POST",{},token)
+    assert status==202,(status,body)
+    job=json.loads(body)
+    for _ in range(600):
+        job=ok_json(f"/api/admin/scan-jobs/{job['id']}",token=token)
+        if job["status"] in ("completed","failed"): break
+        time.sleep(.1)
+    assert job["status"]=="completed" and job["movies_found"]>=1,job
+    return library["id"]
+
+def check_hls_engine(args,root,request,ok_json,sql,token,base):
+    """Remux, subtitles, seeking and burn-in through the real server."""
+    # Earlier checks leave a 100x100 transcode limit behind.
+    ok_json('/api/admin/playback/safety','PUT',{'enabled':False,'max_width':1920,'max_height':1080,'max_bitrate_kbps':None},token)
+    folder=root/"hls"; folder.mkdir()
+    srt=root/"embedded.srt"; srt.write_text(SRT,encoding="utf-8")
+    film=folder/"Lisek Story (2020).mkv"
+    subprocess.run([args.ffmpeg,"-v","error","-f","lavfi","-i","testsrc2=size=640x360:rate=24000/1001:duration=60",
+        "-f","lavfi","-i","sine=frequency=440:sample_rate=48000:duration=60","-i",str(srt),
+        "-filter_complex","[1:a]pan=5.1|FL=c0|FR=c0|FC=c0|LFE=c0|BL=c0|BR=c0[a]","-map","0:v","-map","[a]","-map","2:s",
+        "-c:v","libx264","-preset","ultrafast","-bf","3","-g","48","-c:a","ac3","-b:a","448k","-c:s","srt",
+        "-metadata:s:s:0","language=pol",str(film)],check=True)
+    (folder/"Lisek Story (2020).pol.srt").write_bytes(SRT.encode("cp1250"))
+    library_id=scan_library(request,ok_json,token,"HLS",folder)
+    item=sql(f"SELECT id FROM media_items WHERE library_id='{library_id}'")
+
+    # Chrome: MKV and AC-3 unsupported -> video copied, audio to stereo AAC.
+    started=ok_json(f"/api/media/{item}/playback","POST",{"client":CHROME},token)
+    assert started["mode"]=="remux" and started["hls"],started
+    assert {"container_not_supported","audio_codec_not_supported"}<={*started["reasons"]},started["reasons"]
+    delivered=started["delivered"]
+    assert delivered["video_copied"] and delivered["audio_codec"]=="aac" and delivered["downmix"]=="standard",delivered
+    assert [s["id"] for s in started["subtitle_tracks"]]==["s2","x0"],started["subtitle_tracks"]
+    assert [s["hls_rendition"] for s in started["subtitle_tracks"]]==[0,1]
+    sid=started["session_id"]; ticket=started["stream_url"].split("ticket=")[1]
+    status,master,_=request(started["stream_url"])
+    master=master.decode()
+    assert status==200 and 'CODECS="avc1.' in master and 'LANGUAGE="pol"' in master and 'SUBTITLES="subs"' in master,master
+    # FFmpeg as an HLS client: every playlist, the init segment and all media segments.
+    out=subprocess.run([args.ffmpeg,"-v","error","-i",base+started["stream_url"],"-map","0:v","-map","0:a","-f","null","-"],
+        capture_output=True,text=True,timeout=300)
+    assert out.returncode==0,out.stderr
+    status,cue,_=request(f"/api/playback/{sid}/hls/subs-s2-0.vtt?ticket={ticket}")
+    assert status==200 and "Pierwszy napis" in cue.decode() and "X-TIMESTAMP-MAP" in cue.decode(),cue
+    status,cue,_=request(f"/api/playback/{sid}/hls/subs-x0-0.vtt?ticket={ticket}")
+    assert status==200 and "Zażółć gęślą jaźń" in cue.decode(),cue
+    # Far seek: the server restarts FFmpeg there.
+    status,playlist,_=request(f"/api/playback/{sid}/hls/video.m3u8?ticket={ticket}")
+    last=[l for l in playlist.decode().splitlines() if l.startswith("seg-")][-1]
+    started_at=time.time()
+    status,body,_=request(f"/api/playback/{sid}/hls/{last}")
+    assert status==200 and body[4:8]==b"moof",(status,body[:16])
+    seek_seconds=time.time()-started_at
+    ok_json(f"/api/playback/{sid}","DELETE",token=token)
+    assert request(f"/api/playback/{sid}/hls/seg-0.m4s?ticket={ticket}")[0]==401
+
+    # A TV plays MKV + AC-3 directly; the external subtitle becomes a <track> file.
+    tv=dict(CHROME,containers=["mkv","mp4"],audio_codecs=["aac","ac3"],max_audio_channels=6,hls="native")
+    direct=ok_json(f"/api/media/{item}/playback","POST",{"client":tv},token)
+    assert direct["mode"]=="direct_play" and not direct["reasons"],direct
+    track=next(s for s in direct["subtitle_tracks"] if s["id"]=="x0")
+    status,vtt,headers=request(track["url"])
+    assert status==200 and headers["Content-Type"].startswith("text/vtt") and "Zażółć gęślą jaźń" in vtt.decode(),vtt
+    ok_json(f"/api/playback/{direct['session_id']}","DELETE",token=token)
+
+    # Burnt-in CP1250 subtitle + night-mode downmix: a transcode starting at 20 s.
+    burned=ok_json(f"/api/media/{item}/playback","POST",{"client":CHROME,"subtitle":"x0","burn_subtitle":True,
+        "downmix":"night","start_position_seconds":20},token)
+    assert burned["mode"]=="transcode" and burned["subtitle_delivery"]=="burn_in",burned
+    assert "subtitle_burn_in" in burned["reasons"] and burned["delivered"]["downmix"]=="night",burned
+    status,playlist,_=request(burned["stream_url"].replace("master.m3u8","video.m3u8"))
+    segment=[l for l in playlist.decode().splitlines() if l.startswith("seg-")][5]
+    status,body,_=request(f"/api/playback/{burned['session_id']}/hls/{segment}")
+    assert status==200 and body[4:8]==b"moof",(status,body[:16])
+    ok_json(f"/api/playback/{burned['session_id']}","DELETE",token=token)
+
+    if args.node and args.hlsjs:
+        # VP9 + Opus decode in Playwright's Chromium (H.264 does not): remux and play with hls.js.
+        web_folder=root/"web"; web_folder.mkdir()
+        web=web_folder/"Another Story (2021).mkv"
+        subprocess.run([args.ffmpeg,"-v","error","-f","lavfi","-i","testsrc2=size=320x180:rate=24:duration=60",
+            "-f","lavfi","-i","sine=frequency=440:sample_rate=48000:duration=60","-i",str(srt),"-map","0:v","-map","1:a","-map","2:s",
+            "-c:v","libvpx-vp9","-deadline","realtime","-cpu-used","8","-g","48","-b:v","300k","-c:a","libopus","-c:s","srt",
+            str(web)],check=True)
+        scan_library(request,ok_json,token,"Web",web_folder)
+        web_item=sql("SELECT id FROM media_items WHERE file_path LIKE '%Another Story%'")
+        played=ok_json(f"/api/media/{web_item}/playback","POST",{"client":CHROME},token)
+        assert played["mode"]=="remux",played
+        out=subprocess.run([args.node,str(Path(__file__).with_name("hls_browser_check.mjs").resolve()),
+            json.dumps({"base":base,"master":played["stream_url"],"hlsjs":args.hlsjs,"seek":40})],
+            capture_output=True,text=True,timeout=240)
+        result=json.loads(out.stdout.strip().splitlines()[-1]) if out.stdout.strip() else {"ok":False,"error":out.stderr}
+        assert result["ok"] and not result["errors"],result
+        assert abs(result["duration"]-60)<1 and "Po przewinięciu" in " ".join(result["cues"]),result
+        print(f"hls.js: duration {result['duration']:.1f}s, seek to 40s playing after {result['seekMs']:.0f} ms")
+        ok_json(f"/api/playback/{played['session_id']}","DELETE",token=token)
+    print(f"HLS engine: remux + subtitles OK, far seek served in {seek_seconds:.2f}s")
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--server", required=True)
@@ -29,6 +136,7 @@ def main():
     parser.add_argument("--ffmpeg")
     parser.add_argument("--ffprobe")
     parser.add_argument("--node")
+    parser.add_argument("--hlsjs", help="hls.min.js: also play HLS in headless Chromium (needs playwright)")
     args = parser.parse_args()
     database = "lisek_smoke_" + uuid.uuid4().hex
     admin_url = urllib.parse.urlsplit(args.database_url)
@@ -244,10 +352,14 @@ def main():
                 converted=ok_json(f'/api/media/{item_id}/playback?transcode=true','POST',{},token)
                 status,manifest,_=request(converted['stream_url'])
                 assert status==200 and b'#EXTM3U' in manifest,(status,manifest)
-                segment=next(line for line in manifest.decode().splitlines() if line and not line.startswith('#'))
-                segment_url=f"/api/playback/{converted['session_id']}/hls/"+segment
-                status,segment_body,_=request(segment_url)
-                assert status==200 and len(segment_body)>188
+                hls_base=f"/api/playback/{converted['session_id']}/hls/"
+                variant=next(line for line in manifest.decode().splitlines() if line and not line.startswith('#'))
+                status,media_playlist,_=request(hls_base+variant)
+                assert status==200 and b'#EXT-X-PLAYLIST-TYPE:VOD' in media_playlist and b'#EXT-X-ENDLIST' in media_playlist,media_playlist
+                segment=next(line for line in media_playlist.decode().splitlines() if line.startswith('seg-'))
+                segment_url=hls_base+segment
+                status,segment_body,headers=request(segment_url)
+                assert status==200 and len(segment_body)>1000 and segment_body[4:8]==b'moof',segment_body[:16]
                 ok_json(f"/api/playback/{converted['session_id']}/progress",'PUT',{'position_seconds':1,'duration_seconds':8,'paused':True,'ended':True},token)
                 assert request(segment_url)[0]==401
                 # Trusted reverse proxy detects the remote address; direct URLs cannot bypass the cap.
@@ -301,10 +413,13 @@ def main():
             assert request('/api/admin/playback/settings',token=other_token)[0]==403
             assert request('/api/admin/playback/settings','PUT',settings,other_token)[0]==403
             assert ok_json("/api/me/list",token=other_token) == []
+            if args.ffmpeg and args.ffprobe:
+                # After the checks that count items and webhook deliveries.
+                check_hls_engine(args,root,request,ok_json,sql,token,base)
             ok_json("/api/auth/logout","POST",{},token)
             if args.node:
                 event=notification_queue.get(timeout=15)
-                while event['type']=='scan_progress':
+                while event['type'] in ('scan_progress','library_changed'):
                     event=notification_queue.get(timeout=15)
                 assert event['type']=='closed',event
             assert request(resumed["stream_url"])[0] == 401
@@ -321,7 +436,7 @@ def main():
             server.wait(timeout=10)
             log.close()
             server = None
-            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, browser notifications")
+            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications")
     finally:
         if server:
             server.terminate()

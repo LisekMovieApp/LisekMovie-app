@@ -53,9 +53,11 @@ fn public() -> OpenApiRouter<SharedState> {
         .routes(routes!(setup::finish))
         .routes(routes!(auth::login))
         // Authorized by the item-scoped playback ticket in the query
-        // string, not a session: browsers' <video> cannot send headers.
+        // string, not a session: <video>, hls.js and <track> cannot send
+        // headers.
         .routes(routes!(playback::stream))
         .routes(routes!(playback::hls))
+        .routes(routes!(playback::subtitles))
         // Authenticates with its first WebSocket frame: browsers cannot set
         // headers on a WebSocket handshake.
         .routes(routes!(browser_notifications::socket))

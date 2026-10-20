@@ -35,6 +35,38 @@ pub struct PlaybackSettings {
     pub tonemapping_desat: f64,
     pub tonemapping_peak: f64,
     pub tonemapping_param: Option<f64>,
+    /// Where HDR -> SDR tone mapping runs: `auto` picks the fastest one the
+    /// FFmpeg build supports (`cuda` > `libplacebo` > `opencl` >
+    /// `software`). `cuda` needs jellyfin-ffmpeg's `tonemap_cuda`.
+    pub tonemapping_backend: String,
+    /// GPU used for decoding, filtering and encoding (CUDA device order,
+    /// see `nvidia-smi -L`).
+    pub hardware_device_index: u32,
+    /// Encode HEVC instead of H.264 for clients that decode HEVC (NVENC
+    /// only). Same quality at a lower bitrate.
+    pub hevc_encoding: bool,
+    /// Copy a compatible video stream into HLS instead of re-encoding it.
+    pub allow_remux: bool,
+    /// HLS segment length when the video is re-encoded, in seconds. A
+    /// copied video is cut at its own keyframes, close to this length.
+    pub hls_segment_seconds: u32,
+    /// Pause FFmpeg once it is this many seconds ahead of the segment the
+    /// player last asked for, and resume it at half of that. Until then
+    /// FFmpeg runs at full speed, so playback and seeking start at once.
+    pub throttling: bool,
+    pub throttle_lead_seconds: u32,
+    /// Segments further than this behind the player are deleted.
+    pub segment_retention_seconds: u32,
+    /// Simultaneous video encodes. Remuxes (copied video) do not count.
+    pub max_concurrent_transcodes: u32,
+    /// Default stereo downmix of surround audio: `standard` (ITU-R
+    /// BS.775), `dialogue` (louder centre channel), `night` (dialogue plus
+    /// dynamic range compression) or `pro_logic_ii` (matrix-encoded for
+    /// receivers that decode Dolby Pro Logic II).
+    pub downmix_algorithm: String,
+    /// Character set of external text subtitles that are not UTF-8 (Polish
+    /// `.srt` files are usually Windows-1250).
+    pub subtitle_fallback_charset: String,
 }
 impl Default for PlaybackSettings {
     fn default() -> Self {
@@ -76,10 +108,21 @@ impl Default for PlaybackSettings {
             deinterlace_method: "yadif".into(),
             deinterlace_double_rate: false,
             tonemapping: false,
-            tonemapping_algorithm: "hable".into(),
+            tonemapping_algorithm: "bt2390".into(),
             tonemapping_desat: 0.0,
             tonemapping_peak: 100.0,
             tonemapping_param: None,
+            tonemapping_backend: "auto".into(),
+            hardware_device_index: 0,
+            hevc_encoding: false,
+            allow_remux: true,
+            hls_segment_seconds: 4,
+            throttling: true,
+            throttle_lead_seconds: 30,
+            segment_retention_seconds: 60,
+            max_concurrent_transcodes: 2,
+            downmix_algorithm: "standard".into(),
+            subtitle_fallback_charset: "CP1250".into(),
         }
     }
 }
@@ -137,7 +180,7 @@ impl PlaybackSettings {
             && matches!(self.deinterlace_method.as_str(), "yadif" | "bwdif" | "none")
             && matches!(
                 self.tonemapping_algorithm.as_str(),
-                "hable" | "reinhard" | "mobius" | "clip" | "linear" | "gamma"
+                "bt2390" | "hable" | "reinhard" | "mobius" | "clip" | "linear" | "gamma"
             )
             && self.tonemapping_desat.is_finite()
             && (0.0..=100.0).contains(&self.tonemapping_desat)
@@ -146,6 +189,24 @@ impl PlaybackSettings {
             && self
                 .tonemapping_param
                 .is_none_or(|n| n.is_finite() && (0.0..=100.0).contains(&n))
+            && matches!(
+                self.tonemapping_backend.as_str(),
+                "auto" | "cuda" | "libplacebo" | "opencl" | "software"
+            )
+            && self.hardware_device_index <= 15
+            && (2..=10).contains(&self.hls_segment_seconds)
+            && (10..=600).contains(&self.throttle_lead_seconds)
+            && (10..=3600).contains(&self.segment_retention_seconds)
+            && (1..=32).contains(&self.max_concurrent_transcodes)
+            && matches!(
+                self.downmix_algorithm.as_str(),
+                "standard" | "dialogue" | "night" | "pro_logic_ii"
+            )
+            && (1..=32).contains(&self.subtitle_fallback_charset.len())
+            && self
+                .subtitle_fallback_charset
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
     }
 
     /// Video resume semantics: ignore the opening, complete short clips/past the end threshold.
@@ -257,6 +318,22 @@ mod tests {
         c = PlaybackSettings::default();
         c.tonemapping_algorithm = "hable,evil".into();
         assert!(!c.validate());
+        c = PlaybackSettings::default();
+        c.subtitle_fallback_charset = "CP1250:evil".into();
+        assert!(!c.validate(), "the charset reaches an FFmpeg filter argument");
+        c = PlaybackSettings::default();
+        c.hls_segment_seconds = 1;
+        assert!(!c.validate());
+    }
+
+    #[test]
+    fn settings_saved_before_new_fields_still_load() {
+        let old = r#"{"tonemapping":true,"tonemapping_algorithm":"hable","max_output_height":1080}"#;
+        let c: PlaybackSettings = serde_json::from_str(old).unwrap();
+        assert!(c.validate());
+        assert_eq!(c.tonemapping_algorithm, "hable");
+        assert_eq!(c.throttle_lead_seconds, 30);
+        assert_eq!(c.tonemapping_backend, "auto");
     }
     #[test]
     fn malformed_forwarding_cannot_bypass_remote_limits() {

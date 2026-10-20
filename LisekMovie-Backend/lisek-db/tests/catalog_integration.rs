@@ -94,6 +94,7 @@ async fn scan_persistence_builds_series_and_tracks_file_changes() {
         container: Some("matroska,webm".into()),
         duration_seconds: Some(1200.5),
         bitrate_kbps: Some(4000),
+        start_time_seconds: Some(1.5),
         streams: vec![MediaStream {
             index: 0,
             kind: StreamKind::Video,
@@ -116,12 +117,21 @@ async fn scan_persistence_builds_series_and_tracks_file_changes() {
             channel_layout: None,
             sample_rate: None,
             bitrate_kbps: None,
+            dovi_profile: Some(8),
         }],
     };
     lisek_db::streams::save_probe(pool, probed_id, &probe, None).await.unwrap();
     let (stored, stamp) = lisek_db::streams::stored_probe(pool, probed_id).await.unwrap().unwrap();
     assert_eq!(stored, probe);
     assert!(stamp.size.is_some() && stamp.modified.is_some());
+
+    // Keyframe cache: valid for the same file, ignored once it changed.
+    let keyframes = [0.0, 2.002, 4.004];
+    lisek_db::streams::save_keyframes(pool, probed_id, Some(stamp), &keyframes).await.unwrap();
+    let cached = lisek_db::streams::stored_keyframes(pool, probed_id, Some(stamp)).await.unwrap();
+    assert_eq!(cached.as_deref(), Some(&keyframes[..]));
+    let changed_stamp = lisek_db::streams::FileStamp { size: stamp.size.map(|s| s + 1), ..stamp };
+    assert_eq!(lisek_db::streams::stored_keyframes(pool, probed_id, Some(changed_stamp)).await.unwrap(), None);
 
     let rescan = lisek_db::persist_scan_results(pool, tv, &first).await.unwrap();
     assert!(!rescan.probe_targets.iter().any(|(id, _)| *id == probed_id));
