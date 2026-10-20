@@ -380,7 +380,12 @@
 		"quality_stalls": "Stalls",
 		"quality_active": "Playing now",
 		"quality_ended": "Ended",
-		"try_compatible": "Use compatible playback"
+		"try_compatible": "Use compatible playback",
+		"next_episode": "Next episode",
+		"next_in": "Starts in {seconds} s",
+		"play_now": "Play now",
+		"watch_credits": "Watch credits",
+		"episode_range": "S{season}:E{episode}-E{end}"
 	},
 	"games": {
 		"title": "Flappy Fox",

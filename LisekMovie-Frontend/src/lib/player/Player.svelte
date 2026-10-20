@@ -18,19 +18,27 @@
   Input: mouse (click = play/pause, double-click = fullscreen), touch (tap
   = controls, double-tap on a side = ±10 s), keyboard shortcuts and TV
   remotes (`keys.ts`). Seeks from repeated presses add up and run once.
+
+  Faza 5: the seek bar previews frames from the server's trickplay sprite
+  sheets, and an episode offers the next one during its end credits
+  (`NextUp.svelte`, a 10 s countdown; after three episodes started with
+  nobody touching anything it waits for a press). Fullscreen is taken by
+  the whole document, so moving on to the next episode keeps it.
 -->
 <script lang="ts">
 	import Hls, { type ErrorData } from 'hls.js';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { t } from '$lib/i18n';
 	import Icon, { type IconName } from '$lib/components/Icon.svelte';
 	import {
 		ApiError,
+		fetchNextEpisode,
 		reportProgress,
 		startPlayback,
 		stopPlayback,
 		type DownmixPreference,
+		type NextEpisode,
 		type PlaybackSession,
 		type StartRequest
 	} from '$lib/playback/api';
@@ -41,9 +49,18 @@
 	import { activeLines, isSubtitleTrack, type CueSegment } from './cues';
 	import { bufferedEnd, clampTime, formatTime } from './format';
 	import { commandOf, seekStep, type PlayerCommand } from './keys';
+	import {
+		autoAdvanceAllowed,
+		COUNTDOWN_SECONDS,
+		nextUpDue,
+		recordAutoAdvance,
+		resetAutoAdvances
+	} from './nextUp';
 	import { loadPreferences, savePreferences, type SubtitleSize } from './preferences';
 	import { SeekAccumulator } from './seek';
 	import { ProgressReporter, type MediaSnapshot } from './telemetry';
+	import { fetchTrickplay, preloadSheets, thumbnailAt, type TrickplayManifest } from './trickplay';
+	import NextUp from './NextUp.svelte';
 	import Seekbar from './Seekbar.svelte';
 	import TrackMenu, { type PlaybackStats } from './TrackMenu.svelte';
 
@@ -58,9 +75,19 @@
 		backdrop?: string | null;
 		/** Leaves the player (Back, Stop, the back arrow). */
 		onexit: () => void;
+		/** Plays another item (the next episode) in place of this one. */
+		onnext?: (id: string) => void;
 	}
 
-	let { id, token, heading = null, subheading = null, backdrop = null, onexit }: Props = $props();
+	let {
+		id,
+		token,
+		heading = null,
+		subheading = null,
+		backdrop = null,
+		onexit,
+		onnext
+	}: Props = $props();
 
 	/** Error codes with their own message; anything else is `player.failed`. */
 	const KNOWN_ERRORS = new Set([
@@ -121,6 +148,11 @@
 	let osd = $state<{ icon: IconName; text?: string; key: number } | null>(null);
 	let lines = $state<CueSegment[][]>([]);
 	let resumedAt = $state<number | null>(null);
+	let trick = $state<TrickplayManifest | null>(null);
+	let next = $state<NextEpisode | null>(null);
+	let nextDismissed = $state(false);
+	/** Seconds until the next episode starts; null when not counting. */
+	let countdown = $state<number | null>(null);
 	let stats = $state<PlaybackStats>({
 		bandwidthKbps: null,
 		droppedFrames: null,
@@ -149,6 +181,9 @@
 	let osdKey = 0;
 	let cueKey = '';
 	let seekOrigin = 0;
+	let sheetsWarm = false;
+	/** Leaving for the next episode: keep fullscreen. */
+	let continuing = false;
 
 	const total = $derived(
 		duration > 0 && Number.isFinite(duration) ? duration : (session?.duration_seconds ?? 0)
@@ -219,7 +254,56 @@
 		return 'ok';
 	}
 
+	/** Trickplay sheets and the next episode; both optional extras. */
+	async function loadExtras() {
+		const [manifest, following] = await Promise.all([
+			fetchTrickplay(token, id).catch(() => null),
+			fetchNextEpisode(token, id).catch(() => null)
+		]);
+		if (destroyed) return;
+		trick = manifest;
+		next = following;
+	}
+
+	function warmSheets() {
+		if (!trick || sheetsWarm) return;
+		sheetsWarm = true;
+		preloadSheets(trick, token);
+	}
+
+	const thumbnail = $derived.by(() => {
+		const manifest = trick;
+		return manifest ? (time: number) => thumbnailAt(manifest, time, token) : null;
+	});
+
+	const nextUpVisible = $derived(
+		next !== null &&
+			phase === 'ready' &&
+			!nextDismissed &&
+			nextUpDue(Math.max(0, total - currentTime), total, ended)
+	);
+	const counting = $derived(countdown !== null && (!paused || ended));
+
+	/** Starts the next episode; `auto` when the countdown (not the viewer) did. */
+	function goNext(auto: boolean) {
+		const target = next;
+		if (!target || !onnext) return;
+		if (auto) recordAutoAdvance();
+		else resetAutoAdvances();
+		countdown = null;
+		continuing = true;
+		onnext(target.id);
+	}
+
+	function dismissNext() {
+		nextDismissed = true;
+		countdown = null;
+		resetAutoAdvances();
+		poke();
+	}
+
 	function afterFirstSession(next: PlaybackSession) {
+		void loadExtras();
 		if (next.position_seconds > 5) {
 			resumedAt = next.position_seconds;
 			clearTimeout(resumeTimer);
@@ -582,6 +666,7 @@
 
 	function seekBy(step: number, repeat = false) {
 		if (!video || phase !== 'ready' || !(total > 0)) return;
+		warmSheets();
 		const from = video.currentTime;
 		// The jump is shown from where the first press of this burst was.
 		if (seeker.target === null) seekOrigin = from;
@@ -625,8 +710,11 @@
 			await document.exitFullscreen().catch(() => {});
 			return;
 		}
-		if (root?.requestFullscreen) {
-			await root.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+		// The whole document, not the player: the next episode mounts a new
+		// player and must stay fullscreen.
+		const page = document.documentElement;
+		if (page.requestFullscreen) {
+			await page.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
 			// Phones: turn the picture sideways with the screen.
 			const orientation = screen.orientation as ScreenOrientation & {
 				lock?: (o: string) => Promise<void>;
@@ -739,8 +827,11 @@
 	// skips events this handler prevented.
 	function onKeyDown(event: KeyboardEvent) {
 		if (event.defaultPrevented) return;
+		resetAutoAdvances();
 		const target = event.target instanceof HTMLElement ? event.target : null;
-		const inControls = Boolean(target && controlsEl?.contains(target));
+		// The next-episode card: its buttons take arrows and OK like controls.
+		const inCard = Boolean(target?.closest('[data-player-ui]'));
+		const inControls = Boolean(target && controlsEl?.contains(target)) || inCard;
 		const command = commandOf(event);
 		if (command === 'back') {
 			event.preventDefault();
@@ -762,7 +853,7 @@
 		}
 		const direction = directionOf(event);
 		if (direction) {
-			if (controls && inControls) return poke();
+			if ((controls || inCard) && inControls) return poke();
 			event.preventDefault();
 			if (direction === 'left' || direction === 'right')
 				return seekBy(direction === 'left' ? -10 : 10, event.repeat);
@@ -779,6 +870,7 @@
 	}
 
 	function onSurfacePointerUp(event: PointerEvent) {
+		resetAutoAdvances();
 		if (phase !== 'ready' || event.button !== 0) return;
 		if (menu) return closeMenu();
 		if (event.pointerType === 'mouse') return togglePlay();
@@ -854,6 +946,26 @@
 	});
 
 	$effect(() => {
+		// The card appears: count down unless the binge guard says wait.
+		if (!nextUpVisible) {
+			countdown = null;
+			return;
+		}
+		if (untrack(() => countdown) === null && autoAdvanceAllowed()) countdown = COUNTDOWN_SECONDS;
+	});
+
+	$effect(() => {
+		if (!counting) return;
+		const step = 0.25;
+		const timer = setInterval(() => {
+			if (countdown === null) return;
+			countdown = Math.max(0, countdown - step);
+			if (countdown === 0) goNext(true);
+		}, step * 1000);
+		return () => clearInterval(timer);
+	});
+
+	$effect(() => {
 		if (menu !== 'settings') return;
 		const timer = setInterval(updateStats, 1000);
 		return () => clearInterval(timer);
@@ -903,6 +1015,7 @@
 			['seekbackward', () => seekBy(-10)],
 			['seekforward', () => seekBy(10)],
 			['seekto', (details) => details.seekTime !== undefined && seekTo(details.seekTime)],
+			['nexttrack', () => goNext(false)],
 			['stop', () => onexit()]
 		];
 		for (const [action, handler] of handlers) {
@@ -938,7 +1051,9 @@
 					// Ignore.
 				}
 			}
-			if (document.fullscreenElement === root) void document.exitFullscreen().catch(() => {});
+			if (document.fullscreenElement && !continuing) {
+				void document.exitFullscreen().catch(() => {});
+			}
 		};
 	});
 
@@ -1218,6 +1333,8 @@
 					onstep={(seconds, repeat) => seekBy(seconds, repeat)}
 					ontoggle={togglePlay}
 					navDefault={!finePointer}
+					{thumbnail}
+					onwarm={warmSheets}
 				/>
 				<span class="w-20 shrink-0 text-right text-sm text-white tabular-nums md:text-[1rem]"
 					>−{formatTime(remaining)}</span
@@ -1273,6 +1390,17 @@
 					{formatTime(pending ?? currentTime)} / {formatTime(total)}
 				</span>
 				<div class="ml-auto flex items-center gap-1 md:gap-2">
+					{#if next && onnext}
+						<button
+							type="button"
+							class={button}
+							aria-label={t('player.next_episode')}
+							title={t('player.next_episode')}
+							onclick={() => goNext(false)}
+						>
+							<Icon name="next" class="size-7" />
+						</button>
+					{/if}
 					{#if session && (session.audio_tracks.length > 1 || session.subtitle_tracks.length > 0)}
 						<button
 							type="button"
@@ -1315,6 +1443,17 @@
 			</div>
 		</div>
 	</div>
+
+	{#if nextUpVisible && next && onnext && !menu}
+		<NextUp
+			{next}
+			{token}
+			{countdown}
+			autofocus={!finePointer}
+			onplay={() => goNext(false)}
+			ondismiss={dismissNext}
+		/>
+	{/if}
 
 	{#if menu && session}
 		<TrackMenu

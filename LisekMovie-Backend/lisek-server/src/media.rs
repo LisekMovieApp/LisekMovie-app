@@ -577,6 +577,57 @@ pub async fn media_item_seasons(
     Ok(Json(seasons.into_iter().map(Into::into).collect()))
 }
 
+/// The episode a player offers when one ends ("Następny odcinek").
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct NextEpisodeResponse {
+    pub id: Uuid,
+    /// Series title (episodes carry no title of their own yet).
+    pub title: String,
+    pub season: i32,
+    pub episode: i32,
+    pub end_episode: Option<i32>,
+    pub overview: Option<String>,
+    pub duration_seconds: Option<f64>,
+    pub poster_url: String,
+    pub backdrop_url: String,
+}
+
+impl From<lisek_db::episodes::NextEpisode> for NextEpisodeResponse {
+    fn from(next: lisek_db::episodes::NextEpisode) -> Self {
+        Self {
+            poster_url: format!("/api/media/{}/poster", next.id),
+            backdrop_url: format!("/api/media/{}/backdrop", next.id),
+            id: next.id,
+            title: next.title,
+            season: next.season,
+            episode: next.episode,
+            end_episode: next.end_episode,
+            overview: next.overview,
+            duration_seconds: next.duration_seconds,
+        }
+    }
+}
+
+/// The next episode of the same series in season/episode order (a double
+/// episode `E01-E02` is followed by `E03`, a second copy of an episode is
+/// skipped, specials only follow specials). 204 for a movie or the last
+/// episode — see `lisek_db::episodes::next_episode`.
+#[utoipa::path(get,path="/api/media/{item_id}/next",tag="media",params(("item_id"=uuid::Uuid,Path)),responses((status=200,body=NextEpisodeResponse),(status=204,description="No next episode"),(status=401),(status=500),(status=503)),security(("lisek_auth"=[])))]
+pub async fn next_episode(
+    _auth: AuthUser,
+    State(state): State<SharedState>,
+    Path(item_id): Path<Uuid>,
+) -> Result<Response, MediaError> {
+    let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
+    let next = lisek_db::episodes::next_episode(&pool, item_id)
+        .await
+        .map_err(|_| MediaError::Internal)?;
+    Ok(match next {
+        Some(next) => Json(NextEpisodeResponse::from(next)).into_response(),
+        None => StatusCode::NO_CONTENT.into_response(),
+    })
+}
+
 /// Serves one item's poster. `AuthUser` accepts a `?token=` query param
 /// specifically so a plain `<img src>` can hit this route — see
 /// `auth.rs::token_from_query`'s doc comment.

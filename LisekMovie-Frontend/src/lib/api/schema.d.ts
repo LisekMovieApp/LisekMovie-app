@@ -230,6 +230,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/media/{item_id}/trickplay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Throws an item's thumbnails away and queues it again (after replacing a
+         *     file in place, or to retry a failure).
+         */
+        post: operations["regenerate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/playback/capabilities": {
         parameters: {
             query?: never;
@@ -388,6 +408,23 @@ export interface paths {
             cookie?: never;
         };
         get: operations["stats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trickplay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How far thumbnail generation has got. */
+        get: operations["status"];
         put?: never;
         post?: never;
         delete?: never;
@@ -875,6 +912,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/media/{item_id}/next": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The next episode of the same series in season/episode order (a double
+         *     episode `E01-E02` is followed by `E03`, a second copy of an episode is
+         *     skipped, specials only follow specials). 204 for a movie or the last
+         *     episode — see `lisek_db::episodes::next_episode`.
+         */
+        get: operations["next_episode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/media/{item_id}/playback": {
         parameters: {
             query?: never;
@@ -945,6 +1004,46 @@ export interface paths {
         };
         get: operations["media_state"];
         put: operations["set_flags"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/{item_id}/trickplay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview thumbnails of an item; 404 `trickplay_not_ready` until the
+         *     background job has made them.
+         */
+        get: operations["manifest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/{item_id}/trickplay/{sheet}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One sheet (JPEG). Cached by the browser for good: its URL changes when
+         *     the set is regenerated.
+         */
+        get: operations["sheet"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1313,7 +1412,7 @@ export interface components {
         FinishRequest: {
             admin_password: string;
             admin_username: string;
-            database: components["schemas"]["DatabaseConfig"];
+            database?: null | components["schemas"]["DatabaseConfig"];
             ui_language: string;
         };
         FinishResponse: {
@@ -1511,6 +1610,24 @@ export interface components {
              *     own `library_type` check.
              */
             direction: string;
+        };
+        /** @description The episode a player offers when one ends ("Następny odcinek"). */
+        NextEpisodeResponse: {
+            backdrop_url: string;
+            /** Format: double */
+            duration_seconds?: number | null;
+            /** Format: int32 */
+            end_episode?: number | null;
+            /** Format: int32 */
+            episode: number;
+            /** Format: uuid */
+            id: string;
+            overview?: string | null;
+            poster_url: string;
+            /** Format: int32 */
+            season: number;
+            /** @description Series title (episodes carry no title of their own yet). */
+            title: string;
         };
         /** @description One progress report (`POST /api/telemetry/playback-progress`). */
         PlaybackProgress: {
@@ -2021,6 +2138,49 @@ export interface components {
         };
         /** @enum {string} */
         TranscodeReason: "forced_by_client" | "container_not_supported" | "video_codec_not_supported" | "video_bit_depth_not_supported" | "video_profile_not_supported" | "hdr_not_supported" | "interlaced_not_supported" | "resolution_above_requested" | "bitrate_above_limit" | "audio_codec_not_supported" | "audio_channels_not_supported" | "audio_track_not_first" | "downmix_requested" | "subtitle_burn_in" | "subtitle_needs_hls" | "no_keyframe_index" | "remux_disabled";
+        /**
+         * @description What a player needs to show previews: tile geometry and sheet URLs.
+         *     Thumbnail `n` (the moment `n * interval_seconds`) is on sheet
+         *     `n / (columns * rows)`, column `n % columns`, row
+         *     `(n % (columns * rows)) / columns`.
+         */
+        TrickplayManifest: {
+            /** Format: int32 */
+            columns: number;
+            /**
+             * Format: int32
+             * @description Thumbnails in total (the last sheet may be partly empty).
+             */
+            count: number;
+            /** Format: int32 */
+            height: number;
+            /** Format: int32 */
+            interval_seconds: number;
+            /** Format: int32 */
+            rows: number;
+            /** @description Sheet image URLs in order; like other images they take `?token=`. */
+            sheets: string[];
+            /**
+             * Format: int32
+             * @description Tile size in pixels.
+             */
+            width: number;
+        };
+        TrickplayStats: {
+            /** Format: int64 */
+            failed: number;
+            /**
+             * Format: int64
+             * @description Probed movies and episodes still without (current) thumbnails.
+             */
+            pending: number;
+            /** Format: int64 */
+            ready: number;
+        };
+        TrickplayStatus: components["schemas"]["TrickplayStats"] & {
+            /** @description Generation runs (`LISEK_TRICKPLAY` not set to 0). */
+            enabled: boolean;
+        };
         UpdateMediaItemRequest: {
             forced_provider?: string | null;
             locked_fields: string[];
@@ -2810,6 +2970,49 @@ export interface operations {
             };
         };
     };
+    regenerate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     capabilities: {
         parameters: {
             query?: never;
@@ -3335,6 +3538,43 @@ export interface operations {
                 content?: never;
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrickplayStatus"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4453,6 +4693,52 @@ export interface operations {
             };
         };
     };
+    next_episode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NextEpisodeResponse"];
+                };
+            };
+            /** @description No next episode */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     start: {
         parameters: {
             query?: {
@@ -4686,6 +4972,84 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    manifest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrickplayManifest"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    sheet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+                sheet: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JPEG sprite sheet */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

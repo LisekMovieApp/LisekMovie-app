@@ -5,6 +5,8 @@ import { commandOf, seekStep } from './keys';
 import { audioTrackLabel, languageName, subtitleTrackLabel } from './labels';
 import { parsePreferences } from './preferences';
 import { repeatStep, SeekAccumulator } from './seek';
+import { nextUpDue } from './nextUp';
+import { thumbnailAt } from './trickplay';
 
 const key = (key: string, keyCode = 0) => ({
 	key,
@@ -146,5 +148,46 @@ describe('preferences and labels', () => {
 			name: 'Unknown – Forced',
 			detail: 'PGS'
 		});
+	});
+});
+
+describe('trickplay and next episode', () => {
+	const manifest = {
+		interval_seconds: 10,
+		width: 320,
+		height: 180,
+		columns: 10,
+		rows: 10,
+		count: 250,
+		sheets: [
+			'/api/media/x/trickplay/0?v=1',
+			'/api/media/x/trickplay/1?v=1',
+			'/api/media/x/trickplay/2?v=1'
+		]
+	};
+
+	it('finds the tile for a moment', () => {
+		expect(thumbnailAt(manifest, 0, 't')).toMatchObject({
+			x: 0,
+			y: 0,
+			url: '/api/media/x/trickplay/0?v=1&token=t'
+		});
+		// 1234 s: thumbnail 123 -> sheet 1, cell 23 -> column 3, row 2.
+		expect(thumbnailAt(manifest, 1234, 't')).toMatchObject({
+			x: 960,
+			y: 360,
+			sheetWidth: 3200,
+			url: '/api/media/x/trickplay/1?v=1&token=t'
+		});
+		// Past the end: the last thumbnail, not a blank tile.
+		expect(thumbnailAt(manifest, 99999, 't')?.url).toContain('/trickplay/2?');
+		expect(thumbnailAt(manifest, Number.NaN, 't')).toBeNull();
+	});
+
+	it('shows the next-episode card for the credits or at the end', () => {
+		expect(nextUpDue(30, 2400, false)).toBe(true);
+		expect(nextUpDue(120, 2400, false)).toBe(false);
+		expect(nextUpDue(30, 200, false), 'not before the end of a short extra').toBe(false);
+		expect(nextUpDue(0, 200, true)).toBe(true);
 	});
 });

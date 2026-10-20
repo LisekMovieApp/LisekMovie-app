@@ -89,3 +89,11 @@ pub async fn change_password(pool:&PgPool,id:Uuid,session_hash:&str,expected_has
         .bind(id).bind(new_token_hash).bind(client).bind(device).bind(device_id).execute(&mut *tx).await?;
     tx.commit().await?; Ok(user_from_row(row))
 }
+
+/// Whether any account exists. A database handed to the server through
+/// `DATABASE_URL` (Docker) starts empty: the wizard then only creates the
+/// first administrator.
+pub async fn any_user_exists(pool: &PgPool) -> Result<bool, DbError> {
+    let (exists,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM users)").fetch_one(pool).await?;
+    Ok(exists)
+}

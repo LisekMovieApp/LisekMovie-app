@@ -35,7 +35,9 @@ pub async fn status(State(state): State<SharedState>) -> Json<StatusResponse> {
     let (setup_required, database_connected) = match &**mode {
         ServerMode::SetupRequired => (true, false),
         ServerMode::DatabaseError(_) => (false, false),
-        ServerMode::Ready(_) => (false, true),
+        // A database from `DATABASE_URL` without any account yet: the
+        // wizard skips its database step and only creates the admin.
+        ServerMode::Ready(_) => (pool_without_accounts(&state).await.is_some(), true),
     };
     Json(StatusResponse {
         setup_required,
@@ -62,11 +64,36 @@ fn setup_error(error_code: &'static str, message: impl Into<String>) -> SetupErr
     }
 }
 
-/// Refuses to run any setup endpoint once a working database is already
-/// configured — otherwise anyone could hit `/api/setup/finish` after the
-/// fact and create a second, unauthenticated admin account.
+/// The connected database when it was provided through `DATABASE_URL`
+/// (Docker) and no account exists yet; `None` otherwise. Once an account
+/// is seen the answer is cached: accounts are never all deleted.
+async fn pool_without_accounts(state: &AppState) -> Option<lisek_db::PgPool> {
+    use std::sync::atomic::Ordering;
+    if state.has_accounts.load(Ordering::Relaxed) {
+        return None;
+    }
+    let pool = state.pool()?;
+    match lisek_db::users::any_user_exists(&pool).await {
+        Ok(false) => Some(pool),
+        Ok(true) => {
+            state.has_accounts.store(true, Ordering::Relaxed);
+            None
+        }
+        Err(_) => None,
+    }
+}
+
+/// Refuses to run any setup endpoint once setup is done — otherwise anyone
+/// could hit `/api/setup/finish` after the fact and create a second,
+/// unauthenticated admin account. Setup is open while no database is
+/// configured, or while a preconfigured one has no account yet.
 async fn guard_setup_not_already_done(state: &AppState) -> Result<(), SetupError> {
-    if !matches!(&**state.mode.load(), ServerMode::SetupRequired) {
+    let open = match &**state.mode.load() {
+        ServerMode::SetupRequired => true,
+        ServerMode::Ready(_) => pool_without_accounts(state).await.is_some(),
+        ServerMode::DatabaseError(_) => false,
+    };
+    if !open {
         return Err(setup_error(
             "setup_already_complete",
             "Setup has already been completed on this server.",
@@ -86,6 +113,9 @@ pub async fn test_database(
     Json(config): Json<DatabaseConfig>,
 ) -> Result<Json<TestConnectionResponse>, SetupError> {
     guard_setup_not_already_done(&state).await?;
+    if !matches!(&**state.mode.load(), ServerMode::SetupRequired) {
+        return Err(setup_error("setup_already_complete", "The database is already configured."));
+    }
 
     lisek_db::connect_with_config(&config)
         .await
@@ -96,7 +126,9 @@ pub async fn test_database(
 
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct FinishRequest {
-    pub database: DatabaseConfig,
+    /// Required unless the server already has a database (`DATABASE_URL`).
+    #[serde(default)]
+    pub database: Option<DatabaseConfig>,
     pub admin_username: String,
     pub admin_password: String,
     pub ui_language: String,
@@ -127,13 +159,26 @@ pub async fn finish(
         ));
     }
 
-    let pool = lisek_db::connect_with_config(&req.database)
-        .await
-        .map_err(db_error_to_setup_error)?;
-
-    lisek_db::run_migrations(&pool)
-        .await
-        .map_err(db_error_to_setup_error)?;
+    // A database from `DATABASE_URL` is already connected and migrated.
+    let preconfigured = pool_without_accounts(&state).await;
+    let database = match (&preconfigured, req.database.as_ref()) {
+        (Some(_), _) => None,
+        (None, Some(database)) => Some(database),
+        (None, None) => return Err(setup_error("invalid_request", "Database settings are missing.")),
+    };
+    let pool = match (&preconfigured, database) {
+        (Some(pool), _) => pool.clone(),
+        (None, Some(database)) => {
+            let pool = lisek_db::connect_with_config(database)
+                .await
+                .map_err(db_error_to_setup_error)?;
+            lisek_db::run_migrations(&pool)
+                .await
+                .map_err(db_error_to_setup_error)?;
+            pool
+        }
+        (None, None) => unreachable!("checked above"),
+    };
 
     let password_hash =
         lisek_auth::hash_password(&req.admin_password).map_err(|err| match err {
@@ -151,19 +196,22 @@ pub async fn finish(
         .await
         .map_err(db_error_to_setup_error)?;
 
-    if let Err(err) = crate::env_file::save_database_url(&req.database.to_connection_url()) {
-        tracing::error!("failed to persist DATABASE_URL to .env: {err}");
-        return Err(setup_error(
-            "config_write_failed",
-            "The database was set up, but saving the configuration to disk failed. \
-             Setting DATABASE_URL yourself and restarting the server will fix this.",
-        ));
+    state.has_accounts.store(true, std::sync::atomic::Ordering::Relaxed);
+    if let Some(database) = database {
+        if let Err(err) = crate::env_file::save_database_url(&database.to_connection_url()) {
+            tracing::error!("failed to persist DATABASE_URL to .env: {err}");
+            return Err(setup_error(
+                "config_write_failed",
+                "The database was set up, but saving the configuration to disk failed. \
+                 Setting DATABASE_URL yourself and restarting the server will fix this.",
+            ));
+        }
+        state.set_mode(ServerMode::Ready(pool));
     }
-
-    state.set_mode(ServerMode::Ready(pool));
     // A scan cannot have been queued before setup, but the worker sleeps
     // until woken; this makes it pick up the database right away.
     state.scan_wakeup.notify_one();
+    state.trickplay_wakeup.notify_one();
 
     tracing::info!("First-Run Wizard completed — server is now fully configured.");
 

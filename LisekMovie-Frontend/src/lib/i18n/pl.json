@@ -380,7 +380,12 @@
 		"quality_stalls": "Przestoje",
 		"quality_active": "Odtwarzane teraz",
 		"quality_ended": "Zakończone",
-		"try_compatible": "Odtwarzaj w trybie zgodnym"
+		"try_compatible": "Odtwarzaj w trybie zgodnym",
+		"next_episode": "Następny odcinek",
+		"next_in": "Start za {seconds} s",
+		"play_now": "Odtwórz teraz",
+		"watch_credits": "Napisy końcowe",
+		"episode_range": "S{season}:O{episode}-O{end}"
 	},
 	"games": {
 		"title": "Flappy Fox",

@@ -1,0 +1,22 @@
+# NVIDIA GPU for lisek-server: NVENC/NVDEC encoding, tonemap_cuda and
+# OpenCL tone mapping. Needs the NVIDIA driver and the NVIDIA Container
+# Toolkit on the host (Docker Desktop on Windows: WSL 2 backend with a
+# current NVIDIA driver is enough).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+#
+# Check in Admin → Playback → capabilities: "NVENC available" and the tone
+# mapping backends.
+
+services:
+  lisek-server:
+    environment:
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, compute, video, utility]

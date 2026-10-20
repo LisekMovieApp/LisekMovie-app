@@ -27,6 +27,7 @@ mod scan_jobs;
 mod setup;
 mod state;
 mod telemetry;
+mod trickplay;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -101,6 +102,7 @@ async fn main() {
     tokio::spawn(background_refresh::run(state.clone()));
     tokio::spawn(notifications::run(state.clone()));
     tokio::spawn(scan_jobs::run_worker(state.clone()));
+    tokio::spawn(trickplay::run_worker(state.clone()));
     tokio::spawn(async {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
@@ -152,10 +154,18 @@ async fn detect_initial_mode() -> ServerMode {
 /// up together. An invalid value stops the server — silently replacing it
 /// would make every stored provider key unreadable.
 fn load_secret_key() -> SecretBox {
-    match std::env::var("LISEK_SECRET_KEY") {
-        Ok(value) if !value.trim().is_empty() => SecretBox::from_encoded_key(&value)
+    let configured = std::env::var("LISEK_SECRET_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        // An empty variable (docker compose passing `LISEK_SECRET_KEY=` from
+        // a copied .env.example) must not hide the key this server
+        // generated and saved in its own .env on an earlier start: dotenvy
+        // never overrides a variable that is already set, even to "".
+        .or_else(saved_secret_key);
+    match configured {
+        Some(value) => SecretBox::from_encoded_key(&value)
             .unwrap_or_else(|err| panic!("LISEK_SECRET_KEY is invalid: {err}")),
-        _ => {
+        None => {
             let key = SecretBox::generate_encoded_key();
             match env_file::save_var("LISEK_SECRET_KEY", &key) {
                 Ok(()) => tracing::info!(
@@ -171,6 +181,15 @@ fn load_secret_key() -> SecretBox {
             SecretBox::from_encoded_key(&key).expect("generated key is valid")
         }
     }
+}
+
+/// A non-empty `LISEK_SECRET_KEY` saved in `.env` in the working directory.
+fn saved_secret_key() -> Option<String> {
+    dotenvy::from_filename_iter(".env")
+        .ok()?
+        .filter_map(Result::ok)
+        .find(|(key, value)| key == "LISEK_SECRET_KEY" && !value.trim().is_empty())
+        .map(|(_, value)| value)
 }
 
 /// Encrypts provider API keys saved in plaintext by earlier versions.

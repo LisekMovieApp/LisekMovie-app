@@ -296,6 +296,24 @@ def main():
                 assert job["probed"] == 1, job
                 assert sql(f"SELECT count(*) FROM media_streams WHERE media_item_id='{item_id}' AND stream_type='video'") == "1"
                 assert sql(f"SELECT probed_at IS NOT NULL AND file_size IS NOT NULL FROM media_items WHERE id='{item_id}'") == "t"
+                # Faza 5: trickplay sheets are made in the background after the scan.
+                for _ in range(300):
+                    status, body, _ = request(f"/api/media/{item_id}/trickplay", token=token)
+                    if status == 200:
+                        break
+                    assert status == 404 and b"trickplay_not_ready" in body, (status, body)
+                    time.sleep(.2)
+                assert status == 200, "no trickplay sheets: " + (root / "server.log").read_text()[-3000:]
+                trick = json.loads(body)
+                assert (trick["interval_seconds"], trick["width"], trick["height"], trick["columns"]) == (2, 320, 180, 10), trick
+                assert trick["count"] == 4 and len(trick["sheets"]) == 1, trick
+                status, sheet, headers = request(trick["sheets"][0] + "&token=" + token)
+                assert status == 200 and sheet[:2] == b"\xff\xd8" and headers["Content-Type"] == "image/jpeg", (status, sheet[:4])
+                assert "immutable" in headers["Cache-Control"]
+                assert request(trick["sheets"][0])[0] == 401
+                assert request(f"/api/media/{item_id}/trickplay?token=" + token)[0] == 401
+                assert ok_json("/api/admin/trickplay", token=token)["ready"] == 1
+                assert request(f"/api/admin/media/{item_id}/trickplay", "POST", None, token)[0] == 202
             if args.node:
                 progress_seen = False
                 while True:
@@ -336,6 +354,7 @@ def main():
             ok_json(f"/api/playback/{sid}/progress","PUT",progress,token)
             resumed = ok_json(f"/api/media/{item_id}/playback","POST",{},token)
             assert resumed["position_seconds"] == 50
+            assert request(f"/api/media/{item_id}/next", token=token)[0] == 204, "a movie has no next episode"
             # Telemetry (Faza 4): the player's report saves the resume point and quality counters.
             telemetry={"session_id":resumed["session_id"],"position_seconds":45,"duration_seconds":100,"paused":False,
                 "event":"heartbeat","stalls":2,"stall_seconds":1.5,"dropped_frames":3,"bandwidth_kbps":12000}

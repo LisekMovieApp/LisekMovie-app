@@ -1,0 +1,14 @@
+# Build context of the server image is the folder above LisekMovie-app
+# (it also holds the provider plugins). Send only what the build needs:
+# everything else there (other projects, private notes, FFmpeg downloads,
+# media) never leaves the machine.
+*
+!LisekMovie-app/LisekMovie-Backend
+!LisekMovie-plugin-tmdb
+!LisekMovie-plugin-thetvdb
+**/target
+**/.git
+**/.env
+**/.env.*
+**/config/metadata
+LisekMovie-app/LisekMovie-Backend/Dockerfile*

@@ -103,6 +103,10 @@ pub struct AppState {
     /// Wakes the scan worker when a job is queued; the queue itself is the
     /// `scan_jobs` table.
     pub scan_wakeup: Notify,
+    /// Wakes the trickplay worker (after a scan, a regeneration request).
+    pub trickplay_wakeup: Notify,
+    /// An account is known to exist (set once; accounts are never all deleted).
+    pub has_accounts: std::sync::atomic::AtomicBool,
 }
 
 impl AppState {
@@ -114,6 +118,8 @@ impl AppState {
             auth_failures: FailureLimiter::default(),
             events,
             scan_wakeup: Notify::new(),
+            trickplay_wakeup: Notify::new(),
+            has_accounts: std::sync::atomic::AtomicBool::new(false),
         }
     }
 

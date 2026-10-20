@@ -49,6 +49,11 @@
 				: null
 	);
 
+	/** The next episode replaces this page in history: Back leaves the player. */
+	function playNext(nextId: string) {
+		void goto(resolve('/watch/[id]', { id: nextId }), { replaceState: true });
+	}
+
 	function exit() {
 		if (cameFromApp && history.length > 1) history.back();
 		else void goto(resolve('/media/[id]', { id }));
@@ -66,6 +71,7 @@
 			{subheading}
 			backdrop={item && token ? imageUrl(item.backdrop_url, token) : null}
 			onexit={exit}
+			onnext={playNext}
 		/>
 	{/key}
 {:else}

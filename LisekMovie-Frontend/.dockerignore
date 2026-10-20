@@ -1,0 +1,9 @@
+node_modules
+build
+.svelte-kit
+.env
+.env.*
+Dockerfile
+.dockerignore
+**/*.test.ts
+**/*.spec.ts

@@ -22,11 +22,13 @@ mod media;
 mod providers;
 mod scan;
 
+pub mod episodes;
 pub mod games;
 pub mod notifications;
 pub mod playback;
 pub mod scan_jobs;
 pub mod streams;
+pub mod trickplay;
 pub mod users;
 
 pub use accounts::*;

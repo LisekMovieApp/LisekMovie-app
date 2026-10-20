@@ -748,6 +748,48 @@
         ]
       }
     },
+    "/api/admin/media/{item_id}/trickplay": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Throws an item's thumbnails away and queues it again (after replacing a\nfile in place, or to retry a failure).",
+        "operationId": "regenerate",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/admin/playback/capabilities": {
       "post": {
         "operationId": "capabilities",
@@ -1257,6 +1299,41 @@
             "description": ""
           },
           "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/trickplay": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "How far thumbnail generation has got.",
+        "operationId": "status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrickplayStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "503": {
             "description": ""
           }
         },
@@ -2388,6 +2465,55 @@
         ]
       }
     },
+    "/api/media/{item_id}/next": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "The next episode of the same series in season/episode order (a double\nepisode `E01-E02` is followed by `E03`, a second copy of an episode is\nskipped, specials only follow specials). 204 for a movie or the last\nepisode — see `lisek_db::episodes::next_episode`.",
+        "operationId": "next_episode",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NextEpisodeResponse"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No next episode"
+          },
+          "401": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/media/{item_id}/playback": {
       "post": {
         "operationId": "start",
@@ -2635,6 +2761,101 @@
             "description": ""
           },
           "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/media/{item_id}/trickplay": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Preview thumbnails of an item; 404 `trickplay_not_ready` until the\nbackground job has made them.",
+        "operationId": "manifest",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrickplayManifest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/media/{item_id}/trickplay/{sheet}": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "One sheet (JPEG). Cached by the browser for good: its URL changes when\nthe set is regenerated.",
+        "operationId": "sheet",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "sheet",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JPEG sprite sheet"
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "503": {
             "description": ""
           }
         },
@@ -3555,7 +3776,6 @@
       "FinishRequest": {
         "type": "object",
         "required": [
-          "database",
           "admin_username",
           "admin_password",
           "ui_language"
@@ -3568,7 +3788,15 @@
             "type": "string"
           },
           "database": {
-            "$ref": "#/components/schemas/DatabaseConfig"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DatabaseConfig",
+                "description": "Required unless the server already has a database (`DATABASE_URL`)."
+              }
+            ]
           },
           "ui_language": {
             "type": "string"
@@ -4067,6 +4295,62 @@
           "direction": {
             "type": "string",
             "description": "`\"up\"` or `\"down\"` — anything else is [`AdminError::InvalidInput`],\nsame validate-before-any-query discipline as [`create_library`]'s\nown `library_type` check."
+          }
+        }
+      },
+      "NextEpisodeResponse": {
+        "type": "object",
+        "description": "The episode a player offers when one ends (\"Następny odcinek\").",
+        "required": [
+          "id",
+          "title",
+          "season",
+          "episode",
+          "poster_url",
+          "backdrop_url"
+        ],
+        "properties": {
+          "backdrop_url": {
+            "type": "string"
+          },
+          "duration_seconds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "end_episode": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "episode": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "overview": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "poster_url": {
+            "type": "string"
+          },
+          "season": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "title": {
+            "type": "string",
+            "description": "Series title (episodes carry no title of their own yet)."
           }
         }
       },
@@ -5141,6 +5425,96 @@
           "subtitle_needs_hls",
           "no_keyframe_index",
           "remux_disabled"
+        ]
+      },
+      "TrickplayManifest": {
+        "type": "object",
+        "description": "What a player needs to show previews: tile geometry and sheet URLs.\nThumbnail `n` (the moment `n * interval_seconds`) is on sheet\n`n / (columns * rows)`, column `n % columns`, row\n`(n % (columns * rows)) / columns`.",
+        "required": [
+          "interval_seconds",
+          "width",
+          "height",
+          "columns",
+          "rows",
+          "count",
+          "sheets"
+        ],
+        "properties": {
+          "columns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Thumbnails in total (the last sheet may be partly empty)."
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "interval_seconds": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "rows": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "sheets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Sheet image URLs in order; like other images they take `?token=`."
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Tile size in pixels."
+          }
+        }
+      },
+      "TrickplayStats": {
+        "type": "object",
+        "required": [
+          "ready",
+          "failed",
+          "pending"
+        ],
+        "properties": {
+          "failed": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Probed movies and episodes still without (current) thumbnails."
+          },
+          "ready": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "TrickplayStatus": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/TrickplayStats"
+          },
+          {
+            "type": "object",
+            "required": [
+              "enabled"
+            ],
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "description": "Generation runs (`LISEK_TRICKPLAY` not set to 0)."
+              }
+            }
+          }
         ]
       },
       "UpdateMediaItemRequest": {

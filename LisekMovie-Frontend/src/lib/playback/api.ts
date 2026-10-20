@@ -7,6 +7,7 @@ export type StartRequest = components['schemas']['StartRequest'];
 export type AudioTrack = components['schemas']['AudioTrack'];
 export type SubtitleTrack = components['schemas']['SubtitleTrack'];
 export type DownmixPreference = components['schemas']['DownmixPreference'];
+export type NextEpisode = components['schemas']['NextEpisodeResponse'];
 export interface MediaState {
 	position_seconds: number;
 	duration_seconds: number;
@@ -97,4 +98,9 @@ export function stopPlayback(token: string, sessionId: string) {
 
 export function fetchMyList(token: string) {
 	return api<ListEntry[]>(token, '/api/me/list');
+}
+
+/** The episode after `id` in its series, or null (a movie, the last episode). */
+export async function fetchNextEpisode(token: string, id: string): Promise<NextEpisode | null> {
+	return (await api<NextEpisode | undefined>(token, `/api/media/${encodeURIComponent(id)}/next`)) ?? null;
 }

@@ -132,6 +132,12 @@ fn registry() -> std::sync::MutexGuard<'static, HashMap<String, Arc<Session>>> {
     SESSIONS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Sessions encoding video right now. Background jobs (trickplay) wait
+/// while there are any, so they never compete with a viewer for the CPU.
+pub fn encoding_sessions() -> usize {
+    registry().values().filter(|s| s.spec.plan.encodes_video()).count()
+}
+
 /// Starts a session and its first run at the resume position.
 pub async fn create(spec: SessionSpec) -> Result<Arc<Session>, SessionError> {
     if spec.plan.encodes_video() {

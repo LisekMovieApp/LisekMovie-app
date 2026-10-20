@@ -1,10 +1,27 @@
-# Convenience PostgreSQL instance for the "set it up for me" path in the
-# First-Run Wizard. lisek-server itself always runs as a separate process —
-# this only provides the database, it does not run the app.
+# LisekMovie: PostgreSQL + lisek-server + web app on one network.
 #
-# Usage: docker compose up -d
-# Then point the wizard (or DATABASE_URL) at localhost:5432 with the
-# credentials below, or your own values if you changed them.
+#   docker compose up -d --build          whole stack, web app on :${LISEK_HTTP_PORT:-8096}
+#   docker compose up -d postgres         only the database (local development:
+#                                         the First-Run Wizard's "bundled
+#                                         PostgreSQL" defaults point here)
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+#                                         with an NVIDIA GPU (NVENC, CUDA tone mapping)
+#
+# The server image is built from the folder ABOVE this repository: it also
+# needs the provider plugins next to it (LisekMovie-plugin-tmdb,
+# LisekMovie-plugin-thetvdb). Only those and the backend are sent to the
+# build (LisekMovie-Backend/Dockerfile.dockerignore).
+#
+# Settings come from `.env` next to this file (see .env.example): the
+# variables below with `${...}` and, for the server, everything in that
+# file. Values set under `environment:` win over `.env`.
+#
+# Libraries: add folders in Admin → Libraries as paths INSIDE the container,
+# i.e. under /media (MEDIA_DIR is mounted there read-only).
+
+# No top-level `name:`: the project keeps its folder's name, so the
+# database volume created by the earlier database-only compose file is
+# reused as it is.
 
 services:
   postgres:
@@ -13,22 +30,99 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: lisekmovie
-      POSTGRES_PASSWORD: lisekmovie
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lisekmovie}
       POSTGRES_DB: lisekmovie
       # Postgres 18's images expect PGDATA to be a subdirectory of the
       # mounted volume, not the mount point itself (the image now stores
       # data in a pg_ctlcluster-style, major-version-specific layout).
       # Without this the container loop-restarts on a fresh volume.
       PGDATA: /var/lib/postgresql/data/pgdata
+    # Local development only: published on this machine, not the network.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - lisekmovie-postgres-data:/var/lib/postgresql/data
+    networks:
+      - lisekmovie
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U lisekmovie"]
+      test: ["CMD-SHELL", "pg_isready -U lisekmovie -d lisekmovie"]
       interval: 5s
       timeout: 5s
       retries: 10
 
+  lisek-server:
+    build:
+      context: ..
+      dockerfile: LisekMovie-app/LisekMovie-Backend/Dockerfile
+      args:
+        # jellyfin (tonemap_cuda, OpenCL, VAAPI/QSV) or debian (distribution ffmpeg)
+        FFMPEG: ${LISEK_FFMPEG_FLAVOR:-jellyfin}
+    image: lisekmovie/server:local
+    container_name: lisekmovie-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # The database above. With DATABASE_URL set, the First-Run Wizard
+      # only creates the administrator account.
+      DATABASE_URL: postgres://lisekmovie:${POSTGRES_PASSWORD:-lisekmovie}@postgres:5432/lisekmovie
+      # Fixed inside the container, whatever a development .env says.
+      LISEK_BIND_ADDR: 0.0.0.0:8080
+      LISEK_CONFIG_DIR: /var/lib/lisekmovie/config
+      LISEK_FFMPEG: /usr/local/bin/ffmpeg
+      LISEK_FFPROBE: /usr/local/bin/ffprobe
+      TZ: ${TZ:-Europe/Warsaw}
+    volumes:
+      # Settings, generated LISEK_SECRET_KEY (.env), posters, trickplay
+      # sheets and HLS transcodes. Back it up with the database.
+      - lisekmovie-data:/var/lib/lisekmovie
+      # Your films and series. Read-only: "save metadata next to the video"
+      # in a library needs `:rw` here.
+      - ${MEDIA_DIR:-./media}:/media:ro
+      # Optional: transcodes in RAM (fast, no SSD wear). Needs a few GB.
+      # - type: tmpfs
+      #   target: /var/lib/lisekmovie/config/transcodes
+      #   tmpfs:
+      #     size: 4g
+    networks:
+      - lisekmovie
+    # Not published: browsers reach the API through the web app (/api).
+    expose:
+      - "8080"
+
+  lisek-web:
+    build:
+      context: ./LisekMovie-Frontend
+    image: lisekmovie/web:local
+    container_name: lisekmovie-web
+    restart: unless-stopped
+    depends_on:
+      lisek-server:
+        condition: service_healthy
+    environment:
+      LISEK_API_URL: http://lisek-server:8080
+      # Behind another reverse proxy (Caddy, Traefik, nginx with TLS): set
+      # TRUST_PROXY=1 so client addresses from it are passed on.
+      TRUST_PROXY: ${LISEK_TRUST_PROXY:-0}
+      TZ: ${TZ:-Europe/Warsaw}
+    ports:
+      - "${LISEK_HTTP_PORT:-8096}:3000"
+    networks:
+      - lisekmovie
+
+networks:
+  lisekmovie:
+    # A fixed subnet so it can be entered in Admin → Playback → trusted
+    # proxies: then remote-viewer limits see real client addresses instead
+    # of the web container's.
+    ipam:
+      config:
+        - subnet: ${LISEK_SUBNET:-172.30.96.0/24}
+
 volumes:
   lisekmovie-postgres-data:
+  lisekmovie-data:

@@ -3,10 +3,15 @@
   Single-page, three in-memory steps (not three routes) so nothing is lost
   between them and the URL stays just "/setup". `+layout.ts` is what sends a
   browser here in the first place, and away from here once setup is done.
+
+  Faza 5 (Docker): when the server already has a database (`DATABASE_URL`,
+  status `database_connected`), the database step is skipped and only the
+  administrator account is created.
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import { t, setLocale, getLocale, setLocaleCookie, SUPPORTED_LOCALES, type Locale } from '$lib/i18n';
 	import { setSessionCookie } from '$lib/auth';
 	import logoText from '$lib/assets/logo_text.svg';
@@ -43,7 +48,9 @@
 		password: ''
 	};
 
-	const TOTAL_STEPS = 3;
+	/** The server was started with a database (Docker): no database step. */
+	const preconfigured = $derived(page.data.status?.database_connected === true);
+	const totalSteps = $derived(preconfigured ? 2 : 3);
 	const inputClass =
 		'rounded-md border border-neutral-700 bg-black px-3 py-2 text-neutral-100 focus:border-gold';
 
@@ -134,7 +141,7 @@
 		finishErrorCode = null;
 
 		const result = await postJson<{ ok: boolean }>('/api/setup/finish', {
-			database,
+			database: preconfigured ? null : database,
 			admin_username: adminUsername,
 			admin_password: adminPassword,
 			ui_language: uiLanguage
@@ -187,7 +194,10 @@
 		<div class="mb-8 flex flex-col items-center gap-2 text-center">
 			<img src={logoText} alt="LisekMovie" class="w-40" />
 			<p class="text-sm tracking-wide text-gold-dim uppercase">
-				{t('setup.step_indicator', { current: step, total: TOTAL_STEPS })}
+				{t('setup.step_indicator', {
+					current: preconfigured && step === 3 ? 2 : step,
+					total: totalSteps
+				})}
 			</p>
 		</div>
 
@@ -199,7 +209,7 @@
 				<p class="mb-6 text-sm text-neutral-400">{t('setup.step_language_subtitle')}</p>
 
                 <div class="flex flex-col gap-3">
-                    {#each SUPPORTED_LOCALES as locale}
+                    {#each SUPPORTED_LOCALES as locale (locale)}
                         <button type="button"
                             class="rounded-md border px-4 py-3 text-left transition-colors {uiLanguage === locale ? 'border-gold bg-gold/10 text-gold' : 'border-neutral-700 text-neutral-200 hover:border-gold-dim'}"
                             onclick={() => selectLanguage(locale)}>{t(`languages.${locale}`)}</button>
@@ -209,7 +219,7 @@
 				<button
 					type="button"
 					class="mt-8 w-full rounded-md bg-gold px-4 py-2.5 font-medium text-black transition-colors hover:bg-gold-dim"
-					onclick={() => (step = 2)}
+					onclick={() => (step = preconfigured ? 3 : 2)}
 				>
 					{t('common.next')}
 				</button>
@@ -360,7 +370,7 @@
 					<button
 						type="button"
 						class="w-1/3 rounded-md border border-neutral-700 px-4 py-2.5 font-medium text-neutral-200 hover:border-gold-dim"
-						onclick={() => (step = 2)}
+						onclick={() => (step = preconfigured ? 1 : 2)}
 					>
 						{t('common.back')}
 					</button>

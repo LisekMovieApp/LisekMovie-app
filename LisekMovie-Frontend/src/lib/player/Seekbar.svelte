@@ -3,10 +3,15 @@
   pending target (shown as a ghost bar and a time bubble); the player
   seeks once, on release or a moment after the last key press, so fast
   seeking does not restart the server's encoder for every step.
+
+  With trickplay sheets (`thumbnail`), the bubble becomes a picture of the
+  moment under the pointer, the drag or the pending keyboard jump, so a
+  remote user sees where a seek lands before it happens.
 -->
 <script lang="ts">
 	import { t } from '$lib/i18n';
 	import { formatTime } from './format';
+	import type { Thumbnail } from './trickplay';
 
 	interface Props {
 		currentTime: number;
@@ -24,6 +29,10 @@
 		ontoggle: () => void;
 		/** Focused first when the controls appear (TV remotes). */
 		navDefault?: boolean;
+		/** Preview tile for a moment, when the item has trickplay sheets. */
+		thumbnail?: ((time: number) => Thumbnail | null) | null;
+		/** The bar is about to be used (hover, focus): preload the sheets. */
+		onwarm?: () => void;
 	}
 
 	let {
@@ -35,7 +44,9 @@
 		oncommit,
 		onstep,
 		ontoggle,
-		navDefault = false
+		navDefault = false,
+		thumbnail = null,
+		onwarm
 	}: Props = $props();
 
 	let bar = $state<HTMLDivElement>();
@@ -47,6 +58,14 @@
 		known ? Math.min(100, Math.max(0, (time / duration) * 100)) : 0;
 	const shown = $derived(pending ?? currentTime);
 	const bubble = $derived(dragging || pending !== null ? shown : hover);
+	const preview = $derived(bubble !== null && thumbnail ? thumbnail(bubble) : null);
+	/** Preview width on screen: larger on big screens (TVs), never upscaled much. */
+	let previewWidth = $state(240);
+	const previewScale = $derived(preview ? previewWidth / preview.width : 1);
+
+	function measure() {
+		previewWidth = Math.round(Math.min(320, Math.max(160, window.innerWidth * 0.15)));
+	}
 
 	function timeAt(clientX: number): number {
 		if (!bar || !known) return 0;
@@ -114,6 +133,14 @@
 	onpointerup={onPointerUp}
 	onpointercancel={onPointerUp}
 	onpointerleave={() => (hover = null)}
+	onpointerenter={() => {
+		measure();
+		onwarm?.();
+	}}
+	onfocus={() => {
+		measure();
+		onwarm?.();
+	}}
 	onkeydown={onKeyDown}
 >
 	<div
@@ -134,7 +161,26 @@
 		class:scale-100={dragging || pending !== null}
 		style:left="{percent(shown)}%"
 	></div>
-	{#if bubble !== null && known}
+	{#if bubble !== null && known && preview}
+		{@const w = previewWidth}
+		{@const h = Math.round(preview.height * previewScale)}
+		<div
+			class="pointer-events-none absolute bottom-full mb-4 flex -translate-x-1/2 flex-col items-center gap-1.5"
+			style:left={`clamp(${w / 2}px, ${percent(bubble)}%, calc(100% - ${w / 2}px))`}
+		>
+			<div
+				class="overflow-hidden rounded-md bg-black bg-no-repeat shadow-[0_8px_30px_rgb(0_0_0/0.7)] ring-2 ring-white/80"
+				style:width={`${w}px`}
+				style:height={`${h}px`}
+				style:background-image={`url("${preview.url}")`}
+				style:background-size={`${preview.sheetWidth * previewScale}px ${preview.sheetHeight * previewScale}px`}
+				style:background-position={`-${preview.x * previewScale}px -${preview.y * previewScale}px`}
+			></div>
+			<span class="rounded bg-black/85 px-2 py-0.5 text-sm font-semibold text-white tabular-nums"
+				>{formatTime(bubble)}</span
+			>
+		</div>
+	{:else if bubble !== null && known}
 		<div
 			class="pointer-events-none absolute bottom-full mb-3 -translate-x-1/2 rounded-md bg-black/85 px-2 py-1 text-sm font-semibold text-white tabular-nums ring-1 ring-white/15"
 			style:left={`clamp(1.75rem, ${percent(bubble)}%, calc(100% - 1.75rem))`}

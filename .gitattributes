@@ -8,3 +8,11 @@
 #   on every platform.
 *.rs  text eol=lf
 *.sql text eol=lf
+
+# - Dockerfiles, compose files and the Node server run inside Linux
+#   containers: a CRLF checkout on Windows breaks `\` line continuations.
+Dockerfile*       text eol=lf
+*.dockerignore    text eol=lf
+.dockerignore     text eol=lf
+docker-compose*.yml text eol=lf
+LisekMovie-Frontend/server.js text eol=lf

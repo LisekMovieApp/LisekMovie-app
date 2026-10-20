@@ -198,6 +198,9 @@ async fn run_job(state: &SharedState, pool: &PgPool, job: ScanJob) {
     }
     job.finished_at = Some(Utc::now());
     progress.flush().await;
+    // New or changed files: the trickplay worker takes over (it skips
+    // whatever already has current thumbnails).
+    state.trickplay_wakeup.notify_one();
 
     if let Err(err) = db::prune_finished(pool, KEEP_FINISHED_DAYS).await {
         tracing::warn!(%err, "failed to prune old scan jobs");

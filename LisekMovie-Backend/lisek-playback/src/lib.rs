@@ -15,6 +15,7 @@ pub mod session;
 pub mod subtitles;
 pub mod tonemap;
 pub mod transcode;
+pub mod trickplay;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ByteRange {

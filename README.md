@@ -64,6 +64,21 @@ Each playback is planned per stream: direct play, remux (video copied into HLS, 
 
 `lisek-playback/tests/hls_engine.rs` exercises the HLS engine against the `ffmpeg` on `PATH` and is skipped without it. `tools/smoke_test.py` covers the whole server; with `--ffmpeg`, `--ffprobe`, `--node` and `--hlsjs LisekMovie-Frontend/node_modules/hls.js/dist/hls.min.js` it also plays a remuxed stream with hls.js in headless Chromium (needs the `playwright` package).
 
+## Running with Docker
+
+`docker-compose.yml` runs PostgreSQL, `lisek-server` and the web app on one network. The server image is built from the folder that holds this repository **and** the provider plugins next to it (`LisekMovie-plugin-tmdb`, `LisekMovie-plugin-thetvdb`); only those are sent to the build.
+
+```
+cp .env.example .env        # set POSTGRES_PASSWORD, MEDIA_DIR, LISEK_HTTP_PORT
+docker compose up -d --build
+# NVIDIA GPU (NVENC, CUDA tone mapping; needs the NVIDIA Container Toolkit):
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+```
+
+Open `http://<host>:8096`: the wizard only asks for the administrator account (the database comes from the compose file). Add libraries under `/media/...` (`MEDIA_DIR` is mounted there read-only). The `lisekmovie-data` volume holds settings, posters, trickplay thumbnails, transcodes and a generated `LISEK_SECRET_KEY` — back it up together with `lisekmovie-postgres-data`.
+
+The server image installs [jellyfin-ffmpeg](https://github.com/jellyfin/jellyfin-ffmpeg) (`LISEK_FFMPEG_FLAVOR=debian` uses the distribution's FFmpeg instead). Seek-bar previews are generated in the background after each scan; `LISEK_TRICKPLAY=0` turns that off.
+
 ## License
 
 LisekMovie is licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)**, with an additional attribution requirement.

@@ -252,8 +252,11 @@ fn token_from_query(query: Option<&str>) -> Option<String> {
 
 fn is_image_path(path: &str) -> bool {
     let segments: Vec<_> = path.split('/').collect();
-    segments.len() == 5 && segments[1] == "api" && segments[2] == "media"
-        && matches!(segments[4], "poster" | "backdrop" | "logo")
+    let media = segments.len() >= 5 && segments[1] == "api" && segments[2] == "media";
+    // `/api/media/{id}/poster|backdrop|logo` and the trickplay sprite
+    // sheets `/api/media/{id}/trickplay/{n}` (CSS backgrounds).
+    (media && segments.len() == 5 && matches!(segments[4], "poster" | "backdrop" | "logo"))
+        || (media && segments.len() == 6 && segments[4] == "trickplay")
 }
 
 #[derive(Debug)]
@@ -384,6 +387,16 @@ mod tests {
         assert_eq!(token_from_query(Some("")), None);
         assert_eq!(token_from_query(Some("size=w500")), None);
         assert_eq!(token_from_query(Some("token=")), None);
+    }
+
+    #[test]
+    fn query_tokens_only_for_images_and_trickplay_sheets() {
+        let id = "/api/media/0b7d9c2e-0000-0000-0000-000000000000";
+        assert!(is_image_path(&format!("{id}/poster")));
+        assert!(is_image_path(&format!("{id}/trickplay/3")));
+        assert!(!is_image_path(&format!("{id}/trickplay")), "the manifest is JSON, read with the header");
+        assert!(!is_image_path(&format!("{id}/next")));
+        assert!(!is_image_path("/api/libraries"));
     }
 }
 
