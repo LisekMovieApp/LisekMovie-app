@@ -42,6 +42,11 @@
   one bundled response), whichever of the four resolves first can populate
   the shared header, and any one of them hitting a real 404 is enough to
   know the library itself doesn't exist.
+
+  Faza 6: "Grupuj kolekcje" folds the films of each collection (two or
+  more in this library) into one card leading to `/collection/[id]`. On by
+  default; the choice is remembered per browser (localStorage). A letter
+  filter always lists single films.
 -->
 <script lang="ts">
 	import { t } from '$lib/i18n';
@@ -54,6 +59,7 @@
 		type MediaItem
 	} from '$lib/media/api';
 	import MediaCard from './MediaCard.svelte';
+	import Icon from './Icon.svelte';
 	import SkeletonCard from './SkeletonCard.svelte';
 
 	interface Props {
@@ -75,6 +81,15 @@
 	let sort = $state<LibrarySort>('title_asc');
 	let letter = $state<string | null>(null);
 	let viewDensity = $state<'comfortable' | 'compact'>('comfortable');
+	const GROUP_KEY = 'lisek.library.groupCollections';
+	function storedGrouping(): boolean {
+		try {
+			return localStorage.getItem(GROUP_KEY) !== '0';
+		} catch {
+			return true;
+		}
+	}
+	let groupCollections = $state(storedGrouping());
 	let items: MediaItem[] | null = $state(null);
 	let total = $state(0);
 	let pageSize = $state(100);
@@ -93,7 +108,8 @@
 			const result = await fetchLibraryItems(sessionToken, id, {
 				page: p,
 				sort: s,
-				letter: l ?? undefined
+				letter: l ?? undefined,
+				groupCollections
 			});
 			if (mySeq !== loadSeq) return; // superseded — discard
 			items = result.items;
@@ -136,6 +152,19 @@
 		items = null;
 		const mySeq = ++loadSeq;
 		loadPage(libraryId, 1, next, letter, mySeq);
+	}
+
+	function toggleGrouping() {
+		groupCollections = !groupCollections;
+		try {
+			localStorage.setItem(GROUP_KEY, groupCollections ? '1' : '0');
+		} catch {
+			// Private mode: the choice lasts for this page only.
+		}
+		pageNum = 1;
+		items = null;
+		const mySeq = ++loadSeq;
+		loadPage(libraryId, 1, sort, letter, mySeq);
 	}
 
 	function changeLetter(next: string | null) {
@@ -238,6 +267,20 @@
 					{t('library.view_compact')}
 				</button>
 			</div>
+
+			<button
+				type="button"
+				onclick={toggleGrouping}
+				aria-pressed={groupCollections}
+				disabled={letter !== null}
+				title={letter !== null ? t('collections.group_letter_hint') : undefined}
+				class="flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 {groupCollections
+					? 'border-gold text-gold'
+					: 'border-neutral-700 text-neutral-200 hover:border-gold-dim'}"
+			>
+				<Icon name="stack" class="size-4" />
+				{t('collections.group_toggle')}
+			</button>
 		</div>
 
 		<div class="mb-4 flex flex-wrap gap-1.5">

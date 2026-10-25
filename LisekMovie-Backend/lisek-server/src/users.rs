@@ -85,3 +85,43 @@ pub async fn change(auth:SessionUser,State(state):State<SharedState>,Json(req):J
     let user=db::change_password(&pool,auth.user.id,&auth.token_hash,&old_hash,&checked,&lisek_auth::hash_session_token(&token)).await?;
     Ok(no_store(LoginResponse{token,user}))
 }
+
+/// An account's access restrictions (parental controls) as the admin
+/// editor shows them.
+#[derive(Serialize,utoipa::ToSchema)]
+pub struct UserRestrictionsResponse {
+    #[serde(flatten)]
+    restrictions: lisek_db::access::Restrictions,
+    /// `false` for an administrator: administrators always see everything.
+    enforced: bool,
+}
+#[derive(Serialize,utoipa::ToSchema)]
+pub struct RestrictedUser { user_id: Uuid, #[serde(flatten)] restrictions: lisek_db::access::Restrictions }
+
+fn restrictions_not_found()->UserError{UserError(StatusCode::NOT_FOUND,"user_not_found")}
+
+/// Accounts that browse with restrictions (the user list marks them).
+#[utoipa::path(get,path="/api/admin/user-restrictions",responses((status=200,body=Vec<RestrictedUser>),(status=403)),security(("lisek_auth"=[])))]
+pub async fn list_restrictions(_admin: AdminUser,State(state):State<SharedState>)->Result<Json<Vec<RestrictedUser>>,UserError>{
+    Ok(Json(lisek_db::access::list_restrictions(&pool(&state).await?).await?
+        .into_iter().map(|(user_id,restrictions)|RestrictedUser{user_id,restrictions}).collect()))
+}
+#[utoipa::path(get,path="/api/admin/users/{id}/restrictions",params(("id"=Uuid,Path)),responses((status=200,body=UserRestrictionsResponse),(status=403),(status=404)),security(("lisek_auth"=[])))]
+pub async fn get_restrictions(_admin: AdminUser,State(state):State<SharedState>,Path(id):Path<Uuid>)->Result<Json<UserRestrictionsResponse>,UserError>{
+    let (is_admin,restrictions)=lisek_db::access::get_restrictions(&pool(&state).await?,id).await?.ok_or_else(restrictions_not_found)?;
+    Ok(Json(UserRestrictionsResponse{restrictions,enforced:!is_admin}))
+}
+/// Replaces an account's restrictions. `libraries: null` allows every
+/// library, `max_age_rating: null` removes the age limit; both null clears
+/// the restrictions. Takes effect on the account's next request.
+#[utoipa::path(put,path="/api/admin/users/{id}/restrictions",params(("id"=Uuid,Path)),request_body=lisek_db::access::Restrictions,responses((status=200,body=UserRestrictionsResponse),(status=400),(status=403),(status=404)),security(("lisek_auth"=[])))]
+pub async fn set_restrictions(_admin: AdminUser,State(state):State<SharedState>,Path(id):Path<Uuid>,Json(req):Json<lisek_db::access::Restrictions>)->Result<Json<UserRestrictionsResponse>,UserError>{
+    if req.max_age_rating.is_some_and(|age|!(0..=lisek_db::access::MAX_AGE_RATING).contains(&age)) || req.libraries.as_ref().is_some_and(|l|l.len()>1000) {
+        return Err(UserError(StatusCode::BAD_REQUEST,"invalid_restrictions"));
+    }
+    let pool=pool(&state).await?;
+    if !lisek_db::access::set_restrictions(&pool,id,&req).await? {return Err(restrictions_not_found());}
+    let (is_admin,restrictions)=lisek_db::access::get_restrictions(&pool,id).await?.ok_or_else(restrictions_not_found)?;
+    tracing::info!(user_id=%id,?restrictions,"account restrictions changed");
+    Ok(Json(UserRestrictionsResponse{restrictions,enforced:!is_admin}))
+}

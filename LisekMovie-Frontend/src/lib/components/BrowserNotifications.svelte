@@ -22,11 +22,17 @@
         function stop() {
             clearTimeout(timer); socket?.close(); socket = undefined; connected = false;
         }
+        // The app's service worker (`src/service-worker.ts`, registered by
+        // SvelteKit) shows the notifications and handles their clicks.
+        // Without one (plain HTTP, dev browsers) desktop browsers fall back
+        // to nonpersistent notifications.
         async function register() {
             if ('serviceWorker' in navigator) {
                 try {
-                    await navigator.serviceWorker.register('/notifications-worker.js');
-                    registration = await navigator.serviceWorker.ready;
+                    registration = await Promise.race([
+                        navigator.serviceWorker.ready,
+                        new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 4000))
+                    ]);
                 } catch { /* Desktop browsers can use nonpersistent notifications. */ }
             }
         }

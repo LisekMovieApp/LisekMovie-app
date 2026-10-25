@@ -27,8 +27,8 @@ use crate::auth::{AdminUser, SessionUser};
 use crate::openapi::ApiDoc;
 use crate::state::SharedState;
 use crate::{
-    admin, auth, browser_notifications, games, media, notifications, playback, scan_jobs, setup,
-    telemetry, trickplay, users,
+    admin, auth, browser_notifications, collections, games, media, notifications, playback,
+    scan_jobs, setup, telemetry, trickplay, users,
 };
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -77,6 +77,11 @@ fn user() -> OpenApiRouter<SharedState> {
         .routes(routes!(media::media_item_detail))
         .routes(routes!(media::media_item_seasons))
         .routes(routes!(media::next_episode))
+        .routes(routes!(collections::item_collection))
+        .routes(routes!(collections::library_collections))
+        .routes(routes!(collections::get_collection))
+        .routes(routes!(collections::collection_poster))
+        .routes(routes!(collections::collection_backdrop))
         .routes(routes!(trickplay::manifest))
         .routes(routes!(trickplay::sheet))
         .routes(routes!(media::poster_image))
@@ -98,6 +103,8 @@ fn admin() -> OpenApiRouter<SharedState> {
         .routes(routes!(users::list, users::create))
         .routes(routes!(users::edit))
         .routes(routes!(users::reset))
+        .routes(routes!(users::get_restrictions, users::set_restrictions))
+        .routes(routes!(users::list_restrictions))
         .routes(routes!(admin::list_providers))
         .routes(routes!(admin::update_provider))
         .routes(routes!(admin::set_provider_key, admin::clear_provider_key))

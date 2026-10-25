@@ -45,9 +45,11 @@ pub async fn deliveries(pool:&PgPool)->Result<serde_json::Value,DbError>{
 
 #[derive(serde::Serialize,sqlx::FromRow)]
 pub struct BrowserEvent { pub event_id:i64, pub item_id:uuid::Uuid, pub title:String }
-pub async fn browser_events(pool:&PgPool,since:chrono::DateTime<chrono::Utc>)->Result<Vec<BrowserEvent>,DbError>{
-    Ok(sqlx::query_as("SELECT e.id AS event_id,e.item_id,m.title FROM browser_notification_events e JOIN media_items m ON m.id=e.item_id WHERE e.created_at >= $1 AND e.created_at > now()-interval '5 minutes' ORDER BY e.id DESC LIMIT 1000")
-        .bind(since).fetch_all(pool).await?.into_iter().rev().collect())
+/// New-item events since `since` that the account may see.
+pub async fn browser_events(pool:&PgPool,since:chrono::DateTime<chrono::Utc>,access:&crate::access::Restrictions)->Result<Vec<BrowserEvent>,DbError>{
+    let (libraries,max_age,block_unrated)=access.binds();
+    Ok(sqlx::query_as("SELECT e.id AS event_id,e.item_id,m.title FROM browser_notification_events e JOIN media_items m ON m.id=e.item_id WHERE e.created_at >= $1 AND e.created_at > now()-interval '5 minutes' AND lisek_visible(m.library_id,m.age_rating,$2,$3,$4) ORDER BY e.id DESC LIMIT 1000")
+        .bind(since).bind(libraries).bind(max_age).bind(block_unrated).fetch_all(pool).await?.into_iter().rev().collect())
 }
 pub async fn prune_browser_events(pool:&PgPool)->Result<(),DbError>{
     sqlx::query("DELETE FROM browser_notification_events WHERE created_at < now()-interval '1 day'").execute(pool).await?;

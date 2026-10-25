@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT c.id AS \"id!\", c.library_id AS \"library_id!\", c.item_type AS \"item_type!\",\n                       c.title AS \"title!\", c.year AS \"year?\", c.overview AS \"overview?\",\n                       c.season AS \"season?\", c.episode AS \"episode?\", c.created_at AS \"created_at!\"\n                FROM (\n                    (SELECT m.id, m.library_id, m.item_type, m.title, m.year, m.overview,\n                            NULL::int AS season, NULL::int AS episode, m.created_at\n                     FROM media_items m\n                     WHERE m.item_type = 'movie' AND m.library_id = $2\n                       AND lisek_visible(m.library_id, m.age_rating, $3, $4, $5)\n                     ORDER BY m.created_at DESC, m.id DESC\n                     LIMIT $1)\n                    UNION ALL\n                    (SELECT s.representative_item_id, s.library_id, 'series', s.title, NULL::int,\n                            r.overview, NULL::int, NULL::int, s.last_episode_added_at\n                     FROM series s\n                     JOIN media_items r ON r.id = s.representative_item_id\n                     WHERE s.library_id = $2 AND lisek_visible(s.library_id, r.age_rating, $3, $4, $5)\n                     ORDER BY s.last_episode_added_at DESC, s.representative_item_id DESC\n                     LIMIT $1)\n                ) c\n                ORDER BY c.created_at DESC, c.id DESC\n                LIMIT $1\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "library_id!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "item_type!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "title!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "year?",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "overview?",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "season?",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "episode?",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid",
+        "UuidArray",
+        "Int4",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "b0ab52d1c85c213cade46919ffa9c3b42f33cbb59a7a0a7a1df9a04fb034e180"
+}

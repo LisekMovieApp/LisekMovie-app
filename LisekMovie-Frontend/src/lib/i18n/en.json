@@ -93,7 +93,8 @@
 		"seasons_title": "Seasons",
 		"season_label": "Season {number}",
 		"episode_label": "Episode {number}",
-		"episode_label_range": "Episode {number}–{end}"
+		"episode_label_range": "Episode {number}–{end}",
+		"age_rating_hint": "Age rating"
 	},
 	"library": {
 		"load_failed": "Couldn't load this library. Please try again.",
@@ -230,7 +231,11 @@
 		"fallback_migrated_backdrop_only": "Only the backdrop could be moved; the poster is still cached locally.",
 		"fallback_migrate_nothing": "Nothing could be moved — check that the media folder is writable.",
 		"tab_users": "Users",
-		"episode_code": "S{season}E{episode}"
+		"episode_code": "S{season}E{episode}",
+		"editor_age_rating": "Age rating (parental controls)",
+		"editor_age_from_provider": "From the provider: {label}",
+		"editor_age_unrated": "From the provider: unrated",
+		"editor_age_rating_hint": "Minimum viewer age. Your own value is kept on rescans; use it for home videos and titles without a rating."
 	},
 	"errors": {
 		"database_connection_failed": "Couldn't connect to the database. Check the connection details and try again.",
@@ -616,5 +621,85 @@
 	"languages": {
 		"pl": "Polski",
 		"en": "English"
+	},
+	"collections": {
+		"card_label": "{name} — collection ({count} films)",
+		"badge": "Collection · {count}",
+		"group_toggle": "Group collections",
+		"group_letter_hint": "A letter filter lists single films",
+		"row_title": "Collections — {name}",
+		"not_found": "This collection doesn't exist or has no films you can watch.",
+		"load_failed": "Couldn't load this collection.",
+		"kicker": "Collection",
+		"film_count": "Films: {count}",
+		"play_from_start": "Play from the start",
+		"films_title": "Films in this collection",
+		"from_collection": "From the collection: {name}",
+		"see_collection": "See the collection"
+	},
+	"restrictions": {
+		"title": "Access control",
+		"hint": "Limit what this account can browse and play: only some libraries (e.g. kids' cartoons) and an age limit based on TMDB certifications. Changes apply on the account's next request.",
+		"admin_note": "Administrators always see everything — restrictions don't apply to them.",
+		"presets": "Quick profiles",
+		"preset_child": "Child (up to 7, hide unrated)",
+		"preset_teen": "Teenager (up to 13)",
+		"preset_none": "No limits",
+		"libraries": "Libraries",
+		"all_libraries": "All libraries",
+		"only_selected": "Only the selected libraries",
+		"nothing_visible": "No library selected: this account will see nothing.",
+		"age_limit": "Age limit",
+		"no_age_limit": "No age limit",
+		"age_all": "Suitable for all ages only",
+		"age_up_to": "Up to {age} years",
+		"age_examples": "Examples: PG → 10, PG-13 → 13, R → 17, FSK 12 → 12, TV-14 → 14, TV-MA → 17.",
+		"block_unrated": "Also hide titles without an age rating",
+		"save": "Save restrictions",
+		"saved": "Restrictions saved.",
+		"restricted_badge": "Restricted account"
+	},
+	"trickplay_admin": {
+		"tab": "Thumbnails",
+		"title": "Seek-bar thumbnails",
+		"hint": "Preview frames for the player's seek bar are made in the background, one file at a time, and wait while someone is transcoding. This page refreshes by itself.",
+		"load_failed": "Couldn't load the thumbnail status.",
+		"refresh_failed": "The last refresh failed; showing older numbers.",
+		"done_of": "{done} of {total} videos processed",
+		"eta": "Remaining",
+		"eta_soon": "under a minute",
+		"eta_minutes": "about {minutes} min",
+		"eta_hours": "about {hours} h {minutes} min",
+		"ready": "Ready",
+		"pending": "Waiting",
+		"failed": "Failed",
+		"now": "Generating now",
+		"pace": "Recent pace: about {seconds} s per video.",
+		"libraries": "Libraries",
+		"no_videos": "no videos",
+		"library_counts": "{done} / {total} · {percent}%",
+		"failures": "Failed files",
+		"failures_hint": "A failed file is retried by itself once it changes. Retry now after fixing the cause.",
+		"unknown_error": "unknown error",
+		"retry": "Retry",
+		"state_working": "Generating",
+		"state_paused": "Paused for playback",
+		"state_idle": "Waiting for the next round",
+		"state_done": "All done",
+		"state_disabled": "Turned off",
+		"state_no_ffmpeg": "FFmpeg missing",
+		"explain_paused": "Someone is transcoding right now; generation continues when they finish.",
+		"explain_idle": "The next file starts shortly (after a scan, or within 15 minutes).",
+		"explain_done": "Every video has thumbnails. New files get them after the next scan.",
+		"explain_disabled": "Generation is turned off on the server (LISEK_TRICKPLAY=0). Existing thumbnails are still shown.",
+		"explain_no_ffmpeg": "FFmpeg could not be started. Check the “Playback limits” tab.",
+		"explain_working": "Generating."
+	},
+	"pwa": {
+		"install": "Install app",
+		"install_ios": "Add to Home Screen",
+		"install_ios_hint": "In Safari, tap Share, then \"Add to Home Screen\".",
+		"offline_title": "You're offline",
+		"offline_hint": "LisekMovie needs a connection to your server. Check the network and try again."
 	}
 }

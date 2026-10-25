@@ -36,7 +36,8 @@ use std::sync::Arc;
 
 use lisek_db::{EnrichTarget, PgPool};
 use lisek_metadata::image_cache::{
-    backdrop_cache_path, fetch_image, logo_cache_path, poster_cache_path, store_image,
+    backdrop_cache_path, download_image, fetch_image, logo_cache_path, poster_cache_path,
+    store_image,
 };
 use lisek_plugin_api::{MovieQuery, ProviderMatch, SeriesQuery};
 use uuid::Uuid;
@@ -163,6 +164,9 @@ pub struct EnrichCache {
     /// Media-folder files written this pass. Episodes in one season folder
     /// share `poster.jpg`; it is written once.
     written: HashSet<PathBuf>,
+    /// Collections whose artwork was checked this pass (every film of a
+    /// collection names the same images).
+    collections_done: HashSet<Uuid>,
 }
 
 impl EnrichCache {
@@ -290,6 +294,10 @@ pub async fn enrich_item_cached(
     {
         tracing::warn!(%item_id, provider_key, %err, "failed to save provider metadata");
     }
+    if matches!(target, EnrichTarget::Movie { .. }) {
+        sync_collection(cache, pool, http, config_dir, item_id, &provider_key, &matched.fields)
+            .await;
+    }
 
     let mut used_fallback = false;
     let mut image_saved = false;
@@ -335,6 +343,156 @@ pub async fn enrich_item_cached(
     }
 }
 
+/// Where a collection's own artwork is kept:
+/// `config/metadata/collections/<id>/<file_name>`.
+pub fn collection_image_path(config_dir: &Path, collection_id: Uuid, file_name: &str) -> PathBuf {
+    config_dir
+        .join("metadata")
+        .join("collections")
+        .join(collection_id.to_string())
+        .join(file_name)
+}
+
+/// The collection a provider match names, as `fields.collection`:
+/// `{"id": "10", "name": "...", "poster_url": ..., "backdrop_url": ...}`.
+#[derive(Debug, PartialEq, Eq)]
+enum CollectionField<'a> {
+    /// No `collection` key: the provider could not tell (a failed lookup)
+    /// — keep the film's current links.
+    Unknown,
+    /// `null`: the film belongs to no collection.
+    None,
+    Some {
+        id: String,
+        name: &'a str,
+        poster_url: Option<&'a str>,
+        backdrop_url: Option<&'a str>,
+    },
+}
+
+fn collection_field(fields: &serde_json::Value) -> CollectionField<'_> {
+    let Some(value) = fields.get("collection") else {
+        return CollectionField::Unknown;
+    };
+    if value.is_null() {
+        return CollectionField::None;
+    }
+    let id = match value.get("id") {
+        Some(serde_json::Value::String(id)) if !id.is_empty() => id.clone(),
+        Some(serde_json::Value::Number(id)) => id.to_string(),
+        _ => return CollectionField::Unknown,
+    };
+    let Some(name) = value.get("name").and_then(|n| n.as_str()).filter(|n| !n.trim().is_empty())
+    else {
+        return CollectionField::Unknown;
+    };
+    let url = |key: &str| value.get(key).and_then(|u| u.as_str()).filter(|u| !u.is_empty());
+    CollectionField::Some {
+        id,
+        name: name.trim(),
+        poster_url: url("poster_url"),
+        backdrop_url: url("backdrop_url"),
+    }
+}
+
+/// Links a film to the collection its provider names (creating the
+/// collection on first sight) and keeps the collection's artwork current.
+/// Failures are logged; the film's own metadata is already saved.
+async fn sync_collection(
+    cache: &mut EnrichCache,
+    pool: &PgPool,
+    http: &reqwest::Client,
+    config_dir: &Path,
+    item_id: Uuid,
+    provider_key: &str,
+    fields: &serde_json::Value,
+) {
+    let (provider_id, name, poster_url, backdrop_url) = match collection_field(fields) {
+        CollectionField::Unknown => return,
+        CollectionField::None => {
+            if let Err(err) = lisek_db::collections::unlink_item(pool, item_id, provider_key).await {
+                tracing::warn!(%item_id, %err, "failed to remove a film from its collection");
+            }
+            return;
+        }
+        CollectionField::Some {
+            id,
+            name,
+            poster_url,
+            backdrop_url,
+        } => (id, name, poster_url, backdrop_url),
+    };
+    let stored = match lisek_db::collections::upsert(pool, provider_key, &provider_id, name).await {
+        Ok(stored) => stored,
+        Err(err) => {
+            tracing::warn!(%item_id, %err, collection = name, "failed to save collection");
+            return;
+        }
+    };
+    if let Err(err) = lisek_db::collections::link_item(pool, stored.id, item_id).await {
+        tracing::warn!(%item_id, %err, collection = name, "failed to link film to collection");
+    }
+    if !cache.collections_done.insert(stored.id) {
+        return;
+    }
+
+    let mut saved = [stored.poster_url.clone(), stored.backdrop_url.clone()];
+    let wanted = [poster_url, backdrop_url];
+    for (slot, file_name) in ["poster.jpg", "backdrop.jpg"].into_iter().enumerate() {
+        let path = collection_image_path(config_dir, stored.id, file_name);
+        match wanted[slot] {
+            Some(url)
+                if saved[slot].as_deref() == Some(url)
+                    && tokio::fs::try_exists(&path).await.unwrap_or(false) => {}
+            Some(url) => match download_image(http, url, &path).await {
+                Ok(()) => saved[slot] = Some(url.to_owned()),
+                Err(err) => {
+                    tracing::warn!(collection = name, %err, image = file_name, "failed to download collection artwork");
+                }
+            },
+            None => {
+                // The provider dropped the image: the first film's own
+                // artwork stands in from now on.
+                let _ = tokio::fs::remove_file(&path).await;
+                saved[slot] = None;
+            }
+        }
+    }
+    if saved != [stored.poster_url, stored.backdrop_url]
+        && let Err(err) = lisek_db::collections::set_artwork(
+            pool,
+            stored.id,
+            saved[0].as_deref(),
+            saved[1].as_deref(),
+        )
+        .await
+    {
+        tracing::warn!(collection = name, %err, "failed to record collection artwork");
+    }
+}
+
+/// Deletes collections left without films (after a scan or refresh) and
+/// their artwork, plus artwork folders no collection owns.
+pub async fn prune_collections(pool: &PgPool, config_dir: &Path) {
+    if let Err(err) = lisek_db::collections::prune_empty(pool).await {
+        tracing::warn!(%err, "failed to remove empty collections");
+        return;
+    }
+    let Ok(ids) = lisek_db::collections::all_ids(pool).await else {
+        return;
+    };
+    let keep: HashSet<String> = ids.into_iter().map(|id| id.to_string()).collect();
+    let root = config_dir.join("metadata").join("collections");
+    let Ok(mut entries) = tokio::fs::read_dir(&root).await else {
+        return;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if !keep.contains(entry.file_name().to_string_lossy().as_ref()) {
+            let _ = tokio::fs::remove_dir_all(entry.path()).await;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct EnrichOutcome {
     /// A provider (any of them, in priority order) returned a match for
@@ -346,4 +504,55 @@ pub struct EnrichOutcome {
     /// or every image download/write failing; see the per-item
     /// `tracing::warn!` lines this function emits for which one happened.
     pub image_saved: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collection_field_tells_unknown_from_none() {
+        assert_eq!(
+            collection_field(&serde_json::json!({"overview": "x"})),
+            CollectionField::Unknown
+        );
+        assert_eq!(
+            collection_field(&serde_json::json!({"collection": null})),
+            CollectionField::None
+        );
+        assert_eq!(
+            collection_field(&serde_json::json!({"collection": {"id": 10, "name": " Star Wars "}})),
+            CollectionField::Some {
+                id: "10".to_string(),
+                name: "Star Wars",
+                poster_url: None,
+                backdrop_url: None,
+            }
+        );
+        assert_eq!(
+            collection_field(&serde_json::json!({"collection": {"id": "10", "name": ""}})),
+            CollectionField::Unknown,
+            "a nameless collection is ignored, not used to unlink"
+        );
+        assert_eq!(
+            collection_field(&serde_json::json!({
+                "collection": {"id": "10", "name": "SW", "poster_url": "https://x/p.jpg", "backdrop_url": ""}
+            })),
+            CollectionField::Some {
+                id: "10".to_string(),
+                name: "SW",
+                poster_url: Some("https://x/p.jpg"),
+                backdrop_url: None,
+            }
+        );
+    }
+
+    #[test]
+    fn collection_artwork_lives_under_the_config_dir() {
+        let id = Uuid::nil();
+        assert_eq!(
+            collection_image_path(Path::new("/cfg"), id, "poster.jpg"),
+            Path::new("/cfg/metadata/collections/00000000-0000-0000-0000-000000000000/poster.jpg")
+        );
+    }
 }

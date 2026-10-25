@@ -11,6 +11,10 @@
 	import { resolve } from '$app/paths';
 	import { t } from '$lib/i18n';
 	import { buildAuthHeader, clearSessionCookie, getSessionCookieClientSide } from '$lib/auth';
+	import { install, promptInstall } from '$lib/pwa/install.svelte';
+	import Icon from './Icon.svelte';
+
+	let iosHelp = $state(false);
 
 	interface Props {
 		username: string;
@@ -76,6 +80,27 @@
 				{t('auth.logged_in_as', { username })}
 			</p>
 			{#key page.data.user?.id}<BrowserNotifications userId={page.data.user?.id ?? username} />{/key}
+            {#if install.available}
+				<button
+					type="button"
+					onclick={() => promptInstall()}
+					class="mb-2 flex w-full items-center gap-2 rounded border border-gold/60 px-3 py-2 text-left text-sm text-gold hover:bg-gold/10"
+				>
+					<Icon name="download" class="size-4" />
+					{t('pwa.install')}
+				</button>
+			{:else if install.ios}
+				<button
+					type="button"
+					onclick={() => (iosHelp = !iosHelp)}
+					aria-expanded={iosHelp}
+					class="mb-2 flex w-full items-center gap-2 rounded border border-gold/60 px-3 py-2 text-left text-sm text-gold hover:bg-gold/10"
+				>
+					<Icon name="download" class="size-4" />
+					{t('pwa.install_ios')}
+				</button>
+				{#if iosHelp}<p class="-mt-1 mb-2 px-1 text-xs text-neutral-400">{t('pwa.install_ios_hint')}</p>{/if}
+			{/if}
             <a href={resolve('/change-password')} class="mb-2 block rounded border border-neutral-700 px-3 py-2 text-sm">{t('auth.change_password')}</a>
             {#if isAdmin}
 				<a

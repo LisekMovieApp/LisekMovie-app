@@ -24,12 +24,12 @@ use uuid::Uuid;
 
 use lisek_core::MediaItem;
 
-use crate::{DbError, PgPool};
+use crate::{DbError, PgPool, access::Restrictions};
 
 /// One card as the catalog queries return it. Converted into the public
 /// [`MediaItem`] at the edge of this module.
 #[derive(Debug, sqlx::FromRow)]
-struct CatalogRow {
+pub(crate) struct CatalogRow {
     id: Uuid,
     library_id: Uuid,
     item_type: String,
@@ -57,7 +57,7 @@ impl From<CatalogRow> for MediaItem {
     }
 }
 
-fn into_items(rows: Vec<CatalogRow>) -> Vec<MediaItem> {
+pub(crate) fn into_items(rows: Vec<CatalogRow>) -> Vec<MediaItem> {
     rows.into_iter().map(MediaItem::from).collect()
 }
 
@@ -67,7 +67,11 @@ fn into_items(rows: Vec<CatalogRow>) -> Vec<MediaItem> {
 /// scan recency once nothing is enriched yet (e.g. right after a library's
 /// very first scan, before any provider is configured) rather than leaving
 /// the banner empty. A show can feature here exactly like a movie can.
-pub async fn get_hero_item(pool: &PgPool) -> Result<Option<MediaItem>, DbError> {
+pub async fn get_hero_item(
+    pool: &PgPool,
+    access: &Restrictions,
+) -> Result<Option<MediaItem>, DbError> {
+    let (libraries, max_age, block_unrated) = access.binds();
     let row = sqlx::query_as!(
         CatalogRow,
         r#"
@@ -79,6 +83,7 @@ pub async fn get_hero_item(pool: &PgPool) -> Result<Option<MediaItem>, DbError> 
                     NULL::int AS season, NULL::int AS episode, m.created_at
              FROM media_items m
              WHERE m.item_type = 'movie' AND m.overview IS NOT NULL
+               AND lisek_visible(m.library_id, m.age_rating, $1, $2, $3)
              ORDER BY m.created_at DESC, m.id DESC
              LIMIT 1)
             UNION ALL
@@ -86,14 +91,14 @@ pub async fn get_hero_item(pool: &PgPool) -> Result<Option<MediaItem>, DbError> 
                     NULL::int, NULL::int, s.last_episode_added_at
              FROM series s
              JOIN media_items r ON r.id = s.representative_item_id
-             WHERE r.overview IS NOT NULL
+             WHERE r.overview IS NOT NULL AND lisek_visible(s.library_id, r.age_rating, $1, $2, $3)
              ORDER BY s.last_episode_added_at DESC, s.representative_item_id DESC
              LIMIT 1)
             UNION ALL
             (SELECT m.id, m.library_id, m.item_type, m.title, m.year, m.overview,
                     NULL::int, NULL::int, m.created_at
              FROM media_items m
-             WHERE m.item_type = 'movie'
+             WHERE m.item_type = 'movie' AND lisek_visible(m.library_id, m.age_rating, $1, $2, $3)
              ORDER BY m.created_at DESC, m.id DESC
              LIMIT 1)
             UNION ALL
@@ -101,12 +106,16 @@ pub async fn get_hero_item(pool: &PgPool) -> Result<Option<MediaItem>, DbError> 
                     NULL::int, NULL::int, s.last_episode_added_at
              FROM series s
              JOIN media_items r ON r.id = s.representative_item_id
+             WHERE lisek_visible(s.library_id, r.age_rating, $1, $2, $3)
              ORDER BY s.last_episode_added_at DESC, s.representative_item_id DESC
              LIMIT 1)
         ) c
         ORDER BY (c.overview IS NOT NULL) DESC, c.created_at DESC, c.id DESC
         LIMIT 1
-        "#
+        "#,
+        libraries,
+        max_age,
+        block_unrated
     )
     .fetch_optional(pool)
     .await?;
@@ -123,7 +132,9 @@ pub async fn list_recently_added(
     pool: &PgPool,
     library_id: Option<Uuid>,
     limit: i64,
+    access: &Restrictions,
 ) -> Result<Vec<MediaItem>, DbError> {
+    let (libraries, max_age, block_unrated) = access.binds();
     let rows = match library_id {
         None => {
             sqlx::query_as!(
@@ -136,7 +147,7 @@ pub async fn list_recently_added(
                     (SELECT m.id, m.library_id, m.item_type, m.title, m.year, m.overview,
                             NULL::int AS season, NULL::int AS episode, m.created_at
                      FROM media_items m
-                     WHERE m.item_type = 'movie'
+                     WHERE m.item_type = 'movie' AND lisek_visible(m.library_id, m.age_rating, $2, $3, $4)
                      ORDER BY m.created_at DESC, m.id DESC
                      LIMIT $1)
                     UNION ALL
@@ -144,13 +155,17 @@ pub async fn list_recently_added(
                             r.overview, NULL::int, NULL::int, s.last_episode_added_at
                      FROM series s
                      JOIN media_items r ON r.id = s.representative_item_id
+                     WHERE lisek_visible(s.library_id, r.age_rating, $2, $3, $4)
                      ORDER BY s.last_episode_added_at DESC, s.representative_item_id DESC
                      LIMIT $1)
                 ) c
                 ORDER BY c.created_at DESC, c.id DESC
                 LIMIT $1
                 "#,
-                limit
+                limit,
+                libraries,
+                max_age,
+                block_unrated
             )
             .fetch_all(pool)
             .await?
@@ -167,6 +182,7 @@ pub async fn list_recently_added(
                             NULL::int AS season, NULL::int AS episode, m.created_at
                      FROM media_items m
                      WHERE m.item_type = 'movie' AND m.library_id = $2
+                       AND lisek_visible(m.library_id, m.age_rating, $3, $4, $5)
                      ORDER BY m.created_at DESC, m.id DESC
                      LIMIT $1)
                     UNION ALL
@@ -174,7 +190,7 @@ pub async fn list_recently_added(
                             r.overview, NULL::int, NULL::int, s.last_episode_added_at
                      FROM series s
                      JOIN media_items r ON r.id = s.representative_item_id
-                     WHERE s.library_id = $2
+                     WHERE s.library_id = $2 AND lisek_visible(s.library_id, r.age_rating, $3, $4, $5)
                      ORDER BY s.last_episode_added_at DESC, s.representative_item_id DESC
                      LIMIT $1)
                 ) c
@@ -182,7 +198,10 @@ pub async fn list_recently_added(
                 LIMIT $1
                 "#,
                 limit,
-                library_id
+                library_id,
+                libraries,
+                max_age,
+                block_unrated
             )
             .fetch_all(pool)
             .await?
@@ -197,7 +216,12 @@ pub async fn list_recently_added(
 /// orders by release year (then scan recency), which reads honestly as
 /// "the newest releases in your library". A series has no year, so shows
 /// sort after every dated movie.
-pub async fn list_top_today(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>, DbError> {
+pub async fn list_top_today(
+    pool: &PgPool,
+    limit: i64,
+    access: &Restrictions,
+) -> Result<Vec<MediaItem>, DbError> {
+    let (libraries, max_age, block_unrated) = access.binds();
     let rows = sqlx::query_as!(
         CatalogRow,
         r#"
@@ -208,7 +232,7 @@ pub async fn list_top_today(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>,
             (SELECT m.id, m.library_id, m.item_type, m.title, m.year, m.overview,
                     NULL::int AS season, NULL::int AS episode, m.created_at
              FROM media_items m
-             WHERE m.item_type = 'movie'
+             WHERE m.item_type = 'movie' AND lisek_visible(m.library_id, m.age_rating, $2, $3, $4)
              ORDER BY m.year DESC NULLS LAST, m.created_at DESC, m.id DESC
              LIMIT $1)
             UNION ALL
@@ -216,13 +240,17 @@ pub async fn list_top_today(pool: &PgPool, limit: i64) -> Result<Vec<MediaItem>,
                     r.overview, NULL::int, NULL::int, s.last_episode_added_at
              FROM series s
              JOIN media_items r ON r.id = s.representative_item_id
+             WHERE lisek_visible(s.library_id, r.age_rating, $2, $3, $4)
              ORDER BY s.last_episode_added_at DESC, s.representative_item_id DESC
              LIMIT $1)
         ) c
         ORDER BY c.year DESC NULLS LAST, c.created_at DESC, c.id DESC
         LIMIT $1
         "#,
-        limit
+        limit,
+        libraries,
+        max_age,
+        block_unrated
     )
     .fetch_all(pool)
     .await?;
@@ -236,8 +264,9 @@ pub async fn list_recommended(
     pool: &PgPool,
     library_id: Option<Uuid>,
     limit: i64,
+    access: &Restrictions,
 ) -> Result<Vec<MediaItem>, DbError> {
-    random_sample(pool, library_id, limit).await
+    random_sample(pool, library_id, limit, access).await
 }
 
 /// "Popular Now" — same caveat as [`list_recommended`]: no view-count
@@ -246,8 +275,9 @@ pub async fn list_popular(
     pool: &PgPool,
     library_id: Option<Uuid>,
     limit: i64,
+    access: &Restrictions,
 ) -> Result<Vec<MediaItem>, DbError> {
-    random_sample(pool, library_id, limit).await
+    random_sample(pool, library_id, limit, access).await
 }
 
 /// Uniform random sample without `ORDER BY random()` over the whole table.
@@ -263,7 +293,9 @@ async fn random_sample(
     pool: &PgPool,
     library_id: Option<Uuid>,
     limit: i64,
+    access: &Restrictions,
 ) -> Result<Vec<MediaItem>, DbError> {
+    let (libraries, max_age, block_unrated) = access.binds();
     let rows = match library_id {
         None => {
             sqlx::query_as!(
@@ -275,25 +307,27 @@ async fn random_sample(
                             m.created_at, m.shuffle_key AS k
                      FROM media_items m
                      WHERE m.item_type = 'movie' AND m.shuffle_key >= (SELECT v FROM seed)
+                       AND lisek_visible(m.library_id, m.age_rating, $2, $3, $4)
                      ORDER BY m.shuffle_key LIMIT $1)
                     UNION ALL
                     (SELECT m.id, m.library_id, m.item_type, m.title, m.year, m.overview,
                             m.created_at, m.shuffle_key
                      FROM media_items m
-                     WHERE m.item_type = 'movie'
+                     WHERE m.item_type = 'movie' AND lisek_visible(m.library_id, m.age_rating, $2, $3, $4)
                      ORDER BY m.shuffle_key LIMIT $1)
                     UNION ALL
                     (SELECT s.representative_item_id, s.library_id, 'series', s.title, NULL::int,
                             r.overview, s.last_episode_added_at, s.shuffle_key
                      FROM series s
                      JOIN media_items r ON r.id = s.representative_item_id
-                     WHERE s.shuffle_key >= (SELECT v FROM seed)
+                     WHERE s.shuffle_key >= (SELECT v FROM seed) AND lisek_visible(s.library_id, r.age_rating, $2, $3, $4)
                      ORDER BY s.shuffle_key LIMIT $1)
                     UNION ALL
                     (SELECT s.representative_item_id, s.library_id, 'series', s.title, NULL::int,
                             r.overview, s.last_episode_added_at, s.shuffle_key
                      FROM series s
                      JOIN media_items r ON r.id = s.representative_item_id
+                     WHERE lisek_visible(s.library_id, r.age_rating, $2, $3, $4)
                      ORDER BY s.shuffle_key LIMIT $1)
                 ),
                 unique_candidates AS (
@@ -306,7 +340,10 @@ async fn random_sample(
                 ORDER BY (c.k - seed.v + 1.0) - floor(c.k - seed.v + 1.0)
                 LIMIT $1
                 "#,
-                limit
+                limit,
+                libraries,
+                max_age,
+                block_unrated
             )
             .fetch_all(pool)
             .await?
@@ -322,12 +359,14 @@ async fn random_sample(
                      FROM media_items m
                      WHERE m.item_type = 'movie' AND m.library_id = $2
                        AND m.shuffle_key >= (SELECT v FROM seed)
+                       AND lisek_visible(m.library_id, m.age_rating, $3, $4, $5)
                      ORDER BY m.shuffle_key LIMIT $1)
                     UNION ALL
                     (SELECT m.id, m.library_id, m.item_type, m.title, m.year, m.overview,
                             m.created_at, m.shuffle_key
                      FROM media_items m
                      WHERE m.item_type = 'movie' AND m.library_id = $2
+                       AND lisek_visible(m.library_id, m.age_rating, $3, $4, $5)
                      ORDER BY m.shuffle_key LIMIT $1)
                     UNION ALL
                     (SELECT s.representative_item_id, s.library_id, 'series', s.title, NULL::int,
@@ -335,13 +374,14 @@ async fn random_sample(
                      FROM series s
                      JOIN media_items r ON r.id = s.representative_item_id
                      WHERE s.library_id = $2 AND s.shuffle_key >= (SELECT v FROM seed)
+                       AND lisek_visible(s.library_id, r.age_rating, $3, $4, $5)
                      ORDER BY s.shuffle_key LIMIT $1)
                     UNION ALL
                     (SELECT s.representative_item_id, s.library_id, 'series', s.title, NULL::int,
                             r.overview, s.last_episode_added_at, s.shuffle_key
                      FROM series s
                      JOIN media_items r ON r.id = s.representative_item_id
-                     WHERE s.library_id = $2
+                     WHERE s.library_id = $2 AND lisek_visible(s.library_id, r.age_rating, $3, $4, $5)
                      ORDER BY s.shuffle_key LIMIT $1)
                 ),
                 unique_candidates AS (
@@ -355,7 +395,10 @@ async fn random_sample(
                 LIMIT $1
                 "#,
                 limit,
-                library_id
+                library_id,
+                libraries,
+                max_age,
+                block_unrated
             )
             .fetch_all(pool)
             .await?
@@ -370,7 +413,12 @@ async fn random_sample(
 /// card (the same representative id the feed hands out), so an old link to
 /// a single episode lands on the show's page. `None` when no such item
 /// exists.
-pub async fn get_media_item(pool: &PgPool, item_id: Uuid) -> Result<Option<MediaItem>, DbError> {
+pub async fn get_media_item(
+    pool: &PgPool,
+    item_id: Uuid,
+    access: &Restrictions,
+) -> Result<Option<MediaItem>, DbError> {
+    let (libraries, max_age, block_unrated) = access.binds();
     let row = sqlx::query_as!(
         CatalogRow,
         r#"
@@ -382,17 +430,21 @@ pub async fn get_media_item(pool: &PgPool, item_id: Uuid) -> Result<Option<Media
                    m.season_number AS season, m.episode_number AS episode, m.created_at
             FROM media_items m
             WHERE m.id = $1 AND m.item_type <> 'episode'
+              AND lisek_visible(m.library_id, m.age_rating, $2, $3, $4)
             UNION ALL
             SELECT s.representative_item_id, s.library_id, 'series', s.title, NULL::int, r.overview,
                    NULL::int, NULL::int, s.last_episode_added_at
             FROM episodes e
             JOIN series s ON s.id = e.series_id
             JOIN media_items r ON r.id = s.representative_item_id
-            WHERE e.media_item_id = $1
+            WHERE e.media_item_id = $1 AND lisek_visible(s.library_id, r.age_rating, $2, $3, $4)
         ) c
         LIMIT 1
         "#,
-        item_id
+        item_id,
+        libraries,
+        max_age,
+        block_unrated
     )
     .fetch_optional(pool)
     .await?;
@@ -608,60 +660,99 @@ pub struct LibraryFilter<'a> {
     /// Case-insensitive substring of the title, served by the `pg_trgm`
     /// GIN indexes. `%`, `_` and `\` are matched literally.
     pub search: Option<&'a str>,
+    /// Show the films of a collection (two or more visible ones in this
+    /// library) as one `item_type = "collection"` card instead. Ignored
+    /// while a letter or search filter is set: a search lists films.
+    pub group_collections: bool,
+}
+
+impl LibraryFilter<'_> {
+    fn grouping(&self) -> bool {
+        self.group_collections && self.letter.is_none() && self.search.is_none()
+    }
 }
 
 // Library pages combine three sorts with two optional filters — twelve
 // literal variants as `query_as!` macros. Instead the SQL is assembled from
 // the fixed fragments below; only placeholder numbers are formatted in and
 // every value is bound, which is why `AssertSqlSafe` is sound here.
+//
+// Fixed placeholders: `$1` library, `$2..$4` the account's restrictions
+// (see `access::Restrictions::binds`); filter values follow from `$5`.
 const MOVIE_COLUMNS: &str = "SELECT m.id, m.library_id, m.item_type, m.title, m.year, m.overview, \
      NULL::int AS season, NULL::int AS episode, m.created_at \
-     FROM media_items m WHERE m.item_type = 'movie' AND m.library_id = $1";
+     FROM media_items m WHERE m.item_type = 'movie' AND m.library_id = $1 \
+     AND lisek_visible(m.library_id, m.age_rating, $2, $3, $4)";
 const SERIES_COLUMNS: &str = "SELECT s.representative_item_id AS id, s.library_id, \
      'series'::text AS item_type, s.title, NULL::int AS year, r.overview, \
      NULL::int AS season, NULL::int AS episode, s.last_episode_added_at AS created_at \
-     FROM series s JOIN media_items r ON r.id = s.representative_item_id WHERE s.library_id = $1";
+     FROM series s JOIN media_items r ON r.id = s.representative_item_id WHERE s.library_id = $1 \
+     AND lisek_visible(s.library_id, r.age_rating, $2, $3, $4)";
+const FIRST_FILTER_PLACEHOLDER: usize = 5;
 
-/// `(movie branch, series branch, merged)` ORDER BY clauses — the same
-/// keys in all three so the per-branch LIMIT is exact.
-fn order_clauses(sort: LibrarySort) -> (&'static str, &'static str, &'static str) {
+/// With collection grouping: `members` are the visible films of this
+/// library that belong to a collection, `grouped` the collections with at
+/// least two of them (one card each).
+const GROUPED_CTE: &str = "WITH members AS ( \
+       SELECT ci.collection_id, m.id, m.year, m.created_at \
+       FROM collection_items ci JOIN media_items m ON m.id = ci.media_item_id \
+       WHERE m.item_type = 'movie' AND m.library_id = $1 \
+         AND lisek_visible(m.library_id, m.age_rating, $2, $3, $4)), \
+     grouped AS ( \
+       SELECT collection_id, min(year) AS year, max(created_at) AS created_at \
+       FROM members GROUP BY collection_id HAVING count(*) >= 2) ";
+const NOT_GROUPED: &str = " AND NOT EXISTS (SELECT 1 FROM members g \
+     JOIN grouped USING (collection_id) WHERE g.id = m.id)";
+const COLLECTION_COLUMNS: &str = "SELECT k.id, $1::uuid AS library_id, 'collection'::text AS item_type, \
+     k.name AS title, g.year, NULL::text AS overview, NULL::int AS season, NULL::int AS episode, \
+     g.created_at FROM grouped g JOIN collections k ON k.id = g.collection_id";
+
+/// `(movie branch, series branch, collection branch, merged)` ORDER BY
+/// clauses — the same keys everywhere so the per-branch LIMIT is exact.
+fn order_clauses(sort: LibrarySort) -> [&'static str; 4] {
     match sort {
-        LibrarySort::TitleAsc => (
+        LibrarySort::TitleAsc => [
             "m.title ASC, m.id ASC",
             "s.title ASC, s.representative_item_id ASC",
+            "k.name ASC, k.id ASC",
             "c.title ASC, c.id ASC",
-        ),
-        LibrarySort::TitleDesc => (
+        ],
+        LibrarySort::TitleDesc => [
             "m.title DESC, m.id DESC",
             "s.title DESC, s.representative_item_id DESC",
+            "k.name DESC, k.id DESC",
             "c.title DESC, c.id DESC",
-        ),
-        LibrarySort::RecentlyAdded => (
+        ],
+        LibrarySort::RecentlyAdded => [
             "m.created_at DESC, m.id DESC",
             "s.last_episode_added_at DESC, s.representative_item_id DESC",
+            "g.created_at DESC, k.id DESC",
             "c.created_at DESC, c.id DESC",
-        ),
+        ],
     }
 }
 
 /// Appends the filter conditions to both branches. Returns the extra SQL
 /// for each branch plus the values to bind, in placeholder order starting
-/// at `$2`.
+/// at [`FIRST_FILTER_PLACEHOLDER`].
 fn filter_clauses(filter: &LibraryFilter<'_>) -> (String, String, Vec<String>) {
     let mut movie = String::new();
     let mut series = String::new();
     let mut binds = Vec::new();
     if let Some(letter) = filter.letter {
         binds.push(letter.to_ascii_uppercase().to_string());
-        let n = binds.len() + 1;
+        let n = binds.len() + FIRST_FILTER_PLACEHOLDER - 1;
         movie.push_str(&format!(" AND m.title_initial = ${n}"));
         series.push_str(&format!(" AND s.title_initial = ${n}"));
     }
     if let Some(search) = filter.search {
         binds.push(format!("%{}%", escape_like(search)));
-        let n = binds.len() + 1;
+        let n = binds.len() + FIRST_FILTER_PLACEHOLDER - 1;
         movie.push_str(&format!(" AND m.title ILIKE ${n}"));
         series.push_str(&format!(" AND s.title ILIKE ${n}"));
+    }
+    if filter.grouping() {
+        movie.push_str(NOT_GROUPED);
     }
     (movie, series, binds)
 }
@@ -677,9 +768,10 @@ fn escape_like(value: &str) -> String {
     out
 }
 
-/// One page of a library's movies and series. Each branch fetches
-/// `offset + limit` rows from its index, then the merged list is cut to
-/// the page — deep pages cost more, the first pages stay constant.
+/// One page of a library's movies and series (and, with
+/// `group_collections`, collections). Each branch fetches `offset + limit`
+/// rows from its index, then the merged list is cut to the page — deep
+/// pages cost more, the first pages stay constant.
 pub async fn list_items_by_library_page(
     pool: &PgPool,
     library_id: Uuid,
@@ -687,22 +779,39 @@ pub async fn list_items_by_library_page(
     filter: LibraryFilter<'_>,
     limit: i64,
     offset: i64,
+    access: &Restrictions,
 ) -> Result<Vec<MediaItem>, DbError> {
-    let (movie_order, series_order, merged_order) = order_clauses(sort);
+    let [movie_order, series_order, collection_order, merged_order] = order_clauses(sort);
     let (movie_filter, series_filter, binds) = filter_clauses(&filter);
-    let window = binds.len() + 2;
+    let window = binds.len() + FIRST_FILTER_PLACEHOLDER;
     let page_limit = window + 1;
     let page_offset = window + 2;
+    let (cte, collection_branch) = if filter.grouping() {
+        (
+            GROUPED_CTE,
+            format!(
+                " UNION ALL ({COLLECTION_COLUMNS} ORDER BY {collection_order} LIMIT ${window})"
+            ),
+        )
+    } else {
+        ("", String::new())
+    };
     let sql = format!(
-        "SELECT c.id, c.library_id, c.item_type, c.title, c.year, c.overview, c.season, c.episode, \
-                c.created_at \
+        "{cte}SELECT c.id, c.library_id, c.item_type, c.title, c.year, c.overview, c.season, \
+                c.episode, c.created_at \
          FROM (({MOVIE_COLUMNS}{movie_filter} ORDER BY {movie_order} LIMIT ${window}) \
                UNION ALL \
-               ({SERIES_COLUMNS}{series_filter} ORDER BY {series_order} LIMIT ${window})) c \
+               ({SERIES_COLUMNS}{series_filter} ORDER BY {series_order} LIMIT ${window})\
+               {collection_branch}) c \
          ORDER BY {merged_order} LIMIT ${page_limit} OFFSET ${page_offset}"
     );
 
-    let mut query = sqlx::query_as::<_, CatalogRow>(AssertSqlSafe(sql)).bind(library_id);
+    let (libraries, max_age, block_unrated) = access.binds();
+    let mut query = sqlx::query_as::<_, CatalogRow>(AssertSqlSafe(sql))
+        .bind(library_id)
+        .bind(libraries)
+        .bind(max_age)
+        .bind(block_unrated);
     for value in binds {
         query = query.bind(value);
     }
@@ -717,19 +826,34 @@ pub async fn list_items_by_library_page(
 }
 
 /// Total number of cards [`list_items_by_library_page`] pages through for
-/// the same library and filter — a series counts once.
+/// the same library and filter — a series and a grouped collection count
+/// once.
 pub async fn count_items_by_library(
     pool: &PgPool,
     library_id: Uuid,
     filter: LibraryFilter<'_>,
+    access: &Restrictions,
 ) -> Result<i64, DbError> {
     let (movie_filter, series_filter, binds) = filter_clauses(&filter);
+    let (cte, collections) = if filter.grouping() {
+        (GROUPED_CTE, " + (SELECT count(*) FROM grouped)")
+    } else {
+        ("", "")
+    };
     let sql = format!(
-        "SELECT (SELECT count(*) FROM media_items m \
-                 WHERE m.item_type = 'movie' AND m.library_id = $1{movie_filter}) \
-              + (SELECT count(*) FROM series s WHERE s.library_id = $1{series_filter})"
+        "{cte}SELECT (SELECT count(*) FROM media_items m \
+                 WHERE m.item_type = 'movie' AND m.library_id = $1 \
+                 AND lisek_visible(m.library_id, m.age_rating, $2, $3, $4){movie_filter}) \
+              + (SELECT count(*) FROM series s JOIN media_items r ON r.id = s.representative_item_id \
+                 WHERE s.library_id = $1 \
+                 AND lisek_visible(s.library_id, r.age_rating, $2, $3, $4){series_filter}){collections}"
     );
-    let mut query = sqlx::query_scalar::<_, i64>(AssertSqlSafe(sql)).bind(library_id);
+    let (libraries, max_age, block_unrated) = access.binds();
+    let mut query = sqlx::query_scalar::<_, i64>(AssertSqlSafe(sql))
+        .bind(library_id)
+        .bind(libraries)
+        .bind(max_age)
+        .bind(block_unrated);
     for value in binds {
         query = query.bind(value);
     }
@@ -741,15 +865,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn filters_number_their_placeholders_after_the_library_id() {
+    fn filters_number_their_placeholders_after_the_library_and_restrictions() {
         let (movie, series, binds) = filter_clauses(&LibraryFilter {
             letter: Some('m'),
             search: Some("50%_off\\"),
+            group_collections: true,
         });
-        assert_eq!(movie, " AND m.title_initial = $2 AND m.title ILIKE $3");
-        assert_eq!(series, " AND s.title_initial = $2 AND s.title ILIKE $3");
+        assert_eq!(movie, " AND m.title_initial = $5 AND m.title ILIKE $6");
+        assert_eq!(series, " AND s.title_initial = $5 AND s.title ILIKE $6");
         assert_eq!(binds, vec!["M".to_string(), "%50\\%\\_off\\\\%".to_string()]);
         assert_eq!(filter_clauses(&LibraryFilter::default()).2.len(), 0);
+    }
+
+    #[test]
+    fn collection_grouping_applies_only_without_a_filter() {
+        let grouped = LibraryFilter {
+            group_collections: true,
+            ..LibraryFilter::default()
+        };
+        assert!(grouped.grouping());
+        assert_eq!(filter_clauses(&grouped).0, NOT_GROUPED);
+        let searching = LibraryFilter {
+            search: Some("star"),
+            ..grouped
+        };
+        assert!(!searching.grouping());
+        assert!(!filter_clauses(&searching).0.contains("NOT EXISTS"));
     }
 
     // `classify_badge_from_flags` is the pure decision logic behind

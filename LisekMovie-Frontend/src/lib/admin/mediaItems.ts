@@ -39,6 +39,11 @@ export interface MediaItemDetail {
 	metadata_locked: boolean;
 	forced_provider: string | null;
 	locked_fields: string[];
+	/** Faza 6: the administrator's own age rating (parental controls);
+	 * `null` = the provider's rating applies. */
+	age_rating?: number | null;
+	provider_age_rating?: number | null;
+	certification?: string | null;
 }
 
 /** The metadata editor's save payload — see
@@ -53,6 +58,8 @@ export interface UpdateMediaItemPayload {
 	metadata_locked: boolean;
 	forced_provider: string | null;
 	locked_fields: string[];
+	/** Faza 6: `null` removes the administrator's own age rating. */
+	age_rating?: number | null;
 }
 
 /** One item currently flagged `metadata_fallback` — the fallback warning

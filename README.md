@@ -77,7 +77,22 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 
 Open `http://<host>:8096`: the wizard only asks for the administrator account (the database comes from the compose file). Add libraries under `/media/...` (`MEDIA_DIR` is mounted there read-only). The `lisekmovie-data` volume holds settings, posters, trickplay thumbnails, transcodes and a generated `LISEK_SECRET_KEY` — back it up together with `lisekmovie-postgres-data`.
 
-The server image installs [jellyfin-ffmpeg](https://github.com/jellyfin/jellyfin-ffmpeg) (`LISEK_FFMPEG_FLAVOR=debian` uses the distribution's FFmpeg instead). Seek-bar previews are generated in the background after each scan; `LISEK_TRICKPLAY=0` turns that off.
+The server image installs [jellyfin-ffmpeg](https://github.com/jellyfin/jellyfin-ffmpeg) (`LISEK_FFMPEG_FLAVOR=debian` uses the distribution's FFmpeg instead). Seek-bar previews are generated in the background after each scan; `LISEK_TRICKPLAY=0` turns that off. Admin → Thumbnails shows their progress.
+
+## Collections and parental controls
+
+With TMDB as the metadata provider, films of one series (TMDB's "collections", e.g. Star Wars) are linked after a scan and the six-hourly metadata refresh. Library pages show a collections row and can fold each collection into one card ("Group collections"). TMDB certifications become an age rating (PG-13 → 13, FSK 12 → 12, TV-MA → 17); the metadata editor can set one by hand, e.g. for home videos.
+
+Admin → Users → an account → "Access control" limits it to chosen libraries and an age limit, optionally hiding unrated titles. Administrators are never restricted.
+
+## Installing on a phone (PWA)
+
+LisekMovie can be added to the home screen and opens full screen, without the browser bar:
+
+- **iPhone/iPad (Safari):** Share → "Add to Home Screen". Works over plain HTTP too.
+- **Android (Chrome):** account menu → "Install app", or the browser's install prompt. Chrome offers installation only over **HTTPS** (put a reverse proxy with a certificate, e.g. Caddy, in front of port 8096 and set `LISEK_TRUST_PROXY=1`).
+
+The service worker caches only the app itself (scripts, styles, icons) and shows an offline page without a connection; `/api` requests, video streams and pages with account data always come from the server.
 
 ## License
 

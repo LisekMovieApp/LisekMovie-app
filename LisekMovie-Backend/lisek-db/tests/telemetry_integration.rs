@@ -161,7 +161,7 @@ async fn progress_reports_store_resume_viewing_time_and_quality() {
         (recent.len(), recent[0].username.as_str(), recent[0].active),
         (1, "viewer", false)
     );
-    let list = playback::my_list(pool, user).await.unwrap();
+    let list = playback::my_list(pool, user, &lisek_db::access::Restrictions::NONE).await.unwrap();
     assert_eq!(
         (list[0].season, list[0].episode, list[0].watched),
         (None, None, true)

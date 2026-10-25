@@ -1314,7 +1314,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "How far thumbnail generation has got.",
+        "summary": "How far thumbnail generation has got: totals, per library, the item in\nprogress and recent failures. The admin page polls it.",
         "operationId": "status",
         "responses": {
           "200": {
@@ -1334,6 +1334,35 @@
             "description": ""
           },
           "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/user-restrictions": {
+      "get": {
+        "summary": "Accounts that browse with restrictions (the user list marks them).",
+        "operationId": "list_restrictions",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RestrictedUser"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
             "description": ""
           }
         },
@@ -1497,6 +1526,96 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TemporaryPassword"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/users/{id}/restrictions": {
+      "get": {
+        "operationId": "get_restrictions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRestrictionsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "put": {
+        "summary": "Replaces an account's restrictions. `libraries: null` allows every\nlibrary, `max_age_rating: null` removes the age limit; both null clears\nthe restrictions. Takes effect on the account's next request.",
+        "operationId": "set_restrictions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Restrictions"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRestrictionsResponse"
                 }
               }
             }
@@ -1810,6 +1929,130 @@
         ]
       }
     },
+    "/api/collections/{collection_id}": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "operationId": "get_collection",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/collections/{collection_id}/backdrop": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "operationId": "collection_backdrop",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Image bytes"
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/collections/{collection_id}/poster": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "operationId": "collection_poster",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Image bytes"
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/games": {
       "get": {
         "operationId": "list",
@@ -2028,6 +2271,55 @@
         ]
       }
     },
+    "/api/libraries/{library_id}/collections": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Collections with two or more films in this library, by name — the\n\"Kolekcje\" row of a library page.",
+        "operationId": "library_collections",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryRowResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/libraries/{library_id}/items": {
       "get": {
         "tags": [
@@ -2086,6 +2378,14 @@
             "schema": {
               "type": "integer",
               "format": "int64"
+            }
+          },
+          {
+            "name": "group_collections",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -2398,6 +2698,58 @@
             "description": ""
           },
           "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/media/{item_id}/collection": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "The collection a film belongs to, with its other films (the detail\npage's \"Z kolekcji\" row). 204 when it belongs to none.",
+        "operationId": "item_collection",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionResponse"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Not part of a collection"
+          },
+          "401": {
             "description": ""
           },
           "404": {
@@ -3495,6 +3847,58 @@
           "unknown"
         ]
       },
+      "CollectionResponse": {
+        "type": "object",
+        "description": "One collection with its films in release order.",
+        "required": [
+          "id",
+          "name",
+          "item_count",
+          "poster_url",
+          "backdrop_url",
+          "items"
+        ],
+        "properties": {
+          "backdrop_url": {
+            "type": "string"
+          },
+          "first_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "item_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Films the account can see."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaItemResponse"
+            }
+          },
+          "last_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "name": {
+            "type": "string"
+          },
+          "poster_url": {
+            "type": "string"
+          }
+        }
+      },
       "CreateLibraryRequest": {
         "type": "object",
         "required": [
@@ -3558,6 +3962,41 @@
           },
           "user": {
             "$ref": "#/components/schemas/User"
+          }
+        }
+      },
+      "CurrentJob": {
+        "type": "object",
+        "required": [
+          "item_id",
+          "title",
+          "started_at"
+        ],
+        "properties": {
+          "episode": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "item_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "season": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "title": {
+            "type": "string"
           }
         }
       },
@@ -4018,6 +4457,38 @@
           }
         }
       },
+      "LibraryTrickplayStats": {
+        "type": "object",
+        "description": "Progress of one library.",
+        "required": [
+          "library_id",
+          "name",
+          "total",
+          "ready",
+          "failed"
+        ],
+        "properties": {
+          "failed": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "library_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ready": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "LoginRequest": {
         "type": "object",
         "required": [
@@ -4166,6 +4637,14 @@
           "logo_url"
         ],
         "properties": {
+          "age_rating": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Detail view only: minimum viewer age (parental controls) and the\ncertification it comes from, e.g. 13 and \"PG-13\". A rating set by\nan administrator has no certification."
+          },
           "backdrop_url": {
             "type": "string"
           },
@@ -4175,6 +4654,12 @@
               "null"
             ],
             "description": "`\"new_series\"` / `\"new_season\"` / `\"new_episodes\"` for a `\"series\"`\nrow (see `lisek_db::classify_series_badge`'s doc comment), or\n`\"new_movie\"` for a `\"movie\"` row added within\n`lisek_db::RECENT_BADGE_DAYS` (Runda 9 — see [`is_recently_added`]),\nor `None`. Only ever set by [`to_response`], for whichever row it's\ngiven; the plain [`From`] impl below always leaves it `None`, which\nis what [`media_item_detail`] (the single-item Detail View endpoint)\nreturns as-is — the badge is a browse-card affordance (home feed,\nand as of Runda 9 the `/library/[id]` grid too — both go through\n[`to_response`]/[`to_responses`]), not something the Detail View\nitself was ever asked to show."
+          },
+          "certification": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "episode": {
             "type": [
@@ -4186,6 +4671,14 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "item_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "`\"collection\"` cards only: how many of its films this card stands\nfor."
           },
           "item_type": {
             "type": "string"
@@ -4795,6 +5288,53 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "RestrictedUser": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Restrictions"
+          },
+          {
+            "type": "object",
+            "required": [
+              "user_id"
+            ],
+            "properties": {
+              "user_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        ]
+      },
+      "Restrictions": {
+        "type": "object",
+        "properties": {
+          "block_unrated": {
+            "type": "boolean",
+            "description": "With an age limit, also hide items that have no rating at all."
+          },
+          "libraries": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "`None`: every library. `Some`: only these (an empty list hides the\nwhole catalog)."
+          },
+          "max_age_rating": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Items rated above this minimum age are hidden. `None`: no limit."
           }
         }
       },
@@ -5427,6 +5967,56 @@
           "remux_disabled"
         ]
       },
+      "TrickplayFailure": {
+        "type": "object",
+        "description": "A failed item for the admin list.",
+        "required": [
+          "item_id",
+          "item_type",
+          "title",
+          "library_name",
+          "failed_at"
+        ],
+        "properties": {
+          "episode": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "failed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "item_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "item_type": {
+            "type": "string"
+          },
+          "library_name": {
+            "type": "string"
+          },
+          "season": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
       "TrickplayManifest": {
         "type": "object",
         "description": "What a player needs to show previews: tile geometry and sheet URLs.\nThumbnail `n` (the moment `n * interval_seconds`) is on sheet\n`n / (columns * rows)`, column `n % columns`, row\n`(n % (columns * rows)) / columns`.",
@@ -5485,16 +6075,18 @@
         "properties": {
           "failed": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "description": "Generation failed for the current file (retried once it changes)."
           },
           "pending": {
             "type": "integer",
             "format": "int64",
-            "description": "Probed movies and episodes still without (current) thumbnails."
+            "description": "Still waiting: no thumbnails yet, or made from an older file."
           },
           "ready": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "description": "Thumbnails made from the current file."
           }
         }
       },
@@ -5506,12 +6098,64 @@
           {
             "type": "object",
             "required": [
-              "enabled"
+              "enabled",
+              "paused_for_playback",
+              "ffmpeg_missing",
+              "libraries",
+              "failures"
             ],
             "properties": {
+              "average_seconds": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "double",
+                "description": "Average seconds per item over the latest generations (since start)."
+              },
+              "current": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CurrentJob",
+                    "description": "The item being generated right now."
+                  }
+                ]
+              },
               "enabled": {
                 "type": "boolean",
                 "description": "Generation runs (`LISEK_TRICKPLAY` not set to 0)."
+              },
+              "eta_seconds": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "double",
+                "description": "`pending * average_seconds`, when an average exists."
+              },
+              "failures": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TrickplayFailure"
+                },
+                "description": "Latest failures, newest first."
+              },
+              "ffmpeg_missing": {
+                "type": "boolean",
+                "description": "FFmpeg could not be started (check Admin → Playback)."
+              },
+              "libraries": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/LibraryTrickplayStats"
+                }
+              },
+              "paused_for_playback": {
+                "type": "boolean",
+                "description": "Generation waits because someone is transcoding."
               }
             }
           }
@@ -5623,6 +6267,26 @@
             "type": "string"
           }
         }
+      },
+      "UserRestrictionsResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Restrictions"
+          },
+          {
+            "type": "object",
+            "required": [
+              "enforced"
+            ],
+            "properties": {
+              "enforced": {
+                "type": "boolean",
+                "description": "`false` for an administrator: administrators always see everything."
+              }
+            }
+          }
+        ],
+        "description": "An account's access restrictions (parental controls) as the admin\neditor shows them."
       }
     },
     "securitySchemes": {

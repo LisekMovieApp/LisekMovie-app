@@ -107,6 +107,8 @@ pub struct AppState {
     pub trickplay_wakeup: Notify,
     /// An account is known to exist (set once; accounts are never all deleted).
     pub has_accounts: std::sync::atomic::AtomicBool,
+    /// What the trickplay worker is doing right now (admin progress view).
+    pub trickplay_progress: std::sync::Mutex<crate::trickplay::Progress>,
 }
 
 impl AppState {
@@ -120,6 +122,7 @@ impl AppState {
             scan_wakeup: Notify::new(),
             trickplay_wakeup: Notify::new(),
             has_accounts: std::sync::atomic::AtomicBool::new(false),
+            trickplay_progress: std::sync::Mutex::default(),
         }
     }
 

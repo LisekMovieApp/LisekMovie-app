@@ -25,7 +25,11 @@
 		| 'close'
 		| 'menu'
 		| 'plus'
-		| 'next';
+		| 'next'
+		| 'stack'
+		| 'lock'
+		| 'download'
+		| 'refresh';
 
 	interface Shape {
 		d: string;
@@ -61,7 +65,11 @@
 		close: { d: 'M6 6l12 12M18 6L6 18' },
 		menu: { d: 'M4 7h16M4 12h16M4 17h16' },
 		plus: { d: 'M12 5v14M5 12h14' },
-		next: { d: 'M5 4.5v15a.7.7 0 0 0 1.1.6L16 12.6a.7.7 0 0 0 0-1.2L6.1 3.9A.7.7 0 0 0 5 4.5zM17 4h2.5v16H17z', fill: true }
+		next: { d: 'M5 4.5v15a.7.7 0 0 0 1.1.6L16 12.6a.7.7 0 0 0 0-1.2L6.1 3.9A.7.7 0 0 0 5 4.5zM17 4h2.5v16H17z', fill: true },
+		stack: { d: 'M4 8.5h16v11H4zM6.5 6h11M9 3.5h6' },
+		lock: { d: 'M6.5 10.5h11a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1zM8.5 10.5V7.5a3.5 3.5 0 0 1 7 0v3M12 14.5v2.5' },
+		download: { d: 'M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14' },
+		refresh: { d: 'M20 11.5A8 8 0 0 0 6.3 6.3L4 8.5M4 4v4.5h4.5M4 12.5a8 8 0 0 0 13.7 5.2L20 15.5M20 20v-4.5h-4.5' }
 	};
 </script>
 

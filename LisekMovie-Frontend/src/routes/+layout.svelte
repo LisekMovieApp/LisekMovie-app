@@ -5,6 +5,7 @@
 	import { page } from '$app/state';
 	import { setLocale } from '$lib/i18n';
 	import { initSpatialNavigation } from '$lib/spatial/spatial';
+	import { watchInstall } from '$lib/pwa/install.svelte';
 	import type { LayoutProps } from './$types';
 
 	let { children, data }: LayoutProps = $props();
@@ -39,6 +40,10 @@
 	// Arrow keys / TV remote D-pad move focus between cards, rows and
 	// buttons on every page (see `$lib/spatial/spatial.ts`).
 	$effect(() => initSpatialNavigation());
+
+	// "Install app" in the account menu (PWA): keep the browser's install
+	// prompt for when the user asks.
+	$effect(() => watchInstall());
 
 	// The player covers the whole screen; the navbar behind it would only
 	// catch Tab focus.

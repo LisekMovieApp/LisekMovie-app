@@ -22,6 +22,8 @@ mod media;
 mod providers;
 mod scan;
 
+pub mod access;
+pub mod collections;
 pub mod episodes;
 pub mod games;
 pub mod notifications;

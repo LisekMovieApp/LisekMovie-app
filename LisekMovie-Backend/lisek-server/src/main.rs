@@ -12,6 +12,7 @@ mod admin;
 mod auth;
 mod users;
 mod background_refresh;
+mod collections;
 mod env_file;
 mod media;
 mod playback;

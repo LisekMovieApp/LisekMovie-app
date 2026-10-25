@@ -172,6 +172,8 @@ async fn run_once(state: &Arc<AppState>) {
         }
     }
 
+    metadata_enrichment::prune_collections(&pool, &config_dir).await;
+
     tracing::info!(
         items_considered,
         items_matched,

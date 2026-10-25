@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT c.id AS \"id!\", c.library_id AS \"library_id!\", c.item_type AS \"item_type!\",\n                       c.title AS \"title!\", c.year AS \"year?\", c.overview AS \"overview?\",\n                       c.season AS \"season?\", c.episode AS \"episode?\", c.created_at AS \"created_at!\"\n                FROM (\n                    (SELECT m.id, m.library_id, m.item_type, m.title, m.year, m.overview,\n                            NULL::int AS season, NULL::int AS episode, m.created_at\n                     FROM media_items m\n                     WHERE m.item_type = 'movie'\n                     ORDER BY m.created_at DESC, m.id DESC\n                     LIMIT $1)\n                    UNION ALL\n                    (SELECT s.representative_item_id, s.library_id, 'series', s.title, NULL::int,\n                            r.overview, NULL::int, NULL::int, s.last_episode_added_at\n                     FROM series s\n                     JOIN media_items r ON r.id = s.representative_item_id\n                     ORDER BY s.last_episode_added_at DESC, s.representative_item_id DESC\n                     LIMIT $1)\n                ) c\n                ORDER BY c.created_at DESC, c.id DESC\n                LIMIT $1\n                ",
+  "query": "\n        SELECT c.id AS \"id!\", c.library_id AS \"library_id!\", c.item_type AS \"item_type!\",\n               c.title AS \"title!\", c.year AS \"year?\", c.overview AS \"overview?\",\n               c.season AS \"season?\", c.episode AS \"episode?\", c.created_at AS \"created_at!\"\n        FROM (\n            SELECT m.id, m.library_id, m.item_type, m.title, m.year, m.overview,\n                   m.season_number AS season, m.episode_number AS episode, m.created_at\n            FROM media_items m\n            WHERE m.id = $1 AND m.item_type <> 'episode'\n              AND lisek_visible(m.library_id, m.age_rating, $2, $3, $4)\n            UNION ALL\n            SELECT s.representative_item_id, s.library_id, 'series', s.title, NULL::int, r.overview,\n                   NULL::int, NULL::int, s.last_episode_added_at\n            FROM episodes e\n            JOIN series s ON s.id = e.series_id\n            JOIN media_items r ON r.id = s.representative_item_id\n            WHERE e.media_item_id = $1 AND lisek_visible(s.library_id, r.age_rating, $2, $3, $4)\n        ) c\n        LIMIT 1\n        ",
   "describe": {
     "columns": [
       {
@@ -60,7 +60,10 @@
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Uuid",
+        "UuidArray",
+        "Int4",
+        "Bool"
       ]
     },
     "nullable": [
@@ -75,5 +78,5 @@
       null
     ]
   },
-  "hash": "e279ba4f8f145dd656030e38f2a8aa3696f405cd525e90a8a19e7c2c72a17c9f"
+  "hash": "ee1679da938a08819f712fb531a4f3c89823e96e89e2033aace9b25eccd3b7ac"
 }

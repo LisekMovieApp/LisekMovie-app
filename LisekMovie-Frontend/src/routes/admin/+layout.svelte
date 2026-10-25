@@ -18,6 +18,7 @@
 		{ href: '/admin/plugins', labelKey: 'admin.tab_plugins' },
 		{ href: '/admin/stats', labelKey: 'player.stats' },
         { href: '/admin/playback', labelKey: 'player.safety' },
+		{ href: '/admin/trickplay', labelKey: 'trickplay_admin.tab' },
         { href: '/admin/notifications', labelKey: 'notifications.title' },
 		{ href: '/admin/games', labelKey: 'nav.games' },
 		{ href: '/admin/libraries', labelKey: 'admin.tab_libraries' },

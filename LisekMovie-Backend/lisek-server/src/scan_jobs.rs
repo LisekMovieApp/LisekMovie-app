@@ -201,6 +201,8 @@ async fn run_job(state: &SharedState, pool: &PgPool, job: ScanJob) {
     // New or changed files: the trickplay worker takes over (it skips
     // whatever already has current thumbnails).
     state.trickplay_wakeup.notify_one();
+    // Removed films can leave a collection empty.
+    crate::metadata_enrichment::prune_collections(pool, &crate::state::config_dir()).await;
 
     if let Err(err) = db::prune_finished(pool, KEEP_FINISHED_DAYS).await {
         tracing::warn!(%err, "failed to prune old scan jobs");

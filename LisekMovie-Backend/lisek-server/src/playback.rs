@@ -400,6 +400,9 @@ pub async fn start(auth: AuthUser, State(state): State<SharedState>, Path(item_i
         Some(id) => Some(TrackRef::parse(id).ok_or(bad_request("subtitle_track_not_found"))?),
     };
     let pool = pool(&state).await?;
+    if !auth.can_see(&pool, item_id).await? {
+        return Err(PlaybackError(StatusCode::NOT_FOUND, "media_not_found"));
+    }
     let source = db::source(&pool, item_id).await?.ok_or(PlaybackError(StatusCode::NOT_FOUND, "media_not_found"))?;
     let path = checked_file(&source).await?;
     let settings = db::settings(&pool).await?;
@@ -747,7 +750,7 @@ pub struct FlagsRequest {
 #[utoipa::path(get,path="/api/media/{item_id}/state",params(("item_id"=Uuid,Path)),responses((status=200,body=Value),(status=401),(status=404)),security(("lisek_auth"=[])))]
 pub async fn media_state(auth: AuthUser, State(state): State<SharedState>, Path(id): Path<Uuid>) -> Result<Json<Value>, PlaybackError> {
     let pool = pool(&state).await?;
-    if db::source(&pool, id).await?.is_none() {
+    if !auth.can_see(&pool, id).await? || db::source(&pool, id).await?.is_none() {
         return Err(PlaybackError(StatusCode::NOT_FOUND, "media_not_found"));
     }
     Ok(Json(json!(db::media_state(&pool, auth.user.id, id).await?)))
@@ -755,7 +758,7 @@ pub async fn media_state(auth: AuthUser, State(state): State<SharedState>, Path(
 #[utoipa::path(put,path="/api/media/{item_id}/state",params(("item_id"=Uuid,Path)),request_body=FlagsRequest,responses((status=204),(status=401),(status=404)),security(("lisek_auth"=[])))]
 pub async fn set_flags(auth: AuthUser, State(state): State<SharedState>, Path(id): Path<Uuid>, Json(req): Json<FlagsRequest>) -> Result<StatusCode, PlaybackError> {
     let pool = pool(&state).await?;
-    if db::source(&pool, id).await?.is_none() {
+    if !auth.can_see(&pool, id).await? || db::source(&pool, id).await?.is_none() {
         return Err(PlaybackError(StatusCode::NOT_FOUND, "media_not_found"));
     }
     db::set_flags(&pool, auth.user.id, id, req.watched, req.favorite).await?;
@@ -763,7 +766,7 @@ pub async fn set_flags(auth: AuthUser, State(state): State<SharedState>, Path(id
 }
 #[utoipa::path(get,path="/api/me/list",responses((status=200,body=Value),(status=401)),security(("lisek_auth"=[])))]
 pub async fn my_list(auth: AuthUser, State(state): State<SharedState>) -> Result<Json<Value>, PlaybackError> {
-    Ok(Json(json!(db::my_list(&pool(&state).await?, auth.user.id).await?)))
+    Ok(Json(json!(db::my_list(&pool(&state).await?, auth.user.id, &auth.access).await?)))
 }
 #[utoipa::path(get,path="/api/admin/stats/users",responses((status=200,body=Value),(status=401),(status=403)),security(("lisek_auth"=[])))]
 pub async fn stats(_admin: AdminUser, State(state): State<SharedState>) -> Result<Json<Value>, PlaybackError> {

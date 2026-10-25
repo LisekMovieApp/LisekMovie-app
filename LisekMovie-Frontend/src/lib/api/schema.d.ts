@@ -423,8 +423,28 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** How far thumbnail generation has got. */
+        /**
+         * How far thumbnail generation has got: totals, per library, the item in
+         *     progress and recent failures. The admin page polls it.
+         */
         get: operations["status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/user-restrictions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Accounts that browse with restrictions (the user list marks them). */
+        get: operations["list_restrictions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -475,6 +495,27 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["reset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{id}/restrictions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_restrictions"];
+        /**
+         * Replaces an account's restrictions. `libraries: null` allows every
+         *     library, `max_age_rating: null` removes the age limit; both null clears
+         *     the restrictions. Takes effect on the account's next request.
+         */
+        put: operations["set_restrictions"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -607,6 +648,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/collections/{collection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_collection"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/collections/{collection_id}/backdrop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["collection_backdrop"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/collections/{collection_id}/poster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["collection_poster"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/games": {
         parameters: {
             query?: never;
@@ -713,6 +802,26 @@ export interface paths {
          *     own reorder buttons about which library comes first.
          */
         get: operations["list_libraries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/libraries/{library_id}/collections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Collections with two or more films in this library, by name — the
+         *     "Kolekcje" row of a library page.
+         */
+        get: operations["library_collections"];
         put?: never;
         post?: never;
         delete?: never;
@@ -876,6 +985,26 @@ export interface paths {
         };
         /** Same as [`poster_image`] for the backdrop image. */
         get: operations["backdrop_image"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/{item_id}/collection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The collection a film belongs to, with its other films (the detail
+         *     page's "Z kolekcji" row). 204 when it belongs to none.
+         */
+        get: operations["item_collection"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1319,6 +1448,24 @@ export interface components {
         };
         /** @enum {string} */
         ClientFamily: "chrome" | "edge" | "firefox" | "safari" | "tv" | "unknown";
+        /** @description One collection with its films in release order. */
+        CollectionResponse: {
+            backdrop_url: string;
+            /** Format: int32 */
+            first_year?: number | null;
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: int64
+             * @description Films the account can see.
+             */
+            item_count: number;
+            items: components["schemas"]["MediaItemResponse"][];
+            /** Format: int32 */
+            last_year?: number | null;
+            name: string;
+            poster_url: string;
+        };
         CreateLibraryRequest: {
             library_type: string;
             name: string;
@@ -1334,6 +1481,17 @@ export interface components {
         CreatedUser: {
             temporary_password: string;
             user: components["schemas"]["User"];
+        };
+        CurrentJob: {
+            /** Format: int32 */
+            episode?: number | null;
+            /** Format: uuid */
+            item_id: string;
+            /** Format: int32 */
+            season?: number | null;
+            /** Format: date-time */
+            started_at: string;
+            title: string;
         };
         /**
          * @description Discrete connection fields, as collected by the First-Run Wizard form.
@@ -1480,6 +1638,18 @@ export interface components {
             items: components["schemas"]["MediaItemResponse"][];
             library: components["schemas"]["PublicLibraryResponse"];
         };
+        /** @description Progress of one library. */
+        LibraryTrickplayStats: {
+            /** Format: int64 */
+            failed: number;
+            /** Format: uuid */
+            library_id: string;
+            name: string;
+            /** Format: int64 */
+            ready: number;
+            /** Format: int64 */
+            total: number;
+        };
         LoginRequest: {
             /**
              * @description Free-text identity for the `sessions` table (a future "your active
@@ -1548,6 +1718,13 @@ export interface components {
          *     something browsable on its own, not one file out of a season.
          */
         MediaItemResponse: {
+            /**
+             * Format: int32
+             * @description Detail view only: minimum viewer age (parental controls) and the
+             *     certification it comes from, e.g. 13 and "PG-13". A rating set by
+             *     an administrator has no certification.
+             */
+            age_rating?: number | null;
             backdrop_url: string;
             /**
              * @description `"new_series"` / `"new_season"` / `"new_episodes"` for a `"series"`
@@ -1563,10 +1740,17 @@ export interface components {
              *     itself was ever asked to show.
              */
             badge?: string | null;
+            certification?: string | null;
             /** Format: int32 */
             episode?: number | null;
             /** Format: uuid */
             id: string;
+            /**
+             * Format: int64
+             * @description `"collection"` cards only: how many of its films this card stands
+             *     for.
+             */
+            item_count?: number | null;
             item_type: string;
             logo_url: string;
             overview?: string | null;
@@ -1912,6 +2096,24 @@ export interface components {
         ResetPassword: {
             password?: string | null;
         };
+        RestrictedUser: components["schemas"]["Restrictions"] & {
+            /** Format: uuid */
+            user_id: string;
+        };
+        Restrictions: {
+            /** @description With an age limit, also hide items that have no rating at all. */
+            block_unrated?: boolean;
+            /**
+             * @description `None`: every library. `Some`: only these (an empty list hides the
+             *     whole catalog).
+             */
+            libraries?: string[] | null;
+            /**
+             * Format: int32
+             * @description Items rated above this minimum age are hidden. `None`: no limit.
+             */
+            max_age_rating?: number | null;
+        };
         SafetyConfig: {
             enabled: boolean;
             /** Format: int32 */
@@ -2138,6 +2340,21 @@ export interface components {
         };
         /** @enum {string} */
         TranscodeReason: "forced_by_client" | "container_not_supported" | "video_codec_not_supported" | "video_bit_depth_not_supported" | "video_profile_not_supported" | "hdr_not_supported" | "interlaced_not_supported" | "resolution_above_requested" | "bitrate_above_limit" | "audio_codec_not_supported" | "audio_channels_not_supported" | "audio_track_not_first" | "downmix_requested" | "subtitle_burn_in" | "subtitle_needs_hls" | "no_keyframe_index" | "remux_disabled";
+        /** @description A failed item for the admin list. */
+        TrickplayFailure: {
+            /** Format: int32 */
+            episode?: number | null;
+            error?: string | null;
+            /** Format: date-time */
+            failed_at: string;
+            /** Format: uuid */
+            item_id: string;
+            item_type: string;
+            library_name: string;
+            /** Format: int32 */
+            season?: number | null;
+            title: string;
+        };
         /**
          * @description What a player needs to show previews: tile geometry and sheet URLs.
          *     Thumbnail `n` (the moment `n * interval_seconds`) is on sheet
@@ -2167,19 +2384,43 @@ export interface components {
             width: number;
         };
         TrickplayStats: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Generation failed for the current file (retried once it changes).
+             */
             failed: number;
             /**
              * Format: int64
-             * @description Probed movies and episodes still without (current) thumbnails.
+             * @description Still waiting: no thumbnails yet, or made from an older file.
              */
             pending: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Thumbnails made from the current file.
+             */
             ready: number;
         };
         TrickplayStatus: components["schemas"]["TrickplayStats"] & {
+            /**
+             * Format: double
+             * @description Average seconds per item over the latest generations (since start).
+             */
+            average_seconds?: number | null;
+            current?: null | components["schemas"]["CurrentJob"];
             /** @description Generation runs (`LISEK_TRICKPLAY` not set to 0). */
             enabled: boolean;
+            /**
+             * Format: double
+             * @description `pending * average_seconds`, when an average exists.
+             */
+            eta_seconds?: number | null;
+            /** @description Latest failures, newest first. */
+            failures: components["schemas"]["TrickplayFailure"][];
+            /** @description FFmpeg could not be started (check Admin → Playback). */
+            ffmpeg_missing: boolean;
+            libraries: components["schemas"]["LibraryTrickplayStats"][];
+            /** @description Generation waits because someone is transcoding. */
+            paused_for_playback: boolean;
         };
         UpdateMediaItemRequest: {
             forced_provider?: string | null;
@@ -2215,6 +2456,14 @@ export interface components {
             must_change_password: boolean;
             ui_language: string;
             username: string;
+        };
+        /**
+         * @description An account's access restrictions (parental controls) as the admin
+         *     editor shows them.
+         */
+        UserRestrictionsResponse: components["schemas"]["Restrictions"] & {
+            /** @description `false` for an administrator: administrators always see everything. */
+            enforced: boolean;
         };
     };
     responses: never;
@@ -3582,6 +3831,31 @@ export interface operations {
             };
         };
     };
+    list_restrictions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestrictedUser"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list: {
         parameters: {
             query?: never;
@@ -3718,6 +3992,82 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TemporaryPassword"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_restrictions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRestrictionsResponse"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_restrictions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Restrictions"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRestrictionsResponse"];
                 };
             };
             400: {
@@ -4049,6 +4399,127 @@ export interface operations {
             };
         };
     };
+    get_collection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    collection_backdrop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    collection_poster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list: {
         parameters: {
             query?: never;
@@ -4265,6 +4736,51 @@ export interface operations {
             };
         };
     };
+    library_collections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                library_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryRowResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     library_items: {
         parameters: {
             query?: {
@@ -4273,6 +4789,7 @@ export interface operations {
                 letter?: string;
                 q?: string;
                 page_size?: number;
+                group_collections?: boolean;
             };
             header?: never;
             path: {
@@ -4612,6 +5129,58 @@ export interface operations {
                 content?: never;
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    item_collection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionResponse"];
+                };
+            };
+            /** @description Not part of a collection */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

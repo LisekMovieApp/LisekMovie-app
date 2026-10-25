@@ -24,6 +24,7 @@ use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 
 use lisek_core::User;
+use lisek_db::access::Restrictions;
 
 use crate::rate_limit;
 use crate::state::SharedState;
@@ -145,6 +146,28 @@ pub struct SessionUser {
 pub struct AuthUser {
     pub user: User,
     pub(crate) token_hash: String,
+    /// What this account may browse (parental controls). Always
+    /// unrestricted for an administrator.
+    pub access: Restrictions,
+}
+
+impl AuthUser {
+    /// Whether this account may see `item_id`. An unrestricted account
+    /// answers `true` without a query (the handler's own lookup still
+    /// reports a missing item); a restricted one gets `false` for a
+    /// missing item too.
+    pub async fn can_see(
+        &self,
+        pool: &lisek_db::PgPool,
+        item_id: uuid::Uuid,
+    ) -> Result<bool, lisek_db::DbError> {
+        if self.access.is_unrestricted() {
+            return Ok(true);
+        }
+        Ok(lisek_db::access::item_visible(pool, item_id, &self.access)
+            .await?
+            .unwrap_or(false))
+    }
 }
 
 pub struct AdminUser(pub AuthUser);
@@ -153,6 +176,7 @@ pub struct AdminUser(pub AuthUser);
 struct ResolvedSession {
     user: User,
     token_hash: String,
+    access: Restrictions,
 }
 
 async fn resolve_session(
@@ -168,12 +192,16 @@ async fn resolve_session(
     let token_hash = lisek_auth::hash_session_token(&token);
 
     let pool = state.pool().ok_or(AuthError::ServerNotReady)?;
-    let user = lisek_db::find_user_by_session_token_hash(&pool, &token_hash)
+    let (user, access) = lisek_db::access::find_session(&pool, &token_hash)
         .await
         .map_err(|_| AuthError::Internal)?
         .ok_or(AuthError::InvalidToken)?;
 
-    let session = ResolvedSession { user, token_hash };
+    let session = ResolvedSession {
+        user,
+        token_hash,
+        access,
+    };
     parts.extensions.insert(session.clone());
     Ok(session)
 }
@@ -182,7 +210,7 @@ impl axum::extract::FromRequestParts<SharedState> for SessionUser {
     type Rejection = AuthError;
 
     async fn from_request_parts(parts: &mut Parts, state: &SharedState) -> Result<Self, Self::Rejection> {
-        let ResolvedSession { user, token_hash } = resolve_session(parts, state).await?;
+        let ResolvedSession { user, token_hash, .. } = resolve_session(parts, state).await?;
         Ok(SessionUser { user, token_hash })
     }
 }
@@ -191,11 +219,19 @@ impl axum::extract::FromRequestParts<SharedState> for AuthUser {
     type Rejection = AuthError;
 
     async fn from_request_parts(parts: &mut Parts, state: &SharedState) -> Result<Self, Self::Rejection> {
-        let ResolvedSession { user, token_hash } = resolve_session(parts, state).await?;
+        let ResolvedSession {
+            user,
+            token_hash,
+            access,
+        } = resolve_session(parts, state).await?;
         if user.must_change_password {
             return Err(AuthError::PasswordChangeRequired);
         }
-        Ok(AuthUser { user, token_hash })
+        Ok(AuthUser {
+            user,
+            token_hash,
+            access,
+        })
     }
 }
 
@@ -253,10 +289,13 @@ fn token_from_query(query: Option<&str>) -> Option<String> {
 fn is_image_path(path: &str) -> bool {
     let segments: Vec<_> = path.split('/').collect();
     let media = segments.len() >= 5 && segments[1] == "api" && segments[2] == "media";
-    // `/api/media/{id}/poster|backdrop|logo` and the trickplay sprite
-    // sheets `/api/media/{id}/trickplay/{n}` (CSS backgrounds).
+    let collection = segments.len() == 5 && segments[1] == "api" && segments[2] == "collections";
+    // `/api/media/{id}/poster|backdrop|logo`, the trickplay sprite
+    // sheets `/api/media/{id}/trickplay/{n}` (CSS backgrounds) and
+    // `/api/collections/{id}/poster|backdrop`.
     (media && segments.len() == 5 && matches!(segments[4], "poster" | "backdrop" | "logo"))
         || (media && segments.len() == 6 && segments[4] == "trickplay")
+        || (collection && matches!(segments[4], "poster" | "backdrop"))
 }
 
 #[derive(Debug)]
@@ -397,6 +436,10 @@ mod tests {
         assert!(!is_image_path(&format!("{id}/trickplay")), "the manifest is JSON, read with the header");
         assert!(!is_image_path(&format!("{id}/next")));
         assert!(!is_image_path("/api/libraries"));
+        let collection = "/api/collections/0b7d9c2e-0000-0000-0000-000000000000";
+        assert!(is_image_path(&format!("{collection}/poster")));
+        assert!(is_image_path(&format!("{collection}/backdrop")));
+        assert!(!is_image_path(collection), "the collection itself is JSON");
     }
 }
 

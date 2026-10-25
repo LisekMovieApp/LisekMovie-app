@@ -50,8 +50,8 @@ async fn run(mut socket: WebSocket, state: SharedState) {
         return;
     }
     let hash = lisek_auth::hash_session_token(&login.token);
-    let mut is_admin = match lisek_db::find_user_by_session_token_hash(&pool, &hash).await {
-        Ok(Some(user)) if !user.must_change_password => user.is_admin,
+    let mut is_admin = match lisek_db::access::find_session(&pool, &hash).await {
+        Ok(Some((user, _))) if !user.must_change_password => user.is_admin,
         _ => return,
     };
     // Subscribed before "ready" so no event between the two is missed.
@@ -83,11 +83,13 @@ async fn run(mut socket: WebSocket, state: SharedState) {
                 Err(broadcast::error::RecvError::Closed) => break,
             },
             _=interval.tick()=>{
-                match lisek_db::find_user_by_session_token_hash(&pool,&hash).await {
-                    Ok(Some(user)) if !user.must_change_password => is_admin = user.is_admin,
+                // Restrictions are re-read with the role: new items the
+                // account may not see are never announced to it.
+                let access = match lisek_db::access::find_session(&pool,&hash).await {
+                    Ok(Some((user,access))) if !user.must_change_password => {is_admin = user.is_admin; access}
                     _ => break,
-                }
-                let Ok(events)=lisek_db::notifications::browser_events(&pool,started).await else{break;};
+                };
+                let Ok(events)=lisek_db::notifications::browser_events(&pool,started,&access).await else{break;};
                 let present:std::collections::HashSet<_>=events.iter().map(|e|e.event_id).collect();
                 seen.retain(|id|present.contains(id));
                 let fresh:Vec<_>=events.into_iter().filter(|e|seen.insert(e.event_id)).collect();

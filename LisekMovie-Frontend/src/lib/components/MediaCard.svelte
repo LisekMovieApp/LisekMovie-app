@@ -23,12 +23,17 @@
   a gold ring, so the focused tile is obvious from across the room. The
   "continue watching" row reuses this card with `href` (straight to the
   player), `caption` (episode, time left) and a `progress` bar.
+
+  Faza 6: a `'collection'` card (a box set on a library page) links to
+  `/collection/[id]`, shows two sheets peeking out behind it and a
+  "Kolekcja · N" badge.
 -->
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import type { ResolvedPathname } from '$app/types';
 	import { t } from '$lib/i18n';
 	import { imageUrl, type MediaItem } from '$lib/media/api';
+	import Icon from './Icon.svelte';
 
 	interface Props {
 		item: MediaItem;
@@ -58,10 +63,20 @@
 	}: Props = $props();
 
 	let imageFailed = $state(false);
+	const isCollection = $derived(item.item_type === 'collection');
+	const target = $derived(
+		href ??
+			(isCollection
+				? resolve('/collection/[id]', { id: item.id })
+				: resolve('/media/[id]', { id: item.id }))
+	);
 </script>
 
 <a
-	href={href ?? resolve('/media/[id]', { id: item.id })}
+	href={target}
+	aria-label={isCollection
+		? t('collections.card_label', { name: item.title, count: item.item_count ?? 0 })
+		: undefined}
 	class="group relative block aspect-video shrink-0 overflow-hidden rounded-md bg-surface ring-gold transition-[transform,box-shadow] duration-200 outline-none hover:z-10 hover:shadow-[0_10px_30px_rgb(0_0_0/0.6)] focus-visible:z-10 focus-visible:scale-[1.07] focus-visible:shadow-[0_10px_30px_rgb(0_0_0/0.7)] focus-visible:ring-[3px] {size ===
 	'compact'
 		? 'w-[110px] sm:w-[130px] md:w-[150px]'
@@ -76,7 +91,23 @@
 			class="size-full object-cover transition-transform duration-300 group-hover:scale-105 group-focus-visible:scale-105"
 		/>
 	{/if}
-	{#if item.badge}
+	{#if isCollection}
+		<!-- Two "sheets" behind the cover: reads as a stack at a glance. -->
+		<span
+			class="pointer-events-none absolute inset-x-3 top-0 h-1.5 rounded-b bg-white/25"
+			aria-hidden="true"
+		></span>
+		<span
+			class="pointer-events-none absolute inset-x-6 top-1.5 h-1 rounded-b bg-white/15"
+			aria-hidden="true"
+		></span>
+		<span
+			class="absolute top-2.5 left-1.5 flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-[0.6rem] font-semibold text-gold ring-1 ring-gold/40 backdrop-blur sm:text-xs"
+		>
+			<Icon name="stack" class="size-3 sm:size-3.5" />
+			{t('collections.badge', { count: item.item_count ?? 0 })}
+		</span>
+	{:else if item.badge}
 		<span
 			class="absolute top-1.5 left-1.5 rounded bg-gold px-1.5 py-0.5 text-[0.6rem] font-semibold text-black sm:text-xs"
 		>

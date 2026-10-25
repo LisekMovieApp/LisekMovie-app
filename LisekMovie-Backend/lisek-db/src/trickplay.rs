@@ -11,6 +11,9 @@ use crate::DbError;
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct TrickplayCandidate {
     pub id: Uuid,
+    pub title: String,
+    pub season_number: Option<i32>,
+    pub episode_number: Option<i32>,
     pub file_path: String,
     pub duration_seconds: f64,
     pub width: Option<i32>,
@@ -29,7 +32,8 @@ pub async fn trickplay_candidates(
 ) -> Result<Vec<TrickplayCandidate>, DbError> {
     Ok(sqlx::query_as(
         r#"
-        SELECT m.id, m.file_path, m.duration_seconds, v.width, v.height, v.color_transfer,
+        SELECT m.id, m.title, m.season_number, m.episode_number,
+               m.file_path, m.duration_seconds, v.width, v.height, v.color_transfer,
                m.file_size, m.file_modified_at
         FROM media_items m
         JOIN LATERAL (
@@ -175,34 +179,115 @@ pub async fn ready_trickplay_ids(pool: &PgPool) -> Result<Vec<Uuid>, DbError> {
     Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
+/// Items trickplay applies to: probed movies and episodes with a real
+/// video stream (the same rule as [`trickplay_candidates`]). `current`:
+/// the stored result was made from the file as it is now.
+const ELIGIBLE: &str = r#"
+    SELECT m.id, m.library_id, t.status,
+           (t.item_id IS NOT NULL
+            AND t.source_size IS NOT DISTINCT FROM m.file_size
+            AND t.source_modified_at IS NOT DISTINCT FROM m.file_modified_at) AS current
+    FROM media_items m
+    LEFT JOIN media_trickplay t ON t.item_id = m.id
+    WHERE m.item_type IN ('movie', 'episode')
+      AND m.probed_at IS NOT NULL AND m.probe_error IS NULL
+      AND m.duration_seconds > 0
+      AND EXISTS (
+          SELECT 1 FROM media_streams s
+          WHERE s.media_item_id = m.id AND s.stream_type = 'video'
+            AND coalesce(s.codec, '') NOT IN ('mjpeg', 'png', 'bmp', 'gif', 'webp'))
+"#;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, utoipa::ToSchema)]
 pub struct TrickplayStats {
+    /// Thumbnails made from the current file.
     pub ready: i64,
+    /// Generation failed for the current file (retried once it changes).
     pub failed: i64,
-    /// Probed movies and episodes still without (current) thumbnails.
+    /// Still waiting: no thumbnails yet, or made from an older file.
     pub pending: i64,
 }
 
+impl TrickplayStats {
+    pub fn total(&self) -> i64 {
+        self.ready + self.failed + self.pending
+    }
+}
+
+/// Progress of one library.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct LibraryTrickplayStats {
+    pub library_id: Uuid,
+    pub name: String,
+    pub total: i64,
+    pub ready: i64,
+    pub failed: i64,
+}
+
+/// Every library with its thumbnail progress, in display order. A
+/// library without videos has `total` 0.
+pub async fn trickplay_library_stats(pool: &PgPool) -> Result<Vec<LibraryTrickplayStats>, DbError> {
+    let sql = format!(
+        "WITH eligible AS ({ELIGIBLE})
+         SELECT l.id AS library_id, l.name,
+                count(e.id) AS total,
+                count(*) FILTER (WHERE e.current AND e.status = 'ready') AS ready,
+                count(*) FILTER (WHERE e.current AND e.status = 'failed') AS failed
+         FROM libraries l
+         LEFT JOIN eligible e ON e.library_id = l.id
+         GROUP BY l.id
+         ORDER BY l.sort_order, l.name"
+    );
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql)).fetch_all(pool).await?)
+}
+
+/// The whole catalog's progress (sums of [`trickplay_library_stats`]).
 pub async fn trickplay_stats(pool: &PgPool) -> Result<TrickplayStats, DbError> {
-    let (ready, failed, pending): (i64, i64, i64) = sqlx::query_as(
-        r#"
-        SELECT
-            (SELECT count(*) FROM media_trickplay WHERE status = 'ready'),
-            (SELECT count(*) FROM media_trickplay WHERE status = 'failed'),
-            (SELECT count(*) FROM media_items m
-             LEFT JOIN media_trickplay t ON t.item_id = m.id
-             WHERE m.item_type IN ('movie', 'episode') AND m.probed_at IS NOT NULL
-               AND m.probe_error IS NULL AND m.duration_seconds > 0
-               AND (t.item_id IS NULL
-                    OR t.source_size IS DISTINCT FROM m.file_size
-                    OR t.source_modified_at IS DISTINCT FROM m.file_modified_at))
-        "#,
-    )
-    .fetch_one(pool)
-    .await?;
+    let sql = format!(
+        "WITH eligible AS ({ELIGIBLE})
+         SELECT count(*) FILTER (WHERE current AND status = 'ready'),
+                count(*) FILTER (WHERE current AND status = 'failed'),
+                count(*) FILTER (WHERE NOT current)
+         FROM eligible"
+    );
+    let (ready, failed, pending): (i64, i64, i64) =
+        sqlx::query_as(sqlx::AssertSqlSafe(sql)).fetch_one(pool).await?;
     Ok(TrickplayStats {
         ready,
         failed,
         pending,
     })
+}
+
+/// A failed item for the admin list.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct TrickplayFailure {
+    pub item_id: Uuid,
+    pub item_type: String,
+    pub title: String,
+    pub season: Option<i32>,
+    pub episode: Option<i32>,
+    pub library_name: String,
+    pub error: Option<String>,
+    pub failed_at: DateTime<Utc>,
+}
+
+/// The most recent failures, newest first.
+pub async fn trickplay_failures(pool: &PgPool, limit: i64) -> Result<Vec<TrickplayFailure>, DbError> {
+    Ok(sqlx::query_as(
+        r#"
+        SELECT t.item_id, m.item_type, m.title, m.season_number AS season,
+               m.episode_number AS episode, l.name AS library_name, t.error,
+               t.generated_at AS failed_at
+        FROM media_trickplay t
+        JOIN media_items m ON m.id = t.item_id
+        JOIN libraries l ON l.id = m.library_id
+        WHERE t.status = 'failed'
+        ORDER BY t.generated_at DESC, t.item_id
+        LIMIT $1
+        "#,
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?)
 }

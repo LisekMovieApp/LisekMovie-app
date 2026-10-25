@@ -93,7 +93,8 @@
 		"seasons_title": "Sezony",
 		"season_label": "Sezon {number}",
 		"episode_label": "Odcinek {number}",
-		"episode_label_range": "Odcinek {number}–{end}"
+		"episode_label_range": "Odcinek {number}–{end}",
+		"age_rating_hint": "Kategoria wiekowa"
 	},
 	"library": {
 		"load_failed": "Nie udało się wczytać tej biblioteki. Spróbuj ponownie.",
@@ -230,7 +231,11 @@
 		"fallback_migrated_backdrop_only": "Udało się przenieść tylko tło; plakat nadal jest w lokalnym cache.",
 		"fallback_migrate_nothing": "Nie udało się przenieść niczego — sprawdź, czy folder z mediami jest zapisywalny.",
 		"tab_users": "Użytkownicy",
-		"episode_code": "S{season}E{episode}"
+		"episode_code": "S{season}E{episode}",
+		"editor_age_rating": "Kategoria wiekowa (kontrola rodzicielska)",
+		"editor_age_from_provider": "Od dostawcy: {label}",
+		"editor_age_unrated": "Od dostawcy: brak kategorii",
+		"editor_age_rating_hint": "Minimalny wiek widza. Twoja wartość zostaje po ponownym skanowaniu; przydaje się dla nagrań domowych i tytułów bez klasyfikacji."
 	},
 	"errors": {
 		"database_connection_failed": "Nie udało się połączyć z bazą danych. Sprawdź dane połączenia i spróbuj ponownie.",
@@ -616,5 +621,85 @@
 	"languages": {
 		"pl": "Polski",
 		"en": "English"
+	},
+	"collections": {
+		"card_label": "{name} — kolekcja (filmy: {count})",
+		"badge": "Kolekcja · {count}",
+		"group_toggle": "Grupuj kolekcje",
+		"group_letter_hint": "Filtr litery pokazuje pojedyncze filmy",
+		"row_title": "Kolekcje — {name}",
+		"not_found": "Ta kolekcja nie istnieje albo nie ma w niej filmów dostępnych dla Ciebie.",
+		"load_failed": "Nie udało się wczytać kolekcji.",
+		"kicker": "Kolekcja",
+		"film_count": "Filmy: {count}",
+		"play_from_start": "Odtwórz od początku",
+		"films_title": "Filmy w kolekcji",
+		"from_collection": "Z kolekcji: {name}",
+		"see_collection": "Zobacz kolekcję"
+	},
+	"restrictions": {
+		"title": "Kontrola dostępu",
+		"hint": "Ogranicz, co to konto może przeglądać i odtwarzać: tylko wybrane biblioteki (np. „Bajki”) i limit wieku na podstawie klasyfikacji z TMDB. Zmiany działają od następnego żądania tego konta.",
+		"admin_note": "Administratorzy zawsze widzą wszystko — ograniczenia ich nie dotyczą.",
+		"presets": "Szybkie profile",
+		"preset_child": "Dziecko (do 7 lat, bez nieocenionych)",
+		"preset_teen": "Nastolatek (do 13 lat)",
+		"preset_none": "Bez ograniczeń",
+		"libraries": "Biblioteki",
+		"all_libraries": "Wszystkie biblioteki",
+		"only_selected": "Tylko wybrane biblioteki",
+		"nothing_visible": "Nie wybrano żadnej biblioteki: to konto nic nie zobaczy.",
+		"age_limit": "Limit wieku",
+		"no_age_limit": "Bez limitu wieku",
+		"age_all": "Tylko bez ograniczeń wiekowych",
+		"age_up_to": "Do {age} lat",
+		"age_examples": "Przykłady: PG → 10, PG-13 → 13, R → 17, FSK 12 → 12, TV-14 → 14, TV-MA → 17.",
+		"block_unrated": "Ukryj też tytuły bez kategorii wiekowej",
+		"save": "Zapisz ograniczenia",
+		"saved": "Zapisano ograniczenia.",
+		"restricted_badge": "Konto z ograniczeniami"
+	},
+	"trickplay_admin": {
+		"tab": "Miniatury",
+		"title": "Miniatury paska przewijania",
+		"hint": "Klatki podglądu dla paska odtwarzacza powstają w tle, po jednym pliku, i czekają, gdy ktoś transkoduje. Strona odświeża się sama.",
+		"load_failed": "Nie udało się wczytać stanu miniatur.",
+		"refresh_failed": "Ostatnie odświeżenie się nie udało; widać starsze liczby.",
+		"done_of": "Przetworzone: {done} z {total} filmów i odcinków",
+		"eta": "Pozostało",
+		"eta_soon": "mniej niż minuta",
+		"eta_minutes": "ok. {minutes} min",
+		"eta_hours": "ok. {hours} godz. {minutes} min",
+		"ready": "Gotowe",
+		"pending": "W kolejce",
+		"failed": "Błędy",
+		"now": "Teraz generuję",
+		"pace": "Ostatnie tempo: ok. {seconds} s na plik.",
+		"libraries": "Biblioteki",
+		"no_videos": "brak wideo",
+		"library_counts": "{done} / {total} · {percent}%",
+		"failures": "Pliki z błędem",
+		"failures_hint": "Plik z błędem jest ponawiany sam, gdy się zmieni. Po usunięciu przyczyny możesz ponowić od razu.",
+		"unknown_error": "nieznany błąd",
+		"retry": "Ponów",
+		"state_working": "Generuję",
+		"state_paused": "Wstrzymane na czas odtwarzania",
+		"state_idle": "Czeka na następną rundę",
+		"state_done": "Wszystko gotowe",
+		"state_disabled": "Wyłączone",
+		"state_no_ffmpeg": "Brak FFmpeg",
+		"explain_paused": "Ktoś właśnie transkoduje; generowanie ruszy, gdy skończy.",
+		"explain_idle": "Następny plik ruszy za chwilę (po skanowaniu albo w ciągu 15 minut).",
+		"explain_done": "Każde wideo ma miniatury. Nowe pliki dostaną je po następnym skanowaniu.",
+		"explain_disabled": "Generowanie jest wyłączone na serwerze (LISEK_TRICKPLAY=0). Gotowe miniatury dalej działają.",
+		"explain_no_ffmpeg": "Nie udało się uruchomić FFmpeg. Sprawdź ustawienia w zakładce „Limity odtwarzania”.",
+		"explain_working": "Generuję."
+	},
+	"pwa": {
+		"install": "Zainstaluj aplikację",
+		"install_ios": "Dodaj do ekranu początkowego",
+		"install_ios_hint": "W Safari stuknij Udostępnij, a potem „Do ekranu początk.”.",
+		"offline_title": "Brak połączenia",
+		"offline_hint": "LisekMovie potrzebuje połączenia z Twoim serwerem. Sprawdź sieć i spróbuj ponownie."
 	}
 }

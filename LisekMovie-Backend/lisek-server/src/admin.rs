@@ -334,6 +334,11 @@ pub struct UpdateMediaItemRequest {
     pub metadata_locked: bool,
     pub forced_provider: Option<String>,
     pub locked_fields: Vec<String>,
+    /// Faza 6: the administrator's own age rating (minimum viewer age,
+    /// 0–21) for parental controls; `null` or absent leaves the
+    /// provider's rating in charge.
+    #[serde(default)]
+    pub age_rating: Option<i32>,
 }
 
 /// The metadata editor's save action — see `lisek_db::update_media_item`'s
@@ -355,6 +360,15 @@ pub async fn update_media_item(
         ));
     }
 
+    if req
+        .age_rating
+        .is_some_and(|age| !(0..=lisek_db::access::MAX_AGE_RATING).contains(&age))
+    {
+        return Err(AdminError::InvalidInput(
+            "age_rating must be between 0 and 21".to_string(),
+        ));
+    }
+
     let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
     let updated = lisek_db::update_media_item(
         &pool,
@@ -366,6 +380,7 @@ pub async fn update_media_item(
         req.metadata_locked,
         req.forced_provider.as_deref(),
         &req.locked_fields,
+        req.age_rating,
     )
     .await
     .map_err(map_db_error)?;

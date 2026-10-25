@@ -50,6 +50,19 @@ pub struct MediaItemDetail {
     pub metadata_locked: bool,
     pub forced_provider: Option<String>,
     pub locked_fields: Vec<String>,
+    /// An administrator's own age rating (parental controls), which wins
+    /// over the provider's. `None`: the provider's value applies.
+    pub age_rating: Option<i32>,
+    /// What the provider says (shown next to the override in the editor).
+    pub provider_age_rating: Option<i32>,
+    pub certification: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct AgeColumns {
+    age_rating: Option<i32>,
+    provider_age_rating: Option<i32>,
+    certification: Option<String>,
 }
 
 type MediaItemDetailRow = (
@@ -81,6 +94,9 @@ fn media_item_detail_from_row(row: MediaItemDetailRow) -> MediaItemDetail {
         metadata_locked: row.9,
         forced_provider: row.10,
         locked_fields: row.11,
+        age_rating: None,
+        provider_age_rating: None,
+        certification: None,
     }
 }
 
@@ -108,8 +124,29 @@ pub async fn get_media_item_detail(
     .bind(item_id)
     .fetch_optional(pool)
     .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let ages = sqlx::query_as::<_, AgeColumns>(
+        r#"
+        SELECT CASE WHEN jsonb_typeof(metadata->'age_rating') = 'number'
+                    THEN (metadata->>'age_rating')::numeric::int END AS age_rating,
+               CASE WHEN jsonb_typeof(metadata->'provider_data'->'age_rating') = 'number'
+                    THEN (metadata->'provider_data'->>'age_rating')::numeric::int END
+                   AS provider_age_rating,
+               metadata->'provider_data'->>'certification' AS certification
+        FROM media_items WHERE id = $1
+        "#,
+    )
+    .bind(item_id)
+    .fetch_one(pool)
+    .await?;
 
-    Ok(row.map(media_item_detail_from_row))
+    let mut detail = media_item_detail_from_row(row);
+    detail.age_rating = ages.age_rating;
+    detail.provider_age_rating = ages.provider_age_rating;
+    detail.certification = ages.certification;
+    Ok(Some(detail))
 }
 
 /// The metadata editor's save action — an admin's own edit, so unlike
@@ -137,14 +174,17 @@ pub async fn update_media_item(
     metadata_locked: bool,
     forced_provider: Option<&str>,
     locked_fields: &[String],
+    age_rating: Option<i32>,
 ) -> Result<bool, DbError> {
     let row: Option<(Uuid,)> = sqlx::query_as(
         r#"
         UPDATE media_items
         SET title = $2,
-            metadata = (metadata - 'original_title' - 'year' - 'provider_data')
+            metadata = (metadata - 'original_title' - 'year' - 'provider_data' - 'age_rating')
                 || jsonb_build_object('original_title', $3::text)
                 || jsonb_build_object('year', $4::int)
+                || CASE WHEN $9::int IS NULL THEN '{}'::jsonb
+                        ELSE jsonb_build_object('age_rating', $9::int) END
                 || jsonb_build_object(
                     'provider_data',
                     COALESCE(metadata->'provider_data', '{}'::jsonb)
@@ -166,6 +206,7 @@ pub async fn update_media_item(
     .bind(metadata_locked)
     .bind(forced_provider)
     .bind(locked_fields)
+    .bind(age_rating)
     .fetch_optional(pool)
     .await?;
 

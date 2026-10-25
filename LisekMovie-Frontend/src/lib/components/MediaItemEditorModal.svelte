@@ -32,6 +32,7 @@
 		type UpdateMediaItemPayload
 	} from '$lib/admin/mediaItems';
 	import type { ProviderConfig } from '$lib/admin/providers';
+	import { AGE_LIMITS } from '$lib/users/restrictions';
 
 	const LOCKABLE_FIELDS = ['title', 'original_title', 'year', 'overview'] as const;
 	type LockableField = (typeof LOCKABLE_FIELDS)[number];
@@ -61,6 +62,8 @@
 	let overview = $state('');
 	let metadataLocked = $state(false);
 	let forcedProvider = $state('');
+	/** Faza 6: '' = the provider's age rating applies. */
+	let ageRating = $state('');
 	let activeFields = $state<LockableField[]>([...LOCKABLE_FIELDS]);
 
 	let saving = $state(false);
@@ -90,6 +93,10 @@
 			overview = detail.overview ?? '';
 			metadataLocked = detail.metadata_locked;
 			forcedProvider = detail.forced_provider ?? '';
+			ageRating =
+				detail.age_rating !== null && detail.age_rating !== undefined
+					? String(detail.age_rating)
+					: '';
 			activeFields = LOCKABLE_FIELDS.filter((field) => !detail.locked_fields.includes(field));
 		} catch {
 			loadFailed = true;
@@ -127,7 +134,8 @@
 			overview: overview.trim() || null,
 			metadata_locked: metadataLocked,
 			forced_provider: forcedProvider || null,
-			locked_fields: LOCKABLE_FIELDS.filter((field) => !activeFields.includes(field))
+			locked_fields: LOCKABLE_FIELDS.filter((field) => !activeFields.includes(field)),
+			age_rating: ageRating === '' ? null : Number(ageRating)
 		};
 
 		saving = true;
@@ -222,6 +230,26 @@
 							<option value={provider.provider_key}>{provider.display_name}</option>
 						{/each}
 					</select>
+				</label>
+
+				<label class="flex flex-col gap-1 text-sm text-neutral-300">
+					{t('admin.editor_age_rating')}
+					<select
+						bind:value={ageRating}
+						class="rounded-md border border-neutral-700 bg-black px-3 py-2 text-neutral-100 focus:border-gold"
+					>
+						<option value="">
+							{item?.provider_age_rating !== null && item?.provider_age_rating !== undefined
+								? t('admin.editor_age_from_provider', {
+										label: item.certification ?? `${item.provider_age_rating}+`
+									})
+								: t('admin.editor_age_unrated')}
+						</option>
+						{#each AGE_LIMITS as age (age)}
+							<option value={String(age)}>{`${age}+`}</option>
+						{/each}
+					</select>
+					<span class="text-xs text-neutral-500">{t('admin.editor_age_rating_hint')}</span>
 				</label>
 
 				<label class="flex items-start gap-2 text-sm text-neutral-300">

@@ -1,0 +1,43 @@
+<!doctype html>
+<!--
+  Shown by the service worker when a page cannot be loaded (no network or
+  the server is down). Self-contained: no app code, no API calls. The text
+  follows the browser language (Polish or English).
+-->
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="theme-color" content="#000000" />
+		<title>LisekMovie</title>
+		<style>
+			html, body { margin: 0; height: 100%; background: #000; color: #e5e5e5; font-family: system-ui, sans-serif; }
+			main { min-height: 100%; display: grid; place-items: center; text-align: center; padding: 24px; box-sizing: border-box; }
+			img { width: 96px; height: 96px; border-radius: 22px; }
+			h1 { color: #fff; font-size: 1.4rem; margin: 20px 0 8px; }
+			p { color: #a3a3a3; max-width: 28rem; line-height: 1.5; margin: 0 auto 24px; }
+			button { background: #bda24d; color: #000; border: 0; border-radius: 8px; padding: 12px 24px; font-weight: 600; font-size: 1rem; cursor: pointer; }
+			button:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+		</style>
+	</head>
+	<body>
+		<main>
+			<div>
+				<img src="/icons/icon-192.png" alt="" />
+				<h1 id="title">You're offline</h1>
+				<p id="hint">LisekMovie needs a connection to your server. Check the network and try again.</p>
+				<button id="retry" type="button" onclick="location.reload()">Try again</button>
+			</div>
+		</main>
+		<script>
+			if ((navigator.language || '').toLowerCase().startsWith('pl')) {
+				document.documentElement.lang = 'pl';
+				document.getElementById('title').textContent = 'Brak połączenia';
+				document.getElementById('hint').textContent =
+					'LisekMovie potrzebuje połączenia z Twoim serwerem. Sprawdź sieć i spróbuj ponownie.';
+				document.getElementById('retry').textContent = 'Spróbuj ponownie';
+			}
+			addEventListener('online', () => location.reload());
+		</script>
+	</body>
+</html>

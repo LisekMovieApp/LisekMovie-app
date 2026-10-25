@@ -8,6 +8,7 @@ use std::time::{Duration, SystemTime};
 
 use lisek_core::media_probe::{MediaProbe, MediaStream, StreamKind};
 use lisek_db::streams::FileStamp;
+use lisek_db::access::Restrictions;
 use lisek_db::{LibraryFilter, LibrarySort, PgPool};
 use lisek_library::{FileFacts, ScanResult, ScannedEpisode, ScannedMovie};
 use uuid::Uuid;
@@ -74,7 +75,7 @@ async fn scan_persistence_builds_series_and_tracks_file_changes() {
     assert_eq!((series, seasons, episodes), (2, 3, 4));
 
     // Catalog: one card per show, the card resolves back to the show.
-    let page = lisek_db::list_items_by_library_page(pool, tv, LibrarySort::TitleAsc, LibraryFilter::default(), 10, 0)
+    let page = lisek_db::list_items_by_library_page(pool, tv, LibrarySort::TitleAsc, LibraryFilter::default(), 10, 0, &Restrictions::NONE)
         .await
         .unwrap();
     assert_eq!(page.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(), ["Other", "Show"]);
@@ -82,7 +83,7 @@ async fn scan_persistence_builds_series_and_tracks_file_changes() {
     let show_card = page[1].id;
     let seasons = lisek_db::list_series_seasons(pool, show_card).await.unwrap();
     assert_eq!(seasons.iter().map(|s| (s.season, s.episodes.len())).collect::<Vec<_>>(), [(1, 2), (2, 1)]);
-    let detail = lisek_db::get_media_item(pool, seasons[0].episodes[0].id).await.unwrap().unwrap();
+    let detail = lisek_db::get_media_item(pool, seasons[0].episodes[0].id, &Restrictions::NONE).await.unwrap().unwrap();
     assert_eq!((detail.id, detail.item_type.as_str()), (show_card, "series"));
     let badges = lisek_db::classify_series_badges(pool, &[show_card]).await.unwrap();
     assert_eq!(badges.get(&show_card), Some(&lisek_db::SeriesBadge::NewSeries));
@@ -182,9 +183,17 @@ async fn locked_items_keep_metadata_but_refresh_file_facts() {
     let scan = vec![movie("/media/a.mkv", "Alpha", 2001, facts(1, 1))];
     let persisted = lisek_db::persist_scan_results(pool, movies, &scan).await.unwrap();
     let id = persisted.enrich_targets[0].0;
-    lisek_db::update_media_item(pool, id, "Alpha (Director's Cut)", None, Some(2002), None, true, None, &[])
+    lisek_db::update_media_item(pool, id, "Alpha (Director's Cut)", None, Some(2002), None, true, None, &[], Some(12))
         .await
         .unwrap();
+    // Faza 6: the administrator's age rating is stored and reported apart
+    // from the provider's.
+    let detail = lisek_db::get_media_item_detail(pool, id).await.unwrap().unwrap();
+    assert_eq!((detail.age_rating, detail.provider_age_rating), (Some(12), None));
+    assert_eq!(
+        lisek_db::access::item_rating(pool, id).await.unwrap(),
+        Some((Some(12), None))
+    );
 
     let renamed = vec![movie("/media/a.mkv", "Alpha Renamed", 1999, facts(2, 2))];
     let again = lisek_db::persist_scan_results(pool, movies, &renamed).await.unwrap();
@@ -215,34 +224,34 @@ async fn catalog_queries_merge_movies_and_series_correctly() {
         .await
         .unwrap();
 
-    let letter = |c| LibraryFilter { letter: Some(c), search: None };
-    let m = lisek_db::list_items_by_library_page(pool, movies, LibrarySort::TitleAsc, letter('m'), 10, 0).await.unwrap();
+    let letter = |c| LibraryFilter { letter: Some(c), ..LibraryFilter::default() };
+    let m = lisek_db::list_items_by_library_page(pool, movies, LibrarySort::TitleAsc, letter('m'), 10, 0, &Restrictions::NONE).await.unwrap();
     assert_eq!(m.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(), ["Matrix", "Memento"]);
-    assert_eq!(lisek_db::count_items_by_library(pool, movies, letter('A')).await.unwrap(), 1, "case-insensitive");
-    let search = LibraryFilter { letter: None, search: Some("% off_") };
-    let found = lisek_db::list_items_by_library_page(pool, movies, LibrarySort::TitleAsc, search, 10, 0).await.unwrap();
+    assert_eq!(lisek_db::count_items_by_library(pool, movies, letter('A'), &Restrictions::NONE).await.unwrap(), 1, "case-insensitive");
+    let search = LibraryFilter { search: Some("% off_"), ..LibraryFilter::default() };
+    let found = lisek_db::list_items_by_library_page(pool, movies, LibrarySort::TitleAsc, search, 10, 0, &Restrictions::NONE).await.unwrap();
     assert_eq!(found.len(), 1, "wildcards in the search term are literal");
-    let desc = lisek_db::list_items_by_library_page(pool, movies, LibrarySort::TitleDesc, LibraryFilter::default(), 2, 1)
+    let desc = lisek_db::list_items_by_library_page(pool, movies, LibrarySort::TitleDesc, LibraryFilter::default(), 2, 1, &Restrictions::NONE)
         .await
         .unwrap();
     assert_eq!(desc.len(), 2);
 
-    let recent = lisek_db::list_recently_added(pool, None, 3).await.unwrap();
+    let recent = lisek_db::list_recently_added(pool, None, 3, &Restrictions::NONE).await.unwrap();
     assert_eq!(recent[0].title, "Mandalorian", "the newest scan comes first");
-    let top = lisek_db::list_top_today(pool, 10).await.unwrap();
+    let top = lisek_db::list_top_today(pool, 10, &Restrictions::NONE).await.unwrap();
     assert_eq!(top.first().map(|i| i.year), Some(Some(1994)));
     assert_eq!(top.last().map(|i| i.item_type.as_str()), Some("series"), "undated shows sort last");
     for _ in 0..20 {
-        let sample = lisek_db::list_recommended(pool, None, 4).await.unwrap();
+        let sample = lisek_db::list_recommended(pool, None, 4, &Restrictions::NONE).await.unwrap();
         assert_eq!(sample.len(), 4);
         let mut ids: Vec<_> = sample.iter().map(|i| i.id).collect();
         ids.sort();
         ids.dedup();
         assert_eq!(ids.len(), 4, "no duplicates");
     }
-    let everything = lisek_db::list_popular(pool, Some(movies), 50).await.unwrap();
+    let everything = lisek_db::list_popular(pool, Some(movies), 50, &Restrictions::NONE).await.unwrap();
     assert_eq!(everything.len(), 5, "a limit above the library size returns each item once");
-    assert!(lisek_db::get_hero_item(pool).await.unwrap().is_some());
+    assert!(lisek_db::get_hero_item(pool, &Restrictions::NONE).await.unwrap().is_some());
 
     let (job, created) = lisek_db::scan_jobs::enqueue(pool, movies, None).await.unwrap();
     assert!(created);

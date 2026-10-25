@@ -57,6 +57,10 @@
   would otherwise bloat this file — see its own top comment for its data
   flow and its own `$effect`/`loadSeq` pair, which mirrors this file's
   exactly.
+
+  Faza 6: a "Kolekcje" row (box sets with two or more films here) sits
+  under "Ostatnio dodane". It loads on its own and stays out of the header
+  logic: a library without collections simply shows no row.
 -->
 <script lang="ts">
 	import { page } from '$app/state';
@@ -67,6 +71,7 @@
 		fetchLibraryRecent,
 		fetchLibraryRecommended,
 		fetchLibraryPopular,
+		fetchLibraryCollections,
 		LibraryNotFoundError,
 		type LibraryRowItems,
 		type LibrarySummary,
@@ -91,6 +96,20 @@
 	let recommendedError = $state(false);
 	let popularItems: MediaItem[] | null = $state(null);
 	let popularError = $state(false);
+	/** `[]` until loaded or on failure: the row is decoration, never a
+	 * skeleton or an error line. */
+	let collectionItems: MediaItem[] = $state([]);
+
+	async function loadCollections(id: string, mySeq: number) {
+		const sessionToken = getSessionCookieClientSide();
+		if (!sessionToken) return;
+		try {
+			const result = await fetchLibraryCollections(sessionToken, id);
+			if (mySeq === loadSeq) collectionItems = result.items;
+		} catch {
+			// No row.
+		}
+	}
 
 	/** How many of the three row fetches have settled (success or failure)
 	 * for the current `libraryId` — reset to 0 on every navigation, used
@@ -167,7 +186,9 @@
 		recommendedError = false;
 		popularItems = null;
 		popularError = false;
+		collectionItems = [];
 		rowsSettled = 0;
+		loadCollections(id, mySeq);
 
 		loadRow(
 			id,
@@ -246,6 +267,13 @@
 					<p class="px-4 text-sm text-red-400 md:px-8">{t('library.recent_failed')}</p>
 				{/if}
 			</div>
+
+			<MediaRow
+				titleKey="collections.row_title"
+				titleParams={{ name: library.name }}
+				items={collectionItems}
+				{token}
+			/>
 
 			<div>
 				<MediaRow

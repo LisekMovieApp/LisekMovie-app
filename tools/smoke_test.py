@@ -443,6 +443,10 @@ def main():
             assert request('/api/admin/playback/settings',token=other_token)[0]==403
             assert request('/api/admin/playback/settings','PUT',settings,other_token)[0]==403
             assert ok_json("/api/me/list",token=other_token) == []
+            # Faza 6: collections and per-account restrictions.
+            from collections_smoke import check_collections_and_restrictions
+            admin_id=sql(f"SELECT id FROM users WHERE username='{config['admin_username']}'")
+            check_collections_and_restrictions(request,ok_json,sql,token,admin_id,item_id,library_id,other_token,other_id)
             if args.ffmpeg and args.ffprobe:
                 # After the checks that count items and webhook deliveries.
                 check_hls_engine(args,root,request,ok_json,sql,token,base)
@@ -466,7 +470,7 @@ def main():
             server.wait(timeout=10)
             log.close()
             server = None
-            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications")
+            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls")
     finally:
         if server:
             server.terminate()

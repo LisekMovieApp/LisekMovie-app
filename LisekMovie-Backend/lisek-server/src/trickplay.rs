@@ -11,6 +11,7 @@
 //! `LISEK_TRICKPLAY=0` turns generation off (thumbnails already made are
 //! still served).
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -22,7 +23,10 @@ use axum::{
 };
 use lisek_core::playback_settings::PlaybackSettings;
 use lisek_db::PgPool;
-use lisek_db::trickplay::{self as db, TrickplayCandidate, TrickplayReady, TrickplayStats};
+use lisek_db::trickplay::{
+    self as db, LibraryTrickplayStats, TrickplayCandidate, TrickplayFailure, TrickplayReady,
+    TrickplayStats,
+};
 use lisek_playback::session;
 use lisek_playback::transcode::{self, FfmpegTools};
 use lisek_playback::trickplay::{self, Plan, TrickplayError};
@@ -39,6 +43,42 @@ const BATCH: i64 = 8;
 const IDLE_RECHECK: Duration = Duration::from_secs(15 * 60);
 /// Re-check interval while someone is transcoding.
 const BUSY_RECHECK: Duration = Duration::from_secs(30);
+
+/// Generation times kept for the ETA estimate.
+const TIMING_WINDOW: usize = 20;
+
+/// The worker's live state for the admin view. Lives in memory: after a
+/// restart it starts empty.
+#[derive(Debug, Default)]
+pub struct Progress {
+    current: Option<CurrentJob>,
+    /// Seconds per item of the latest generations, newest last.
+    recent: VecDeque<f64>,
+    /// FFmpeg could not be started; generation waits for a configuration
+    /// change.
+    ffmpeg_missing: bool,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct CurrentJob {
+    pub item_id: Uuid,
+    pub title: String,
+    pub season: Option<i32>,
+    pub episode: Option<i32>,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl Progress {
+    fn average_seconds(&self) -> Option<f64> {
+        (!self.recent.is_empty()).then(|| self.recent.iter().sum::<f64>() / self.recent.len() as f64)
+    }
+}
+
+fn set_progress(state: &SharedState, update: impl FnOnce(&mut Progress)) {
+    if let Ok(mut progress) = state.trickplay_progress.lock() {
+        update(&mut progress);
+    }
+}
 
 fn root() -> PathBuf {
     config_dir().join("trickplay")
@@ -108,14 +148,37 @@ pub async fn run_worker(state: SharedState) {
             tracing::warn!(
                 "FFmpeg is not available; trickplay thumbnails wait until it is configured"
             );
+            set_progress(&state, |p| p.ffmpeg_missing = true);
             wait(&state, IDLE_RECHECK).await;
             continue;
         }
+        set_progress(&state, |p| p.ffmpeg_missing = false);
         for candidate in candidates {
             if session::encoding_sessions() > 0 {
                 break;
             }
-            if !process(&pool, &settings, &tools, candidate).await {
+            let job = CurrentJob {
+                item_id: candidate.id,
+                title: candidate.title.clone(),
+                season: candidate.season_number,
+                episode: candidate.episode_number,
+                started_at: chrono::Utc::now(),
+            };
+            set_progress(&state, |p| p.current = Some(job));
+            let started = Instant::now();
+            let outcome = process(&pool, &settings, &tools, candidate).await;
+            let elapsed = started.elapsed().as_secs_f64();
+            set_progress(&state, |p| {
+                p.current = None;
+                if outcome == Outcome::Done {
+                    p.recent.push_back(elapsed);
+                    while p.recent.len() > TIMING_WINDOW {
+                        p.recent.pop_front();
+                    }
+                }
+                p.ffmpeg_missing = outcome == Outcome::FfmpegMissing;
+            });
+            if outcome == Outcome::FfmpegMissing {
                 wait(&state, IDLE_RECHECK).await;
                 break;
             }
@@ -123,24 +186,34 @@ pub async fn run_worker(state: SharedState) {
     }
 }
 
-/// Generates one item. `false` when FFmpeg itself cannot run (nothing
-/// else can succeed until the configuration changes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    /// Sheets made.
+    Done,
+    /// This item failed (recorded); carry on with the next.
+    Failed,
+    /// FFmpeg itself cannot run: nothing else can succeed until the
+    /// configuration changes.
+    FfmpegMissing,
+}
+
+/// Generates one item.
 async fn process(
     pool: &PgPool,
     settings: &PlaybackSettings,
     tools: &FfmpegTools,
     item: TrickplayCandidate,
-) -> bool {
+) -> Outcome {
     let started = Instant::now();
     let size = |v: Option<i32>| v.unwrap_or(0).max(0) as u32;
     let Some(plan) = Plan::new(item.duration_seconds, size(item.width), size(item.height)) else {
         failed(pool, &item, "no picture size or duration").await;
-        return true;
+        return Outcome::Failed;
     };
     let input = PathBuf::from(&item.file_path);
     if !tokio::fs::try_exists(&input).await.unwrap_or(false) {
         failed(pool, &item, "file not found").await;
-        return true;
+        return Outcome::Failed;
     }
     let id = item.id.to_string();
     let target = trickplay::item_dir(&root(), &id);
@@ -161,7 +234,7 @@ async fn process(
             if let Err(err) = tokio::fs::rename(&building, &target).await {
                 let _ = tokio::fs::remove_dir_all(&building).await;
                 failed(pool, &item, &format!("cannot store thumbnails: {err}")).await;
-                return true;
+                return Outcome::Failed;
             }
             let count = plan.count.min(sheets * plan.per_sheet());
             let ready = TrickplayReady {
@@ -187,18 +260,18 @@ async fn process(
                 elapsed_ms = started.elapsed().as_millis() as u64,
                 "trickplay thumbnails ready"
             );
-            true
+            Outcome::Done
         }
         Err(TrickplayError::Spawn(err)) => {
             let _ = tokio::fs::remove_dir_all(&building).await;
             tracing::warn!(%err, "cannot start FFmpeg for trickplay");
-            false
+            Outcome::FfmpegMissing
         }
         Err(err) => {
             let _ = tokio::fs::remove_dir_all(&building).await;
             tracing::warn!(item_id = %item.id, file = %item.file_path, %err, "trickplay generation failed");
             failed(pool, &item, &err.to_string()).await;
-            true
+            Outcome::Failed
         }
     }
 }
@@ -262,11 +335,15 @@ fn not_ready() -> PlaybackError {
 /// background job has made them.
 #[utoipa::path(get,path="/api/media/{item_id}/trickplay",tag="media",params(("item_id"=Uuid,Path)),responses((status=200,body=TrickplayManifest),(status=401),(status=404),(status=503)),security(("lisek_auth"=[])))]
 pub async fn manifest(
-    _auth: AuthUser,
+    auth: AuthUser,
     State(state): State<SharedState>,
     Path(item_id): Path<Uuid>,
 ) -> Result<Json<TrickplayManifest>, PlaybackError> {
-    let row = db::get_trickplay(&pool(&state).await?, item_id)
+    let pool = pool(&state).await?;
+    if !auth.can_see(&pool, item_id).await? {
+        return Err(not_ready());
+    }
+    let row = db::get_trickplay(&pool, item_id)
         .await?
         .ok_or_else(not_ready)?;
     // Part of every URL: a regenerated set never comes from a stale cache.
@@ -288,11 +365,15 @@ pub async fn manifest(
 /// the set is regenerated.
 #[utoipa::path(get,path="/api/media/{item_id}/trickplay/{sheet}",tag="media",params(("item_id"=Uuid,Path),("sheet"=u32,Path)),responses((status=200,description="JPEG sprite sheet"),(status=401),(status=404),(status=503)),security(("lisek_auth"=[])))]
 pub async fn sheet(
-    _auth: AuthUser,
+    auth: AuthUser,
     State(state): State<SharedState>,
     Path((item_id, sheet)): Path<(Uuid, u32)>,
 ) -> Result<Response, PlaybackError> {
-    let row = db::get_trickplay(&pool(&state).await?, item_id)
+    let pool = pool(&state).await?;
+    if !auth.can_see(&pool, item_id).await? {
+        return Err(not_ready());
+    }
+    let row = db::get_trickplay(&pool, item_id)
         .await?
         .ok_or_else(not_ready)?;
     if i64::from(sheet) >= i64::from(row.sheet_count) {
@@ -330,23 +411,71 @@ pub async fn regenerate(
     Ok(StatusCode::ACCEPTED)
 }
 
+/// How many failures [`status`] lists.
+const FAILURE_LIST: i64 = 50;
+
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct TrickplayStatus {
     /// Generation runs (`LISEK_TRICKPLAY` not set to 0).
     pub enabled: bool,
+    /// Generation waits because someone is transcoding.
+    pub paused_for_playback: bool,
+    /// FFmpeg could not be started (check Admin → Playback).
+    pub ffmpeg_missing: bool,
     #[serde(flatten)]
     pub counts: TrickplayStats,
+    /// The item being generated right now.
+    pub current: Option<CurrentJob>,
+    /// Average seconds per item over the latest generations (since start).
+    pub average_seconds: Option<f64>,
+    /// `pending * average_seconds`, when an average exists.
+    pub eta_seconds: Option<f64>,
+    pub libraries: Vec<LibraryTrickplayStats>,
+    /// Latest failures, newest first.
+    pub failures: Vec<TrickplayFailure>,
 }
 
-/// How far thumbnail generation has got.
+/// How far thumbnail generation has got: totals, per library, the item in
+/// progress and recent failures. The admin page polls it.
 #[utoipa::path(get,path="/api/admin/trickplay",tag="admin",responses((status=200,body=TrickplayStatus),(status=401),(status=403),(status=503)),security(("lisek_auth"=[])))]
 pub async fn status(
     _admin: AdminUser,
     State(state): State<SharedState>,
 ) -> Result<Json<TrickplayStatus>, PlaybackError> {
-    let counts = db::trickplay_stats(&pool(&state).await?).await?;
+    let pool = pool(&state).await?;
+    let (counts, libraries, failures) = tokio::try_join!(
+        db::trickplay_stats(&pool),
+        db::trickplay_library_stats(&pool),
+        db::trickplay_failures(&pool, FAILURE_LIST),
+    )?;
+    let (current, average_seconds, ffmpeg_missing) = state
+        .trickplay_progress
+        .lock()
+        .map(|p| (p.current.clone(), p.average_seconds(), p.ffmpeg_missing))
+        .unwrap_or_default();
+    let enabled = enabled();
     Ok(Json(TrickplayStatus {
-        enabled: enabled(),
+        enabled,
+        paused_for_playback: enabled && session::encoding_sessions() > 0,
+        ffmpeg_missing,
+        eta_seconds: average_seconds.map(|avg| avg * counts.pending as f64),
         counts,
+        current,
+        average_seconds,
+        libraries,
+        failures,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn average_covers_the_latest_generations() {
+        let mut progress = Progress::default();
+        assert_eq!(progress.average_seconds(), None);
+        progress.recent.extend([10.0, 20.0, 30.0]);
+        assert_eq!(progress.average_seconds(), Some(20.0));
+    }
 }

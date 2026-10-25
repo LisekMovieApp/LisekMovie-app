@@ -145,9 +145,12 @@ pub struct ListEntry {
     pub favorite: bool,
 }
 
-pub async fn my_list(pool: &PgPool, user_id: Uuid) -> Result<Vec<ListEntry>, DbError> {
-    Ok(sqlx::query_as("SELECT m.id,m.title,m.item_type,m.season_number AS season,m.episode_number AS episode,u.position_seconds,u.duration_seconds,u.watched,u.favorite FROM user_media_state u JOIN media_items m ON m.id=u.item_id WHERE u.user_id=$1 ORDER BY u.updated_at DESC LIMIT 500")
-        .bind(user_id).fetch_all(pool).await?)
+/// Continue watching / favourites. Items the account may no longer see
+/// (restrictions changed since) are left out.
+pub async fn my_list(pool: &PgPool, user_id: Uuid, access: &crate::access::Restrictions) -> Result<Vec<ListEntry>, DbError> {
+    let (libraries, max_age, block_unrated) = access.binds();
+    Ok(sqlx::query_as("SELECT m.id,m.title,m.item_type,m.season_number AS season,m.episode_number AS episode,u.position_seconds,u.duration_seconds,u.watched,u.favorite FROM user_media_state u JOIN media_items m ON m.id=u.item_id WHERE u.user_id=$1 AND lisek_visible(m.library_id,m.age_rating,$2,$3,$4) ORDER BY u.updated_at DESC LIMIT 500")
+        .bind(user_id).bind(libraries).bind(max_age).bind(block_unrated).fetch_all(pool).await?)
 }
 
 #[derive(Serialize, sqlx::FromRow)]

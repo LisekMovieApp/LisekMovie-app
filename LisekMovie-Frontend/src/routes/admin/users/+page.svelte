@@ -6,17 +6,31 @@
     import { t, getLocale, SUPPORTED_LOCALES } from '$lib/i18n';
     import { getSessionCookieClientSide, clearSessionCookie } from '$lib/auth';
     import { accountRequest, accountErrorKey, type Account } from '$lib/users/api';
+    import { listRestricted } from '$lib/users/restrictions';
+    import { fetchLibraries, type Library } from '$lib/admin/libraries';
+    import UserRestrictions from '$lib/components/UserRestrictions.svelte';
+    import Icon from '$lib/components/Icon.svelte';
+    import { SvelteSet } from 'svelte/reactivity';
     let users = $state<Account[]>([]), selected = $state<Account | null>(null);
     let creating = $state(false), loaded = $state(false), busy = $state(false);
     let name = $state(''), admin = $state(false), disabled = $state(false), language = $state('');
     let password = $state(''), error = $state(''), saved = $state(false);
     let secret = $state(''), secretName = $state(''), reveal = $state(false), copied = $state(false), signedOut = $state(false);
-    let token = '';
+    let token = $state('');
+    /** Faza 6: accounts with parental controls (lock in the list) and the
+     * libraries the restrictions editor offers. */
+    const restricted = new SvelteSet<string>();
+    let libraries = $state<Library[]>([]);
     onMount(async () => {
         token = getSessionCookieClientSide() ?? '';
         try { users = await accountRequest<Account[]>(token, '/api/admin/users'); loaded = true; }
         catch (e) { error = accountErrorKey(e); }
+        listRestricted(token).then(r => r.forEach(x => restricted.add(x.user_id))).catch(() => {});
+        fetchLibraries(token).then(l => libraries = l).catch(() => {});
     });
+    function markRestricted(id: string, on: boolean) {
+        if (on) restricted.add(id); else restricted.delete(id);
+    }
     function edit(user: Account | null) {
         selected = user; creating = !user;
         name = user?.username ?? ''; admin = user?.is_admin ?? false; disabled = user?.disabled ?? false;
@@ -83,7 +97,7 @@
             {#if !loaded}<p>{t('accounts.loading')}</p>{/if}
             {#each users as user (user.id)}
                 <button disabled={busy || signedOut} onclick={() => edit(user)} aria-current={selected?.id === user.id ? 'true' : undefined} class="text-left {selected?.id === user.id ? 'border-gold bg-white/5' : ''}">
-                    <span class="block break-all font-medium">{user.username}</span>
+                    <span class="flex items-center gap-1.5 break-all font-medium">{user.username}{#if restricted.has(user.id) && !user.is_admin}<span class="text-gold" title={t('restrictions.restricted_badge')}><Icon name="lock" class="size-3.5" /></span>{/if}</span>
                     <span class="text-xs text-neutral-400">{user.is_admin ? t('accounts.administrator') : t('accounts.user')} · {user.disabled ? t('accounts.disabled') : user.must_change_password ? t('accounts.password_change_required') : t('accounts.active')}</span>
                 </button>
             {/each}
@@ -94,7 +108,7 @@
                 <form onsubmit={save} class="flex flex-col gap-4">
                     <fieldset disabled={busy || signedOut} class="flex flex-col gap-4">
                         <label>{t('accounts.username')}<input required maxlength="128" autocomplete="off" bind:value={name} /></label>
-                        <label>{t('accounts.interface_language')}<select bind:value={language}>{#each SUPPORTED_LOCALES as locale}<option value={locale}>{t(`languages.${locale}`)}</option>{/each}</select></label>
+                        <label>{t('accounts.interface_language')}<select bind:value={language}>{#each SUPPORTED_LOCALES as locale (locale)}<option value={locale}>{t(`languages.${locale}`)}</option>{/each}</select></label>
                         <label class="check"><input type="checkbox" bind:checked={admin} />{t('accounts.allow_server_management_administrator')}</label>
                         {#if !creating}<label class="check"><input type="checkbox" bind:checked={disabled} />{t('accounts.disable_account')}</label><p class="text-xs text-neutral-400">{t('accounts.access_hint')}</p>{/if}
                         {#if creating}<label>{t('accounts.custom_temporary_password_optional')}<input type="password" minlength="8" maxlength="1024" autocomplete="new-password" bind:value={password} /></label><p class="text-xs text-neutral-400">{t('accounts.generate_password_hint')}</p>{/if}
@@ -110,6 +124,9 @@
                             <button>{password ? t('accounts.set_temporary_password') : t('accounts.generate_new_temporary_password')}</button>
                         </fieldset>
                     </form>
+                    {#key selected.id}
+                        <UserRestrictions userId={selected.id} isAdmin={selected.is_admin} {libraries} {token} disabled={signedOut} onchange={(on) => selected && markRestricted(selected.id, on)} />
+                    {/key}
                 {/if}
             </div>
         {:else}<p class="rounded-lg border border-dashed border-white/10 p-8 text-neutral-400">{t('accounts.select_account_hint')}</p>{/if}

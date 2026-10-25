@@ -78,14 +78,31 @@ pub struct MediaItemResponse {
     /// [`to_response`]/[`to_responses`]), not something the Detail View
     /// itself was ever asked to show.
     pub badge: Option<String>,
+    /// `"collection"` cards only: how many of its films this card stands
+    /// for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item_count: Option<i64>,
+    /// Detail view only: minimum viewer age (parental controls) and the
+    /// certification it comes from, e.g. 13 and "PG-13". A rating set by
+    /// an administrator has no certification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub age_rating: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub certification: Option<String>,
 }
 
 impl From<lisek_core::MediaItem> for MediaItemResponse {
     fn from(item: lisek_core::MediaItem) -> Self {
+        // A collection card's artwork comes from the collection itself.
+        let base = if item.item_type == "collection" {
+            "collections"
+        } else {
+            "media"
+        };
         Self {
-            poster_url: format!("/api/media/{}/poster", item.id),
-            backdrop_url: format!("/api/media/{}/backdrop", item.id),
-            logo_url: format!("/api/media/{}/logo", item.id),
+            poster_url: format!("/api/{base}/{}/poster", item.id),
+            backdrop_url: format!("/api/{base}/{}/backdrop", item.id),
+            logo_url: format!("/api/{base}/{}/logo", item.id),
             id: item.id,
             item_type: item.item_type,
             title: item.title,
@@ -94,6 +111,9 @@ impl From<lisek_core::MediaItem> for MediaItemResponse {
             season: item.season,
             episode: item.episode,
             badge: None,
+            item_count: None,
+            age_rating: None,
+            certification: None,
         }
     }
 }
@@ -132,7 +152,7 @@ fn is_recently_added(created_at: DateTime<Utc>, now: DateTime<Utc>) -> bool {
     now - created_at <= Duration::days(lisek_db::RECENT_BADGE_DAYS)
 }
 
-async fn to_responses(
+pub(crate) async fn to_responses(
     pool: &lisek_db::PgPool,
     items: Vec<lisek_core::MediaItem>,
 ) -> Vec<MediaItemResponse> {
@@ -176,19 +196,20 @@ pub struct HomeFeedResponse {
 /// tracking (not yet built — see the roadmap).
 #[utoipa::path(get,path="/api/home",tag="media",responses((status=200,body=HomeFeedResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn home_feed(
-    _auth: AuthUser,
+    auth: AuthUser,
     State(state): State<SharedState>,
 ) -> Result<Json<HomeFeedResponse>, MediaError> {
     let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
+    let access = &auth.access;
 
     // Five independent index-backed queries: run them concurrently on
     // separate pool connections instead of back to back.
     let (hero, recently_added, top10, recommended, popular) = tokio::try_join!(
-        lisek_db::get_hero_item(&pool),
-        lisek_db::list_recently_added(&pool, None, ROW_LIMIT),
-        lisek_db::list_top_today(&pool, TOP10_LIMIT),
-        lisek_db::list_recommended(&pool, None, ROW_LIMIT),
-        lisek_db::list_popular(&pool, None, ROW_LIMIT),
+        lisek_db::get_hero_item(&pool, access),
+        lisek_db::list_recently_added(&pool, None, ROW_LIMIT, access),
+        lisek_db::list_top_today(&pool, TOP10_LIMIT, access),
+        lisek_db::list_recommended(&pool, None, ROW_LIMIT, access),
+        lisek_db::list_popular(&pool, None, ROW_LIMIT, access),
     )
     .map_err(|_| MediaError::Internal)?;
 
@@ -253,14 +274,50 @@ impl From<lisek_core::Library> for PublicLibraryResponse {
 /// own reorder buttons about which library comes first.
 #[utoipa::path(get,path="/api/libraries",tag="media",responses((status=200,body=Vec<PublicLibraryResponse>),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn list_libraries(
-    _auth: AuthUser,
+    auth: AuthUser,
     State(state): State<SharedState>,
 ) -> Result<Json<Vec<PublicLibraryResponse>>, MediaError> {
     let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
     let libraries = lisek_db::list_libraries(&pool)
         .await
         .map_err(|_| MediaError::Internal)?;
-    Ok(Json(libraries.into_iter().map(Into::into).collect()))
+    // A restricted account only learns about the libraries it may open.
+    Ok(Json(
+        libraries
+            .into_iter()
+            .filter(|library| auth.access.allows_library(library.id))
+            .map(Into::into)
+            .collect(),
+    ))
+}
+
+/// The library `library_id`, if it exists and `auth` may open it — one
+/// 404 for both, so a restricted account cannot probe for libraries.
+pub(crate) async fn visible_library(
+    pool: &lisek_db::PgPool,
+    auth: &AuthUser,
+    library_id: Uuid,
+) -> Result<lisek_core::Library, MediaError> {
+    if !auth.access.allows_library(library_id) {
+        return Err(MediaError::LibraryNotFound);
+    }
+    lisek_db::get_library(pool, library_id)
+        .await
+        .map_err(|_| MediaError::Internal)?
+        .ok_or(MediaError::LibraryNotFound)
+}
+
+/// 404 (as for a missing item) when `auth` may not see `item_id`.
+pub(crate) async fn ensure_visible(
+    pool: &lisek_db::PgPool,
+    auth: &AuthUser,
+    item_id: Uuid,
+) -> Result<(), MediaError> {
+    match auth.can_see(pool, item_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(MediaError::NotFound),
+        Err(_) => Err(MediaError::Internal),
+    }
 }
 
 /// How many rows [`library_recent`]/[`library_recommended`]/
@@ -291,6 +348,9 @@ pub struct LibraryItemsQuery {
     /// Case-insensitive title substring (trigram-indexed). Blank or longer
     /// than [`MAX_SEARCH_CHARS`] characters is ignored.
     pub q: Option<String>,
+    /// Show each collection with two or more films here as one
+    /// `"collection"` card. Ignored with `letter` or `q`.
+    pub group_collections: Option<bool>,
 }
 
 const MAX_SEARCH_CHARS: usize = 100;
@@ -356,24 +416,22 @@ pub struct LibraryItemsResponse {
 /// library exists and has nothing in it yet" and "this library doesn't
 /// exist", and the frontend needs to tell those apart to show the right
 /// message.
-#[utoipa::path(get,path="/api/libraries/{library_id}/items",tag="media",params(("library_id"=uuid::Uuid,Path),("page"=Option<i64>,Query),("sort"=Option<String>,Query),("letter"=Option<String>,Query),("q"=Option<String>,Query),("page_size"=Option<i64>,Query)),responses((status=200,body=LibraryItemsResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
+#[utoipa::path(get,path="/api/libraries/{library_id}/items",tag="media",params(("library_id"=uuid::Uuid,Path),("page"=Option<i64>,Query),("sort"=Option<String>,Query),("letter"=Option<String>,Query),("q"=Option<String>,Query),("page_size"=Option<i64>,Query),("group_collections"=Option<bool>,Query)),responses((status=200,body=LibraryItemsResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn library_items(
-    _auth: AuthUser,
+    auth: AuthUser,
     State(state): State<SharedState>,
     Path(library_id): Path<Uuid>,
     Query(query): Query<LibraryItemsQuery>,
 ) -> Result<Json<LibraryItemsResponse>, MediaError> {
     let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
-
-    let library = lisek_db::get_library(&pool, library_id)
-        .await
-        .map_err(|_| MediaError::Internal)?
-        .ok_or(MediaError::LibraryNotFound)?;
+    let library = visible_library(&pool, &auth, library_id).await?;
+    let access = &auth.access;
 
     let sort = parse_library_sort(query.sort.as_deref());
     let filter = lisek_db::LibraryFilter {
         letter: parse_letter_filter(query.letter.as_deref()),
         search: parse_search(query.q.as_deref()),
+        group_collections: query.group_collections.unwrap_or(false),
     };
     let page = query.page.unwrap_or(1).max(1);
     let page_size = query
@@ -384,14 +442,31 @@ pub async fn library_items(
     let offset = (page - 1).saturating_mul(page_size);
 
     let (total, items) = tokio::try_join!(
-        lisek_db::count_items_by_library(&pool, library_id, filter),
-        lisek_db::list_items_by_library_page(&pool, library_id, sort, filter, page_size, offset),
+        lisek_db::count_items_by_library(&pool, library_id, filter, access),
+        lisek_db::list_items_by_library_page(
+            &pool, library_id, sort, filter, page_size, offset, access
+        ),
     )
     .map_err(|_| MediaError::Internal)?;
 
+    let collections: Vec<Uuid> = items
+        .iter()
+        .filter(|item| item.item_type == "collection")
+        .map(|item| item.id)
+        .collect();
+    let counts = lisek_db::collections::counts_in_library(&pool, &collections, library_id, access)
+        .await
+        .unwrap_or_default();
+    let mut items = to_responses(&pool, items).await;
+    for item in &mut items {
+        if item.item_type == "collection" {
+            item.item_count = counts.get(&item.id).copied();
+        }
+    }
+
     Ok(Json(LibraryItemsResponse {
         library: library.into(),
-        items: to_responses(&pool, items).await,
+        items,
         total,
         page,
         page_size,
@@ -418,18 +493,14 @@ pub struct LibraryRowResponse {
 /// home feed's own "recently added" row already uses.
 #[utoipa::path(get,path="/api/libraries/{library_id}/recent",tag="media",params(("library_id"=uuid::Uuid,Path)),responses((status=200,body=LibraryRowResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn library_recent(
-    _auth: AuthUser,
+    auth: AuthUser,
     State(state): State<SharedState>,
     Path(library_id): Path<Uuid>,
 ) -> Result<Json<LibraryRowResponse>, MediaError> {
     let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
+    let library = visible_library(&pool, &auth, library_id).await?;
 
-    let library = lisek_db::get_library(&pool, library_id)
-        .await
-        .map_err(|_| MediaError::Internal)?
-        .ok_or(MediaError::LibraryNotFound)?;
-
-    let items = lisek_db::list_recently_added(&pool, Some(library_id), LIBRARY_ROW_LIMIT)
+    let items = lisek_db::list_recently_added(&pool, Some(library_id), LIBRARY_ROW_LIMIT, &auth.access)
         .await
         .map_err(|_| MediaError::Internal)?;
 
@@ -445,18 +516,14 @@ pub async fn library_recent(
 /// feed's own recommended row.
 #[utoipa::path(get,path="/api/libraries/{library_id}/recommended",tag="media",params(("library_id"=uuid::Uuid,Path)),responses((status=200,body=LibraryRowResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn library_recommended(
-    _auth: AuthUser,
+    auth: AuthUser,
     State(state): State<SharedState>,
     Path(library_id): Path<Uuid>,
 ) -> Result<Json<LibraryRowResponse>, MediaError> {
     let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
+    let library = visible_library(&pool, &auth, library_id).await?;
 
-    let library = lisek_db::get_library(&pool, library_id)
-        .await
-        .map_err(|_| MediaError::Internal)?
-        .ok_or(MediaError::LibraryNotFound)?;
-
-    let items = lisek_db::list_recommended(&pool, Some(library_id), LIBRARY_ROW_LIMIT)
+    let items = lisek_db::list_recommended(&pool, Some(library_id), LIBRARY_ROW_LIMIT, &auth.access)
         .await
         .map_err(|_| MediaError::Internal)?;
 
@@ -471,18 +538,14 @@ pub async fn library_recommended(
 /// the home feed's own popular row.
 #[utoipa::path(get,path="/api/libraries/{library_id}/popular",tag="media",params(("library_id"=uuid::Uuid,Path)),responses((status=200,body=LibraryRowResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn library_popular(
-    _auth: AuthUser,
+    auth: AuthUser,
     State(state): State<SharedState>,
     Path(library_id): Path<Uuid>,
 ) -> Result<Json<LibraryRowResponse>, MediaError> {
     let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
+    let library = visible_library(&pool, &auth, library_id).await?;
 
-    let library = lisek_db::get_library(&pool, library_id)
-        .await
-        .map_err(|_| MediaError::Internal)?
-        .ok_or(MediaError::LibraryNotFound)?;
-
-    let items = lisek_db::list_popular(&pool, Some(library_id), LIBRARY_ROW_LIMIT)
+    let items = lisek_db::list_popular(&pool, Some(library_id), LIBRARY_ROW_LIMIT, &auth.access)
         .await
         .map_err(|_| MediaError::Internal)?;
 
@@ -504,16 +567,24 @@ pub async fn library_popular(
 /// picks) still needs to be fetchable on its own.
 #[utoipa::path(get,path="/api/media/{item_id}",tag="media",params(("item_id"=uuid::Uuid,Path)),responses((status=200,body=MediaItemResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn media_item_detail(
-    _auth: AuthUser,
+    auth: AuthUser,
     State(state): State<SharedState>,
     Path(item_id): Path<Uuid>,
 ) -> Result<Json<MediaItemResponse>, MediaError> {
     let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
-    let item = lisek_db::get_media_item(&pool, item_id)
+    let item = lisek_db::get_media_item(&pool, item_id, &auth.access)
         .await
         .map_err(|_| MediaError::Internal)?
         .ok_or(MediaError::NotFound)?;
-    Ok(Json(item.into()))
+    let rating = lisek_db::access::item_rating(&pool, item.id)
+        .await
+        .map_err(|_| MediaError::Internal)?;
+    let mut response = MediaItemResponse::from(item);
+    if let Some((age_rating, certification)) = rating {
+        response.age_rating = age_rating;
+        response.certification = certification;
+    }
+    Ok(Json(response))
 }
 
 /// One episode, as the "Sezony" section renders it — see
@@ -566,11 +637,14 @@ impl From<lisek_db::SeriesSeason> for SeriesSeasonResponse {
 /// right response rather than a distinct error case here.
 #[utoipa::path(get,path="/api/media/{item_id}/seasons",tag="media",params(("item_id"=uuid::Uuid,Path)),responses((status=200,body=Vec<SeriesSeasonResponse>),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn media_item_seasons(
-    _auth: AuthUser,
+    auth: AuthUser,
     State(state): State<SharedState>,
     Path(item_id): Path<Uuid>,
 ) -> Result<Json<Vec<SeriesSeasonResponse>>, MediaError> {
     let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
+    if !auth.can_see(&pool, item_id).await.map_err(|_| MediaError::Internal)? {
+        return Ok(Json(Vec::new()));
+    }
     let seasons = lisek_db::list_series_seasons(&pool, item_id)
         .await
         .map_err(|_| MediaError::Internal)?;
@@ -614,11 +688,15 @@ impl From<lisek_db::episodes::NextEpisode> for NextEpisodeResponse {
 /// episode — see `lisek_db::episodes::next_episode`.
 #[utoipa::path(get,path="/api/media/{item_id}/next",tag="media",params(("item_id"=uuid::Uuid,Path)),responses((status=200,body=NextEpisodeResponse),(status=204,description="No next episode"),(status=401),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn next_episode(
-    _auth: AuthUser,
+    auth: AuthUser,
     State(state): State<SharedState>,
     Path(item_id): Path<Uuid>,
 ) -> Result<Response, MediaError> {
     let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
+    // The next episode is in the same series: same library and rating.
+    if !auth.can_see(&pool, item_id).await.map_err(|_| MediaError::Internal)? {
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    }
     let next = lisek_db::episodes::next_episode(&pool, item_id)
         .await
         .map_err(|_| MediaError::Internal)?;
@@ -633,10 +711,13 @@ pub async fn next_episode(
 /// `auth.rs::token_from_query`'s doc comment.
 #[utoipa::path(get,path="/api/media/{item_id}/poster",tag="media",params(("item_id"=uuid::Uuid,Path)),responses((status=200,description="Image bytes"),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn poster_image(
-    _auth: AuthUser,
+    auth: AuthUser,
     State(state): State<SharedState>,
     Path(item_id): Path<Uuid>,
 ) -> Response {
+    if let Err(err) = ensure_image_visible(&state, &auth, item_id).await {
+        return err.into_response();
+    }
     serve_item_image(
         &state,
         item_id,
@@ -650,10 +731,13 @@ pub async fn poster_image(
 /// Same as [`poster_image`] for the backdrop image.
 #[utoipa::path(get,path="/api/media/{item_id}/backdrop",tag="media",params(("item_id"=uuid::Uuid,Path)),responses((status=200,description="Image bytes"),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn backdrop_image(
-    _auth: AuthUser,
+    auth: AuthUser,
     State(state): State<SharedState>,
     Path(item_id): Path<Uuid>,
 ) -> Response {
+    if let Err(err) = ensure_image_visible(&state, &auth, item_id).await {
+        return err.into_response();
+    }
     serve_item_image(
         &state,
         item_id,
@@ -676,10 +760,13 @@ pub async fn backdrop_image(
 /// as a missing poster: an `<img onerror>` fallback, not an error state.
 #[utoipa::path(get,path="/api/media/{item_id}/logo",tag="media",params(("item_id"=uuid::Uuid,Path)),responses((status=200,description="Image bytes"),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
 pub async fn logo_image(
-    _auth: AuthUser,
+    auth: AuthUser,
     State(state): State<SharedState>,
     Path(item_id): Path<Uuid>,
 ) -> Response {
+    if let Err(err) = ensure_image_visible(&state, &auth, item_id).await {
+        return err.into_response();
+    }
     serve_item_image(
         &state,
         item_id,
@@ -688,6 +775,19 @@ pub async fn logo_image(
         "image/png",
     )
     .await
+}
+
+/// Images of items a restricted account may not see answer 404.
+async fn ensure_image_visible(
+    state: &SharedState,
+    auth: &AuthUser,
+    item_id: Uuid,
+) -> Result<(), MediaError> {
+    if auth.access.is_unrestricted() {
+        return Ok(());
+    }
+    let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
+    ensure_visible(&pool, auth, item_id).await
 }
 
 /// Tries the media-folder copy (`{media_folder_filename}` next to the
@@ -703,7 +803,7 @@ pub async fn logo_image(
 /// than sniffed from the bytes — cheap and correct, since every write path
 /// already guarantees which format lands at each of these three cache
 /// paths.
-async fn serve_item_image(
+pub(crate) async fn serve_item_image(
     state: &SharedState,
     item_id: Uuid,
     media_folder_filename: &str,
@@ -779,7 +879,7 @@ async fn read_media_folder_image(
     }
 }
 
-fn image_response(bytes: Vec<u8>, content_type: &'static str) -> Response {
+pub(crate) fn image_response(bytes: Vec<u8>, content_type: &'static str) -> Response {
     (
         [
             (header::CONTENT_TYPE, content_type),
