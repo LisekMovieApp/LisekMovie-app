@@ -18,7 +18,7 @@ export interface MediaItem {
 	 * for it (a show has no single year or episode number of its own), and
 	 * `id` is what `fetchSeriesSeasons` below takes to load its "Sezony".
 	 */
-	item_type: 'movie' | 'series';
+	item_type: 'movie' | 'series' | 'collection';
 	title: string;
 	year: number | null;
 	overview: string | null;
@@ -47,6 +47,15 @@ export interface MediaItem {
 	 * Runda 9 `fetchLibraryItems`'s grid too — see
 	 * `MediaItemResponse::badge`'s own doc comment). */
 	badge: 'new_series' | 'new_season' | 'new_episodes' | 'new_movie' | null;
+	/** Faza 6, `'collection'` cards only (`item_type`): how many of the
+	 * collection's films the card stands for. Its artwork URLs point at
+	 * `/api/collections/{id}/...` and the card links to `/collection/[id]`. */
+	item_count?: number | null;
+	/** Detail view only: minimum viewer age (parental controls) and the
+	 * certification it comes from ("PG-13", "FSK 12"). A rating an
+	 * administrator set by hand has no certification. */
+	age_rating?: number | null;
+	certification?: string | null;
 }
 
 /** One season of a `'series'` item, as `fetchSeriesSeasons` returns it —
@@ -125,6 +134,9 @@ export interface FetchLibraryItemsOptions {
 	/** A single letter (any case — the backend uppercases it); omitted or
 	 * invalid means "no filter". */
 	letter?: string;
+	/** Faza 6: show the films of each collection (two or more here) as
+	 * one `'collection'` card. Ignored by the backend with a letter. */
+	groupCollections?: boolean;
 }
 
 export interface LibraryItems {
@@ -160,6 +172,7 @@ export async function fetchLibraryItems(
 	if (options.page !== undefined) params.set('page', String(options.page));
 	if (options.sort !== undefined) params.set('sort', options.sort);
 	if (options.letter !== undefined) params.set('letter', options.letter);
+	if (options.groupCollections) params.set('group_collections', 'true');
 	const query = params.toString();
 	const url = `/api/libraries/${encodeURIComponent(libraryId)}/items${query ? `?${query}` : ''}`;
 
@@ -185,7 +198,7 @@ export interface LibraryRowItems {
 async function fetchLibraryRow(
 	token: string,
 	libraryId: string,
-	segment: 'recent' | 'recommended' | 'popular'
+	segment: 'recent' | 'recommended' | 'popular' | 'collections'
 ): Promise<LibraryRowItems> {
 	const url = `/api/libraries/${encodeURIComponent(libraryId)}/${segment}`;
 	const response = await fetch(url, { headers: buildAuthHeader(token) });
@@ -218,6 +231,69 @@ export function fetchLibraryRecommended(
  * `list_popular` logic, scoped to this library (Runda 10). */
 export function fetchLibraryPopular(token: string, libraryId: string): Promise<LibraryRowItems> {
 	return fetchLibraryRow(token, libraryId, 'popular');
+}
+
+/** `/library/[id]`'s "Kolekcje" row (Faza 6): collections with two or
+ * more films in this library, as `'collection'` cards. */
+export function fetchLibraryCollections(
+	token: string,
+	libraryId: string
+): Promise<LibraryRowItems> {
+	return fetchLibraryRow(token, libraryId, 'collections');
+}
+
+/** One collection ("box set") with its films in release order — mirrors
+ * `lisek-server::collections::CollectionResponse`. Only the films this
+ * account may see are listed (parental controls). */
+export interface Collection {
+	id: string;
+	name: string;
+	item_count: number;
+	first_year: number | null;
+	last_year: number | null;
+	poster_url: string;
+	backdrop_url: string;
+	items: MediaItem[];
+}
+
+/** `/collection/[id]`. Throws `MediaNotFoundError` for a 404. */
+export async function fetchCollection(token: string, collectionId: string): Promise<Collection> {
+	const url = `/api/collections/${encodeURIComponent(collectionId)}`;
+	const response = await fetch(url, { headers: buildAuthHeader(token) });
+	if (response.status === 404) {
+		throw new MediaNotFoundError();
+	}
+	if (!response.ok) {
+		throw new Error(`GET ${url} failed with status ${response.status}`);
+	}
+	return (await response.json()) as Collection;
+}
+
+/** The collection a film belongs to (the detail page's "from the
+ * collection" row); `null` when it belongs to none (204). */
+export async function fetchItemCollection(token: string, itemId: string): Promise<Collection | null> {
+	const url = `/api/media/${encodeURIComponent(itemId)}/collection`;
+	const response = await fetch(url, { headers: buildAuthHeader(token) });
+	if (response.status === 204) return null;
+	if (!response.ok) {
+		throw new Error(`GET ${url} failed with status ${response.status}`);
+	}
+	return (await response.json()) as Collection;
+}
+
+/** "1977–1983", "2009" or "" — the year span of a collection's films. */
+export function yearSpan(first: number | null, last: number | null): string {
+	if (first === null) return last === null ? '' : String(last);
+	if (last === null || last === first) return String(first);
+	return `${first}–${last}`;
+}
+
+/** The age badge on a detail page: the certification itself when known
+ * ("PG-13"), otherwise "{age}+"; `null` for unrated. */
+export function ageLabel(item: Pick<MediaItem, 'age_rating' | 'certification'>): string | null {
+	if (item.certification) return item.certification;
+	if (item.age_rating !== null && item.age_rating !== undefined) return `${item.age_rating}+`;
+	return null;
 }
 
 /** Thrown by `fetchMediaDetail` specifically for a 404 — so the Detail View

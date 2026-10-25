@@ -6,11 +6,16 @@
 	import {
 		fetchMediaDetail,
 		fetchSeriesSeasons,
+		fetchItemCollection,
 		imageUrl,
+		ageLabel,
 		MediaNotFoundError,
+		type Collection,
 		type MediaItem,
 		type SeriesSeason
 	} from '$lib/media/api';
+	import Carousel from '$lib/components/Carousel.svelte';
+	import MediaCard from '$lib/components/MediaCard.svelte';
 	import { fetchProviders, type ProviderConfig } from '$lib/admin/providers';
 	import MediaActions from '$lib/components/MediaActions.svelte';
 	import MediaItemEditorModal from '$lib/components/MediaItemEditorModal.svelte';
@@ -34,6 +39,8 @@
 	 * showing — defaults to the first season once `seasons` loads (set at
 	 * the end of `load()`), so the section never opens empty. */
 	let selectedSeason = $state<number | null>(null);
+	/** Faza 6: the collection a movie belongs to ("Z kolekcji" row). */
+	let collection = $state<Collection | null>(null);
 
 	/** Bumped once per load attempt; guards every state write below (the
 	 * primary fetch and both non-fatal secondary ones) against an older
@@ -75,6 +82,15 @@
 			}
 		}
 
+		if (loadedItem.item_type === 'movie') {
+			try {
+				const loadedCollection = await fetchItemCollection(sessionToken, loadedItem.id);
+				if (mySeq === loadSeq) collection = loadedCollection;
+			} catch {
+				// Decoration only: the page works without the row.
+			}
+		}
+
 		if (loadedItem.item_type === 'series') {
 			try {
 				const loadedSeasons = await fetchSeriesSeasons(sessionToken, loadedItem.id);
@@ -106,6 +122,7 @@
 		item = null;
 		seasons = [];
 		selectedSeason = null;
+		collection = null;
 		loadForId(id, mySeq);
 	}
 
@@ -125,6 +142,8 @@
 
 	/** The episode list the season-picker strip shows below itself —
 	 * whichever season in `seasons` matches `selectedSeason`. */
+	let age = $derived(item ? ageLabel(item) : null);
+
 	let activeSeasonEpisodes = $derived.by(() => {
 		return seasons.find((s) => s.season === selectedSeason)?.episodes ?? [];
 	});
@@ -261,8 +280,18 @@
 				<div class="flex flex-1 flex-col gap-4 text-center sm:text-left">
 					<div>
 						<h2 class="text-xl font-semibold text-white md:text-2xl">{item.title}</h2>
-						{#if subtitle}
-							<p class="mt-1 text-sm text-neutral-400">{subtitle}</p>
+						{#if subtitle || age}
+							<p
+								class="mt-1 flex items-center justify-center gap-2 text-sm text-neutral-400 sm:justify-start"
+							>
+								{#if subtitle}<span>{subtitle}</span>{/if}
+								{#if age}
+									<span
+										class="rounded border border-neutral-500 px-1.5 py-px text-xs font-semibold text-neutral-200"
+										title={t('detail.age_rating_hint')}>{age}</span
+									>
+								{/if}
+							</p>
 						{/if}
 					</div>
 
@@ -373,6 +402,27 @@
 				</div>
 			{/if}
 		</div>
+
+		{#if collection && collection.items.length > 1}
+			<section class="mt-2" aria-label={collection.name}>
+				<div class="mb-2 flex items-baseline justify-between gap-4 px-4 md:px-8">
+					<h2 class="text-lg font-semibold text-neutral-100">
+						{t('collections.from_collection', { name: collection.name })}
+					</h2>
+					<a
+						href={resolve('/collection/[id]', { id: collection.id })}
+						class="shrink-0 text-sm text-gold hover:underline focus-visible:outline-2"
+					>
+						{t('collections.see_collection')}
+					</a>
+				</div>
+				<Carousel>
+					{#each collection.items as film (film.id)}
+						<MediaCard item={film} {token} />
+					{/each}
+				</Carousel>
+			</section>
+		{/if}
 	{/if}
 </main>
 

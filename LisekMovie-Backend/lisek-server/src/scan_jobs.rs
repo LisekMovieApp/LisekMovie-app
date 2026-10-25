@@ -117,7 +117,27 @@ pub async fn run_worker(state: SharedState) {
             recovered = true;
         }
         match db::claim_next(&pool).await {
-            Ok(Some(job)) => run_job(&state, &pool, job).await,
+            Ok(Some(job)) => {
+                // Its own task: a panic inside a scan fails that job (and is
+                // logged) instead of silently ending this worker loop.
+                let fallback = job.clone();
+                let task = tokio::spawn(run_job(state.clone(), pool.clone(), job));
+                if let Err(err) = task.await {
+                    tracing::error!(
+                        job_id = %fallback.id,
+                        library_id = %fallback.library_id,
+                        %err,
+                        "scan job crashed; marking it failed"
+                    );
+                    let mut failed = fallback;
+                    failed.status = "failed".into();
+                    failed.error = Some("scan_task_failed".into());
+                    failed.finished_at = Some(Utc::now());
+                    if let Err(err) = db::save(&pool, &failed).await {
+                        tracing::warn!(%err, "failed to record the crashed scan job");
+                    }
+                }
+            }
             Ok(None) => wait_for_work(&state).await,
             Err(err) => {
                 tracing::warn!(%err, "scan queue unavailable");
@@ -173,8 +193,11 @@ fn clamp(value: usize) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }
 
-async fn run_job(state: &SharedState, pool: &PgPool, job: ScanJob) {
+async fn run_job(state: SharedState, pool: PgPool, job: ScanJob) {
     let started = Instant::now();
+    tracing::info!(job_id = %job.id, library_id = %job.library_id, "library scan started");
+    let state = &state;
+    let pool = &pool;
     let mut progress = Progress {
         state,
         pool,
@@ -235,7 +258,12 @@ async fn drive<T>(
 ) -> Result<T, String> {
     loop {
         tokio::select! {
-            result = &mut task => return result.map_err(|_| "scan_task_failed".to_string()),
+            result = &mut task => {
+                return result.map_err(|err| {
+                    tracing::error!(job_id = %progress.job.id, %err, "scan step crashed");
+                    "scan_task_failed".to_string()
+                });
+            }
             _ = tokio::time::sleep(PROGRESS_INTERVAL) => {
                 progress.tick(counter.load(Ordering::Relaxed)).await;
             }
@@ -252,8 +280,10 @@ async fn execute(progress: &mut Progress<'_>) -> Result<(), String> {
         .ok_or("library_not_found")?;
     let library_type = lisek_library::LibraryType::from_db_str(&library.library_type)
         .ok_or("invalid_library_type")?;
+    let job_id = progress.job.id;
 
     // 1. Walk the disk on a blocking thread.
+    tracing::info!(%job_id, roots = ?library.root_paths, library_type = %library.library_type, "scan: walking folders");
     progress.phase("walking", 0).await;
     let found = Arc::new(AtomicUsize::new(0));
     let walk = {
@@ -261,6 +291,11 @@ async fn execute(progress: &mut Progress<'_>) -> Result<(), String> {
         let roots = library.root_paths.clone();
         let now_year = Utc::now().year();
         tokio::task::spawn_blocking(move || {
+            for root in &roots {
+                if !std::path::Path::new(root).is_dir() {
+                    tracing::warn!(%job_id, root = %root, "library folder is missing or not a folder");
+                }
+            }
             lisek_library::scan_library_with_progress(&roots, library_type, now_year, |n| {
                 found.store(n, Ordering::Relaxed)
             })
@@ -268,6 +303,7 @@ async fn execute(progress: &mut Progress<'_>) -> Result<(), String> {
     };
     let results = Arc::new(drive(progress, &found, walk).await?);
     progress.job.files_found = clamp(results.len());
+    tracing::info!(%job_id, files = results.len(), "scan: saving to the database");
 
     // 2. Persist in batches.
     let recognized = results
@@ -296,9 +332,18 @@ async fn execute(progress: &mut Progress<'_>) -> Result<(), String> {
     progress.job.unrecognized = clamp(persisted.summary.unrecognized);
 
     // 3. Metadata providers, before probing: posters are what users notice.
+    tracing::info!(
+        %job_id,
+        movies = persisted.summary.movies_found,
+        episodes = persisted.summary.episodes_found,
+        unrecognized = persisted.summary.unrecognized,
+        to_enrich = persisted.enrich_targets.len(),
+        "scan: fetching metadata"
+    );
     enrich(progress, &library, &persisted.enrich_targets).await?;
 
     // 4. ffprobe for new or changed files.
+    tracing::info!(%job_id, to_probe = persisted.probe_targets.len(), "scan: analysing streams (ffprobe)");
     probe(progress, persisted.probe_targets).await;
     Ok(())
 }
@@ -344,6 +389,13 @@ async fn enrich(
 
     progress.phase("enriching", targets.len()).await;
     for (done, (item_id, target, file_path, forced_provider)) in targets.iter().enumerate() {
+        tracing::debug!(
+            job_id = %progress.job.id,
+            %item_id,
+            ?target,
+            file = %file_path.display(),
+            "scan: enriching item"
+        );
         let outcome = metadata_enrichment::enrich_item_cached(
             &mut cache,
             &pool,
@@ -385,6 +437,7 @@ async fn probe(progress: &mut Progress<'_>, targets: Vec<(Uuid, PathBuf)>) {
     let mut running: JoinSet<ProbeResult> = JoinSet::new();
     let mut done = 0usize;
     let spawn = |running: &mut JoinSet<ProbeResult>, (id, path): (Uuid, PathBuf)| {
+        tracing::debug!(item_id = %id, file = %path.display(), "scan: probing file");
         let settings = settings.clone();
         running.spawn(async move {
             (id, lisek_playback::transcode::probe_media(&path, &settings).await)
@@ -395,8 +448,12 @@ async fn probe(progress: &mut Progress<'_>, targets: Vec<(Uuid, PathBuf)>) {
     }
 
     while let Some(joined) = running.join_next().await {
-        let Ok((item_id, result)) = joined else {
-            continue;
+        let (item_id, result) = match joined {
+            Ok(done) => done,
+            Err(err) => {
+                tracing::error!(%err, "ffprobe task crashed");
+                continue;
+            }
         };
         match result {
             Ok(probe) => match lisek_db::streams::save_probe(&pool, item_id, &probe, None).await {

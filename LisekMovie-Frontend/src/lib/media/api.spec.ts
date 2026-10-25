@@ -7,7 +7,12 @@ import {
 	fetchLibraryRecommended,
 	fetchLibraryPopular,
 	LibraryNotFoundError,
-	imageUrl
+	imageUrl,
+	fetchItemCollection,
+	fetchCollection,
+	MediaNotFoundError,
+	yearSpan,
+	ageLabel
 } from './api';
 
 describe('imageUrl', () => {
@@ -216,4 +221,40 @@ describe('fetchLibraryRecent / fetchLibraryRecommended / fetchLibraryPopular', (
 			await expect(fn('tok123', 'lib-1')).rejects.not.toBeInstanceOf(LibraryNotFoundError);
 		});
 	}
+});
+
+describe('collections (Faza 6)', () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it('asks for grouped collections only when requested', async () => {
+		const fetchMock = vi.fn().mockResolvedValue({
+			ok: true,
+			status: 200,
+			json: () => Promise.resolve({ library: {}, items: [], total: 0, page: 1, page_size: 100 })
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		await fetchLibraryItems('t', 'lib', { groupCollections: true });
+		await fetchLibraryItems('t', 'lib', { groupCollections: false });
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/libraries/lib/items?group_collections=true');
+		expect(fetchMock.mock.calls[1][0]).toBe('/api/libraries/lib/items');
+	});
+
+	it('treats 204 as "not in a collection" and 404 as not found', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 204 }));
+		expect(await fetchItemCollection('t', 'm')).toBeNull();
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404 }));
+		await expect(fetchCollection('t', 'c')).rejects.toBeInstanceOf(MediaNotFoundError);
+	});
+
+	it('formats year spans and age badges', () => {
+		expect(yearSpan(1977, 1983)).toBe('1977–1983');
+		expect(yearSpan(2009, 2009)).toBe('2009');
+		expect(yearSpan(null, null)).toBe('');
+		expect(ageLabel({ age_rating: 13, certification: 'PG-13' })).toBe('PG-13');
+		expect(ageLabel({ age_rating: 7, certification: null })).toBe('7+');
+		expect(ageLabel({ age_rating: 0 })).toBe('0+');
+		expect(ageLabel({ age_rating: null, certification: null })).toBeNull();
+	});
 });

@@ -286,8 +286,17 @@ pub async fn enrich_item_cached(
         }
     };
     let Some((provider_key, matched)) = found else {
+        tracing::debug!(%item_id, ?target, "no provider match");
         return EnrichOutcome::default();
     };
+    tracing::debug!(
+        %item_id,
+        provider = provider_key,
+        poster = matched.poster_url.is_some(),
+        backdrop = matched.backdrop_url.is_some(),
+        collection = matched.fields.get("collection").is_some_and(|c| !c.is_null()),
+        "provider matched; saving metadata"
+    );
 
     if let Err(err) =
         lisek_db::attach_provider_metadata(pool, item_id, &provider_key, &matched.fields).await
@@ -314,6 +323,7 @@ pub async fn enrich_item_cached(
             image_saved |= counts;
             continue;
         }
+        tracing::debug!(%item_id, image = filename, url, "downloading image");
         let bytes = match cache.image(http, target, url).await {
             Ok(bytes) => bytes,
             Err(err) => {
@@ -429,6 +439,13 @@ async fn sync_collection(
             return;
         }
     };
+    tracing::debug!(
+        %item_id,
+        collection_id = %stored.id,
+        collection = name,
+        provider_id,
+        "linking film to collection"
+    );
     if let Err(err) = lisek_db::collections::link_item(pool, stored.id, item_id).await {
         tracing::warn!(%item_id, %err, collection = name, "failed to link film to collection");
     }
@@ -436,38 +453,81 @@ async fn sync_collection(
         return;
     }
 
-    let mut saved = [stored.poster_url.clone(), stored.backdrop_url.clone()];
-    let wanted = [poster_url, backdrop_url];
-    for (slot, file_name) in ["poster.jpg", "backdrop.jpg"].into_iter().enumerate() {
-        let path = collection_image_path(config_dir, stored.id, file_name);
-        match wanted[slot] {
-            Some(url)
-                if saved[slot].as_deref() == Some(url)
-                    && tokio::fs::try_exists(&path).await.unwrap_or(false) => {}
-            Some(url) => match download_image(http, url, &path).await {
-                Ok(()) => saved[slot] = Some(url.to_owned()),
-                Err(err) => {
-                    tracing::warn!(collection = name, %err, image = file_name, "failed to download collection artwork");
-                }
-            },
-            None => {
-                // The provider dropped the image: the first film's own
-                // artwork stands in from now on.
-                let _ = tokio::fs::remove_file(&path).await;
-                saved[slot] = None;
-            }
-        }
-    }
-    if saved != [stored.poster_url, stored.backdrop_url]
+    let poster = sync_artwork(
+        http,
+        config_dir,
+        stored.id,
+        name,
+        "poster.jpg",
+        stored.poster_url.clone(),
+        poster_url,
+    )
+    .await;
+    let backdrop = sync_artwork(
+        http,
+        config_dir,
+        stored.id,
+        name,
+        "backdrop.jpg",
+        stored.backdrop_url.clone(),
+        backdrop_url,
+    )
+    .await;
+    if (&poster, &backdrop) != (&stored.poster_url, &stored.backdrop_url)
         && let Err(err) = lisek_db::collections::set_artwork(
             pool,
             stored.id,
-            saved[0].as_deref(),
-            saved[1].as_deref(),
+            poster.as_deref(),
+            backdrop.as_deref(),
         )
         .await
     {
         tracing::warn!(collection = name, %err, "failed to record collection artwork");
+    }
+}
+
+/// Brings one collection image on disk in line with the provider: keeps an
+/// up-to-date file, downloads a new or changed one, removes one the
+/// provider dropped (the first film's own artwork then stands in). Returns
+/// the source URL now on disk.
+///
+/// No `.await` inside a `match` guard here, on purpose. rustc 1.97
+/// miscompiles `match array[i] { Some(x) if cond(x).await => .., Some(x)
+/// => .. }` in an async fn: the element address is computed from an index
+/// slot on the stack that is never written. In debug builds the first
+/// image of the first collection read through a garbage index — on
+/// Windows that crashed the whole server with STATUS_ACCESS_VIOLATION
+/// right after a scan started (`artwork_sync_survives_a_dirty_stack`
+/// guards against it coming back).
+async fn sync_artwork(
+    http: &reqwest::Client,
+    config_dir: &Path,
+    collection_id: Uuid,
+    collection: &str,
+    file_name: &str,
+    stored_url: Option<String>,
+    wanted_url: Option<&str>,
+) -> Option<String> {
+    let path = collection_image_path(config_dir, collection_id, file_name);
+    let Some(url) = wanted_url else {
+        if stored_url.is_some() {
+            tracing::debug!(collection, image = file_name, "provider dropped this collection image");
+        }
+        let _ = tokio::fs::remove_file(&path).await;
+        return None;
+    };
+    let unchanged = stored_url.as_deref() == Some(url);
+    if unchanged && tokio::fs::try_exists(&path).await.unwrap_or(false) {
+        return stored_url;
+    }
+    tracing::debug!(collection, image = file_name, url, path = %path.display(), "downloading collection artwork");
+    match download_image(http, url, &path).await {
+        Ok(()) => Some(url.to_owned()),
+        Err(err) => {
+            tracing::warn!(collection, %err, image = file_name, "failed to download collection artwork");
+            // Whatever was on disk before is still there.
+            stored_url
+        }
     }
 }
 
@@ -545,6 +605,50 @@ mod tests {
                 backdrop_url: None,
             }
         );
+    }
+
+    /// Fills a stretch of stack with a non-zero pattern, so a read from a
+    /// never-written stack slot gets garbage instead of a lucky zero.
+    #[inline(never)]
+    fn dirty_stack() {
+        let mut buf = [0xABu8; 128 * 1024];
+        std::hint::black_box(&mut buf);
+    }
+
+    /// Regression test for the rustc miscompilation described on
+    /// [`sync_artwork`]: with the old `match wanted[slot] { .. if ...await }`
+    /// loop this test process crashed (SIGSEGV / STATUS_ACCESS_VIOLATION).
+    #[test]
+    fn artwork_sync_survives_a_dirty_stack() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let dir = std::env::temp_dir().join(format!("lisek-artwork-{}", Uuid::new_v4()));
+        let id = Uuid::new_v4();
+        let http = reqwest::Client::new();
+        let poster = collection_image_path(&dir, id, "poster.jpg");
+        std::fs::create_dir_all(poster.parent().unwrap()).unwrap();
+        std::fs::write(&poster, b"jpeg").unwrap();
+        dirty_stack();
+        runtime.block_on(async {
+            dirty_stack();
+            let url = "http://127.0.0.1:9/poster.jpg";
+            // Unchanged URL and the file is there: kept, nothing downloaded.
+            let kept = sync_artwork(&http, &dir, id, "Saga", "poster.jpg", Some(url.into()), Some(url)).await;
+            assert_eq!(kept.as_deref(), Some(url));
+            // A new URL that cannot be downloaded: the old one stays.
+            let failed = sync_artwork(
+                &http, &dir, id, "Saga", "poster.jpg", Some(url.into()), Some("http://127.0.0.1:9/new.jpg"),
+            )
+            .await;
+            assert_eq!(failed.as_deref(), Some(url));
+            // The provider dropped the image: file and URL go.
+            let dropped = sync_artwork(&http, &dir, id, "Saga", "poster.jpg", Some(url.into()), None).await;
+            assert_eq!(dropped, None);
+        });
+        assert!(!poster.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
