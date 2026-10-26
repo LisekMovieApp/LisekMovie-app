@@ -39,7 +39,8 @@ use lisek_metadata::image_cache::{
     backdrop_cache_path, download_image, fetch_image, logo_cache_path, poster_cache_path,
     store_image,
 };
-use lisek_plugin_api::{MovieQuery, ProviderMatch, ProviderPerson, SeriesQuery};
+use lisek_metadata::layout;
+use lisek_plugin_api::{MovieQuery, ProviderEpisode, ProviderMatch, ProviderPerson, SeriesQuery};
 use uuid::Uuid;
 
 use crate::provider_registry;
@@ -142,6 +143,199 @@ fn media_folder_destination(
     file_path.parent().map(|dir| dir.join(filename))
 }
 
+/// A series' artwork (`poster.jpg`, `backdrop.jpg`, `logo.png`, season
+/// posters) goes into the series folder, never a season folder.
+fn series_folder_destination(
+    episode_file: &Path,
+    filename: &str,
+    save_in_media_folder: bool,
+) -> Option<PathBuf> {
+    if !save_in_media_folder {
+        return None;
+    }
+    layout::series_folder(episode_file).map(|dir| dir.join(filename))
+}
+
+/// The provider's facts about one episode (for a double episode, the first
+/// one), as `provider_data.episode`: title, overview, runtime_minutes,
+/// rating, still_url, air_date. `None` when the provider has none or the
+/// season lookup failed (the episode then keeps what it had).
+async fn episode_facts(
+    cache: &mut EnrichCache,
+    provider_key: &str,
+    api_key: &str,
+    language: &str,
+    series_fields: &serde_json::Value,
+    place: &lisek_db::seasons::Placement,
+) -> Option<serde_json::Value> {
+    let series_id = match series_fields.get(format!("{provider_key}_id"))? {
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) if !s.is_empty() => s.clone(),
+        _ => return None,
+    };
+    let key = (provider_key.to_owned(), series_id.clone(), place.season);
+    if !cache.season_episodes.contains_key(&key) {
+        let found = match provider_registry::build_provider(provider_key, api_key) {
+            Some(provider) => match provider.season_episodes(&series_id, place.season, language).await {
+                Ok(episodes) => Some(episodes),
+                Err(err) => {
+                    tracing::warn!(provider = provider_key, series_id, season = place.season, %err, "season episodes lookup failed");
+                    None
+                }
+            },
+            None => None,
+        };
+        cache.season_episodes.insert(key.clone(), found);
+    }
+    let episodes = cache.season_episodes.get(&key)?.as_ref()?;
+    let episode = episodes.iter().find(|e| e.episode == place.episode)?;
+    let title = match place.end_episode {
+        Some(end) if end > place.episode => {
+            let titles: Vec<&str> = (place.episode..=end)
+                .filter_map(|n| episodes.iter().find(|e| e.episode == n)?.title.as_deref())
+                .collect();
+            (!titles.is_empty()).then(|| titles.join(" / "))
+        }
+        _ => episode.title.clone(),
+    };
+    Some(serde_json::json!({
+        "title": title,
+        "overview": episode.overview,
+        "runtime_minutes": episode.runtime_minutes,
+        "rating": episode.rating,
+        "still_url": episode.still_url,
+        "air_date": episode.air_date,
+    }))
+}
+
+/// The episode's still, in the local cache only.
+async fn sync_episode_still(
+    http: &reqwest::Client,
+    config_dir: &Path,
+    item_id: Uuid,
+    previous: Option<String>,
+    wanted: Option<&str>,
+) {
+    let path = layout::episode_still_path(config_dir, &item_id.to_string());
+    let label = item_id.to_string();
+    let _ = sync_artwork(http, &path, &label, previous, wanted).await;
+}
+
+/// Once per series and pass: season names and posters from the provider
+/// (`<series folder>/season01-poster.jpg`, or the local cache) and removal
+/// of the copies of the series' artwork older versions wrote into season
+/// folders.
+#[allow(clippy::too_many_arguments)]
+async fn sync_series_layout(
+    cache: &mut EnrichCache,
+    pool: &PgPool,
+    http: &reqwest::Client,
+    config_dir: &Path,
+    series_id: Uuid,
+    target: &EnrichTarget,
+    file_path: &Path,
+    save_in_media_folder: bool,
+    matched: &ProviderMatch,
+) {
+    let (stored, files) = match lisek_db::seasons::series_layout(pool, series_id).await {
+        Ok(layout) => layout,
+        Err(err) => {
+            tracing::warn!(%series_id, %err, "cannot read the seasons of a series");
+            return;
+        }
+    };
+    let series_dir = layout::series_folder(file_path);
+    let series_key = series_id.to_string();
+    for season in &stored {
+        let provided = matched.seasons.iter().find(|s| s.number == season.number);
+        if let Some(p) = provided
+            && let Err(err) = lisek_db::seasons::set_season_metadata(
+                pool,
+                series_id,
+                season.number,
+                p.name.as_deref(),
+                p.overview.as_deref(),
+                p.air_year,
+            )
+            .await
+        {
+            tracing::warn!(%series_id, season = season.number, %err, "cannot save season metadata");
+        }
+        // No season data at all (another provider, a failed lookup): keep
+        // whatever poster is there.
+        if matched.seasons.is_empty() {
+            continue;
+        }
+        let wanted = provided.and_then(|p| p.poster_url.as_deref());
+        let name = layout::season_poster_name(season.number);
+        let media_dest = save_in_media_folder
+            .then(|| series_dir.as_ref().map(|d| d.join(&name)))
+            .flatten();
+        let cache_dest = layout::season_poster_cache_path(config_dir, &series_key, season.number);
+        let Some(url) = wanted else {
+            if season.poster_url.is_some() {
+                let _ = tokio::fs::remove_file(&cache_dest).await;
+                if let Some(dest) = &media_dest {
+                    let _ = tokio::fs::remove_file(dest).await;
+                }
+                let _ = lisek_db::seasons::set_season_poster_url(pool, series_id, season.number, None).await;
+            }
+            continue;
+        };
+        let on_disk = match &media_dest {
+            Some(dest) => tokio::fs::try_exists(dest).await.unwrap_or(false),
+            None => false,
+        } || tokio::fs::try_exists(&cache_dest).await.unwrap_or(false);
+        if season.poster_url.as_deref() == Some(url) && on_disk {
+            continue;
+        }
+        let bytes = match cache.image(http, target, url).await {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                tracing::warn!(%series_id, season = season.number, %err, "cannot download a season poster");
+                continue;
+            }
+        };
+        match store_image(&bytes, media_dest.as_deref(), &cache_dest).await {
+            Ok(_) => {
+                tracing::debug!(%series_id, season = season.number, file = name, "season poster saved");
+                let _ = lisek_db::seasons::set_season_poster_url(pool, series_id, season.number, Some(url)).await;
+            }
+            Err(err) => tracing::warn!(%series_id, season = season.number, %err, "cannot save a season poster"),
+        }
+    }
+    if save_in_media_folder && let Some(series_dir) = series_dir {
+        remove_legacy_season_artwork(&series_dir, &files).await;
+    }
+}
+
+/// Before Faza 10 the series' `poster.jpg`/`backdrop.jpg`/`logo.png` were
+/// written next to the episodes, i.e. into every season folder. A copy
+/// identical to the one now in the series folder is removed; anything
+/// else (an administrator's own season poster) stays.
+async fn remove_legacy_season_artwork(series_dir: &Path, episode_files: &[String]) {
+    let mut folders: Vec<PathBuf> = episode_files
+        .iter()
+        .filter_map(|f| Path::new(f).parent().map(Path::to_path_buf))
+        .filter(|dir| dir != series_dir)
+        .collect();
+    folders.sort();
+    folders.dedup();
+    for folder in folders {
+        for name in layout::LEGACY_SEASON_FOLDER_FILES {
+            let old = folder.join(name);
+            let Ok(old_bytes) = tokio::fs::read(&old).await else { continue };
+            let Ok(current) = tokio::fs::read(series_dir.join(name)).await else { continue };
+            if old_bytes == current {
+                match tokio::fs::remove_file(&old).await {
+                    Ok(()) => tracing::info!(file = %old.display(), "removed a copy of the series artwork from a season folder"),
+                    Err(err) => tracing::warn!(file = %old.display(), %err, "cannot remove old artwork from a season folder"),
+                }
+            }
+        }
+    }
+}
+
 /// Memo for one enrichment pass. A scan of a 20-episode season used to
 /// search the provider 20 times and download the same three images 20
 /// times; with this, once.
@@ -170,6 +364,12 @@ pub struct EnrichCache {
     /// People whose profile photo was checked this pass (an actor of a
     /// series is credited on every episode).
     people_done: HashSet<Uuid>,
+    /// Series whose season data, season posters and legacy artwork were
+    /// handled this pass.
+    series_done: HashSet<Uuid>,
+    /// A season's episodes from the provider, once per pass:
+    /// `(provider, series id, season)` → episodes (`None`: lookup failed).
+    season_episodes: HashMap<(String, String, i32), Option<Vec<ProviderEpisode>>>,
 }
 
 impl EnrichCache {
@@ -292,6 +492,11 @@ pub async fn enrich_item_cached(
         tracing::debug!(%item_id, ?target, "no provider match");
         return EnrichOutcome::default();
     };
+    let api_key = providers
+        .iter()
+        .find(|(key, _)| *key == provider_key)
+        .map(|(_, api_key)| api_key.as_str())
+        .unwrap_or_default();
     apply_match(
         cache,
         pool,
@@ -302,6 +507,8 @@ pub async fn enrich_item_cached(
         file_path,
         save_in_media_folder,
         &provider_key,
+        api_key,
+        primary_language,
         &matched,
     )
     .await
@@ -311,6 +518,13 @@ pub async fn enrich_item_cached(
 /// the collection it names (movies) and its poster/backdrop/logo, written
 /// next to the video or into the local cache. Shared by enrichment and
 /// "Fix match" (`identify`).
+///
+/// Episodes (Faza 10): the series' artwork goes into the series folder
+/// (the parent of `Season 01/`, Jellyfin's layout), season posters next to
+/// it as `season01-poster.jpg`; the episode's own title, synopsis, runtime,
+/// score and still come from the provider's season (`api_key` and
+/// `language` ask for it) and the still is kept in the local cache, so
+/// season folders hold only videos.
 #[allow(clippy::too_many_arguments)]
 pub async fn apply_match(
     cache: &mut EnrichCache,
@@ -322,6 +536,8 @@ pub async fn apply_match(
     file_path: &Path,
     save_in_media_folder: bool,
     provider_key: &str,
+    api_key: &str,
+    language: &str,
     matched: &ProviderMatch,
 ) -> EnrichOutcome {
     tracing::debug!(
@@ -333,10 +549,39 @@ pub async fn apply_match(
         "provider matched; saving metadata"
     );
 
+    let is_series = matches!(target, EnrichTarget::Series { .. });
+    let placement = if is_series {
+        lisek_db::seasons::placement(pool, item_id).await.ok().flatten()
+    } else {
+        None
+    };
+    let mut fields = matched.fields.clone();
+    let mut still_url = None;
+    // Only an answer from the provider decides about the still; without one
+    // the episode keeps what it has.
+    let mut episode_known = false;
+    if let Some(place) = &placement
+        && let Some(episode) =
+            episode_facts(cache, provider_key, api_key, language, &matched.fields, place).await
+    {
+        still_url = episode.get("still_url").and_then(|u| u.as_str()).map(str::to_owned);
+        episode_known = true;
+        fields["episode"] = episode;
+    }
+    // The still on disk came from this URL (read before the match below
+    // replaces it).
+    let previous_still = match &placement {
+        Some(_) => lisek_db::seasons::episode_still_url(pool, item_id).await.ok().flatten(),
+        None => None,
+    };
     if let Err(err) =
-        lisek_db::attach_provider_metadata(pool, item_id, provider_key, &matched.fields).await
+        lisek_db::attach_provider_metadata(pool, item_id, provider_key, &fields).await
     {
         tracing::warn!(%item_id, provider_key, %err, "failed to save provider metadata");
+    }
+    // `episode_known` implies an episode (a placement).
+    if episode_known {
+        sync_episode_still(http, config_dir, item_id, previous_still, still_url.as_deref()).await;
     }
     if matches!(target, EnrichTarget::Movie { .. }) {
         sync_collection(cache, pool, http, config_dir, item_id, provider_key, &matched.fields)
@@ -355,7 +600,11 @@ pub async fn apply_match(
     ];
     for (url, filename, fallback_dest, counts) in images {
         let Some(url) = url else { continue };
-        let media_dest = media_folder_destination(file_path, filename, save_in_media_folder);
+        let media_dest = if is_series {
+            series_folder_destination(file_path, filename, save_in_media_folder)
+        } else {
+            media_folder_destination(file_path, filename, save_in_media_folder)
+        };
         if media_dest.as_ref().is_some_and(|dest| cache.written.contains(dest)) {
             image_saved |= counts;
             continue;
@@ -382,6 +631,25 @@ pub async fn apply_match(
 
     if let Err(err) = lisek_db::set_metadata_fallback(pool, item_id, used_fallback).await {
         tracing::warn!(%item_id, %err, "failed to record metadata_fallback flag");
+    }
+
+    // After the series' own artwork is in the series folder: season
+    // posters, and the old copies in season folders can be compared to it.
+    if let Some(place) = &placement
+        && cache.series_done.insert(place.series_id)
+    {
+        sync_series_layout(
+            cache,
+            pool,
+            http,
+            config_dir,
+            place.series_id,
+            target,
+            file_path,
+            save_in_media_folder,
+            matched,
+        )
+        .await;
     }
 
     EnrichOutcome {
@@ -940,6 +1208,144 @@ mod tests {
             .await
             .unwrap();
         let _ = std::fs::remove_dir_all(&config);
+    }
+
+    /// Faza 10, against a real database (opt-in) and a real folder: the
+    /// series' artwork lands in the series folder, season posters next to
+    /// it as `season01-poster.jpg`, the old copy in `Season 01/` goes (an
+    /// administrator's own different file stays), and an unchanged season
+    /// poster is not downloaded again.
+    #[tokio::test]
+    async fn series_artwork_goes_to_the_series_folder() {
+        use lisek_plugin_api::ProviderSeason;
+        use sqlx::{AssertSqlSafe, ConnectOptions};
+        use std::sync::atomic::Ordering;
+        let Ok(url) = std::env::var("LISEK_TEST_DATABASE_URL") else {
+            eprintln!("LISEK_TEST_DATABASE_URL not set; skipping database test");
+            return;
+        };
+        let admin_options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
+        let admin = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect_with(admin_options.clone())
+            .await
+            .unwrap();
+        let name = format!("lisek_test_{}", Uuid::new_v4().simple());
+        sqlx::query(AssertSqlSafe(format!("CREATE DATABASE {name}")))
+            .execute(&admin)
+            .await
+            .unwrap();
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_with(admin_options.database(&name).disable_statement_logging())
+            .await
+            .unwrap();
+        lisek_db::run_migrations(&pool).await.unwrap();
+
+        let root = std::env::temp_dir().join(format!("lisek-series-{}", Uuid::new_v4()));
+        let series_dir = root.join("Shows").join("13 Posterunek (1997)");
+        let season_dir = series_dir.join("Season 01");
+        std::fs::create_dir_all(&season_dir).unwrap();
+        std::fs::write(season_dir.join("poster.jpg"), b"jpeg").unwrap(); // our old copy
+        std::fs::write(season_dir.join("backdrop.jpg"), b"admin's own").unwrap();
+        let library = lisek_db::create_library(
+            &pool,
+            "Seriale",
+            "tv_shows",
+            &[root.join("Shows").to_string_lossy().into_owned()],
+            true,
+        )
+        .await
+        .unwrap()
+        .id;
+        let episodes: Vec<lisek_library::ScanResult> = (1..=2)
+            .map(|n| {
+                let file = season_dir.join(format!("S01E0{n}.mkv"));
+                std::fs::write(&file, b"video").unwrap();
+                lisek_library::ScanResult::Episode(lisek_library::ScannedEpisode {
+                    file_path: file,
+                    series_title: "13 Posterunek".into(),
+                    season: 1,
+                    episode: n,
+                    end_episode: None,
+                    file: lisek_library::FileFacts {
+                        size_bytes: Some(5),
+                        modified: None,
+                    },
+                })
+            })
+            .collect();
+        lisek_db::persist_scan_results(&pool, library, &episodes).await.unwrap();
+        let ids: Vec<(Uuid, String)> =
+            sqlx::query_as("SELECT id, file_path FROM media_items ORDER BY file_path")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+
+        let (base, hits) = image_server().await;
+        let matched = ProviderMatch {
+            fields: serde_json::json!({"tmdb_id": 47999, "overview": "x"}),
+            poster_url: Some(format!("{base}/poster.jpg")),
+            backdrop_url: Some(format!("{base}/backdrop.jpg")),
+            seasons: vec![
+                ProviderSeason {
+                    number: 1,
+                    name: Some("Sezon 1".into()),
+                    poster_url: Some(format!("{base}/s1.jpg")),
+                    ..ProviderSeason::default()
+                },
+                ProviderSeason { number: 2, name: Some("Sezon 2".into()), ..ProviderSeason::default() },
+            ],
+            ..ProviderMatch::default()
+        };
+        let target = EnrichTarget::Series { title: "13 Posterunek".into() };
+        let config = root.join("config");
+        let http = reqwest::Client::new();
+        let pass = |cache: &mut EnrichCache| {
+            let (pool, http, config, ids, target, matched) =
+                (pool.clone(), http.clone(), config.clone(), ids.clone(), target.clone(), matched.clone());
+            let cache = std::mem::take(cache);
+            async move {
+                let mut cache = cache;
+                for (id, file) in &ids {
+                    let outcome = apply_match(
+                        &mut cache, &pool, &http, &config, *id, &target, Path::new(file), true,
+                        "test", "", "pl", &matched,
+                    )
+                    .await;
+                    assert!(outcome.image_saved);
+                }
+            }
+        };
+        pass(&mut EnrichCache::default()).await;
+
+        let mut in_series: Vec<String> = std::fs::read_dir(&series_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        in_series.sort();
+        assert_eq!(in_series, ["Season 01", "backdrop.jpg", "poster.jpg", "season01-poster.jpg"]);
+        let mut in_season: Vec<String> = std::fs::read_dir(&season_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        in_season.sort();
+        assert_eq!(in_season, ["S01E01.mkv", "S01E02.mkv", "backdrop.jpg"], "only the admin's own file stays");
+        assert_eq!(std::fs::read(season_dir.join("backdrop.jpg")).unwrap(), b"admin's own");
+        // poster + backdrop once for both episodes, season poster once.
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
+        let cards = lisek_db::seasons::season_cards(&pool, ids[0].0, Uuid::new_v4()).await.unwrap();
+        assert_eq!((cards[0].name.as_deref(), cards[0].has_poster), (Some("Sezon 1"), true));
+
+        // The next pass: series images are written again, the season poster is not.
+        pass(&mut EnrichCache::default()).await;
+        assert_eq!(hits.load(Ordering::SeqCst), 5);
+
+        pool.close().await;
+        sqlx::query(AssertSqlSafe(format!("DROP DATABASE {name} WITH (FORCE)")))
+            .execute(&admin)
+            .await
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

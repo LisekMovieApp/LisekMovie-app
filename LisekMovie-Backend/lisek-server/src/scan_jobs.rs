@@ -226,6 +226,8 @@ async fn run_job(state: SharedState, pool: PgPool, job: ScanJob) {
     state.trickplay_wakeup.notify_one();
     // Removed films can leave a collection empty.
     crate::metadata_enrichment::prune_collections(pool, &crate::state::config_dir()).await;
+    // Removed files leave their scene thumbnails behind.
+    crate::details::sweep_chapter_images(pool).await;
 
     if let Err(err) = db::prune_finished(pool, KEEP_FINISHED_DAYS).await {
         tracing::warn!(%err, "failed to prune old scan jobs");

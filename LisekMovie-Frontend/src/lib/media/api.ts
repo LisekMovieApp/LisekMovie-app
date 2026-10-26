@@ -186,6 +186,33 @@ export async function fetchLibraryItems(
 	return (await response.json()) as LibraryItems;
 }
 
+/** Faza 12: where a letter's first title sits in the unfiltered grid
+ * (`index` is 0-based: page `index / page_size + 1`). `#` covers titles
+ * starting with anything but A–Z; accented capitals count as their base
+ * letter. Only letters with titles are listed, in list order. */
+export interface LibraryLetter {
+	letter: string;
+	index: number;
+}
+
+/** The alpha picker's jump table for the same sort and collection
+ * grouping the grid shows. */
+export async function fetchLibraryLetters(
+	token: string,
+	libraryId: string,
+	options: { sort?: LibrarySort; groupCollections?: boolean } = {}
+): Promise<LibraryLetter[]> {
+	const params = new URLSearchParams();
+	if (options.sort !== undefined) params.set('sort', options.sort);
+	if (options.groupCollections) params.set('group_collections', 'true');
+	const query = params.toString();
+	const url = `/api/libraries/${encodeURIComponent(libraryId)}/letters${query ? `?${query}` : ''}`;
+	const response = await fetch(url, { headers: buildAuthHeader(token) });
+	if (response.status === 404) throw new LibraryNotFoundError();
+	if (!response.ok) throw new Error(`GET ${url} failed with status ${response.status}`);
+	return ((await response.json()) as { letters: LibraryLetter[] }).letters;
+}
+
 /** One library's "Ostatnio dodane"/"Polecane dla Ciebie"/"Popularne teraz"
  * row (Runda 10) — the shape `fetchLibraryRecent`/`fetchLibraryRecommended`/
  * `fetchLibraryPopular` all return: no pagination fields, since these are
@@ -339,5 +366,7 @@ export async function fetchSeriesSeasons(token: string, itemId: string): Promise
  * percent-encode, but `encodeURIComponent` costs nothing and keeps this
  * correct even if that ever changes. */
 export function imageUrl(path: string, token: string): string {
-	return `${path}?token=${encodeURIComponent(token)}`;
+	// Chapter thumbnails already carry `?v=` (Faza 9).
+	const separator = path.includes('?') ? '&' : '?';
+	return `${path}${separator}token=${encodeURIComponent(token)}`;
 }

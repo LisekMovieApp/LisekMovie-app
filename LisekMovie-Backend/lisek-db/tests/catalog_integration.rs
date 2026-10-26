@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use lisek_core::media_probe::{MediaProbe, MediaStream, StreamKind};
+use lisek_core::media_probe::{MediaChapter, MediaProbe, MediaStream, StreamKind};
 use lisek_db::streams::FileStamp;
 use lisek_db::access::Restrictions;
 use lisek_db::{LibraryFilter, LibrarySort, PgPool};
@@ -96,6 +96,7 @@ async fn scan_persistence_builds_series_and_tracks_file_changes() {
         duration_seconds: Some(1200.5),
         bitrate_kbps: Some(4000),
         start_time_seconds: Some(1.5),
+        chapters: Vec::new(),
         streams: vec![MediaStream {
             index: 0,
             kind: StreamKind::Video,
@@ -133,6 +134,39 @@ async fn scan_persistence_builds_series_and_tracks_file_changes() {
     assert_eq!(cached.as_deref(), Some(&keyframes[..]));
     let changed_stamp = lisek_db::streams::FileStamp { size: stamp.size.map(|s| s + 1), ..stamp };
     assert_eq!(lisek_db::streams::stored_keyframes(pool, probed_id, Some(changed_stamp)).await.unwrap(), None);
+
+    // Chapters (0021): stored in start order, an unchanged list is not
+    // rewritten, a shorter one drops the rest, and a file probed before
+    // chapters were read is probed once more by the next scan.
+    let mut with_chapters = probe.clone();
+    with_chapters.chapters = vec![
+        MediaChapter { start_seconds: 0.0, end_seconds: Some(300.0), title: None },
+        MediaChapter { start_seconds: 300.0, end_seconds: None, title: Some("Pościg".into()) },
+    ];
+    lisek_db::streams::save_probe(pool, probed_id, &with_chapters, None).await.unwrap();
+    assert_eq!(lisek_db::streams::chapters(pool, probed_id).await.unwrap(), with_chapters.chapters);
+    let xmin = || async {
+        let rows: Vec<(String,)> = sqlx::query_as("SELECT xmin::text FROM media_chapters ORDER BY chapter_index")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+        rows
+    };
+    let before = xmin().await;
+    lisek_db::streams::save_probe(pool, probed_id, &with_chapters, None).await.unwrap();
+    assert_eq!(xmin().await, before, "unchanged chapters are not rewritten");
+    with_chapters.chapters.truncate(1);
+    lisek_db::streams::save_probe(pool, probed_id, &with_chapters, None).await.unwrap();
+    assert_eq!(lisek_db::streams::chapters(pool, probed_id).await.unwrap().len(), 1);
+    sqlx::query("UPDATE media_items SET chapters_probed = false WHERE id = $1")
+        .bind(probed_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let rescan = lisek_db::persist_scan_results(pool, tv, &first).await.unwrap();
+    assert!(rescan.probe_targets.iter().any(|(id, _)| *id == probed_id), "chapters not read yet");
+    lisek_db::streams::save_probe(pool, probed_id, &probe, None).await.unwrap();
+    assert!(lisek_db::streams::chapters(pool, probed_id).await.unwrap().is_empty());
 
     let rescan = lisek_db::persist_scan_results(pool, tv, &first).await.unwrap();
     assert!(!rescan.probe_targets.iter().any(|(id, _)| *id == probed_id));

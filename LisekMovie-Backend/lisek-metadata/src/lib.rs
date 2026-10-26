@@ -15,6 +15,7 @@
 //! provider extension shares, so it stays here.
 
 pub mod image_cache;
+pub mod layout;
 
 use serde::Serialize;
 

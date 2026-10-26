@@ -79,14 +79,14 @@ describe('/media/[id] page', () => {
 		render(MediaPage);
 
 		await waitFor(() => expect(fetchMediaDetail).toHaveBeenCalledWith('test-token', 'item-a'));
-		expect(await screen.findByRole('heading', { level: 2, name: 'Test Movie A' })).toBeTruthy();
+		expect(await screen.findByRole('heading', { level: 1, name: 'Test Movie A' })).toBeTruthy();
 	});
 
 	it('re-fetches and clears stale content when the id changes, without unmounting the page', async () => {
 		fetchMediaDetail.mockResolvedValueOnce(itemFixture('item-a', 'Test Movie A'));
 
 		render(MediaPage);
-		expect(await screen.findByRole('heading', { level: 2, name: 'Test Movie A' })).toBeTruthy();
+		expect(await screen.findByRole('heading', { level: 1, name: 'Test Movie A' })).toBeTruthy();
 
 		let resolveB: (value: MediaItem) => void = () => {};
 		fetchMediaDetail.mockReturnValueOnce(new Promise((resolve) => (resolveB = resolve)));
@@ -100,10 +100,10 @@ describe('/media/[id] page', () => {
 		expect(fetchMediaDetail).toHaveBeenCalledWith('test-token', 'item-b');
 		// The core assertion: item A's title is gone from the DOM the
 		// instant the id changed — before item B's request has resolved.
-		expect(screen.queryByRole('heading', { level: 2, name: 'Test Movie A' })).toBeNull();
+		expect(screen.queryByRole('heading', { level: 1, name: 'Test Movie A' })).toBeNull();
 
 		resolveB(itemFixture('item-b', 'Test Movie B'));
-		expect(await screen.findByRole('heading', { level: 2, name: 'Test Movie B' })).toBeTruthy();
+		expect(await screen.findByRole('heading', { level: 1, name: 'Test Movie B' })).toBeTruthy();
 	});
 
 	it('discards a stale response from an id that is no longer current', async () => {
@@ -116,14 +116,14 @@ describe('/media/[id] page', () => {
 		flushSync(() => {
 			mockParams.id = 'item-b';
 		});
-		expect(await screen.findByRole('heading', { level: 2, name: 'Test Movie B' })).toBeTruthy();
+		expect(await screen.findByRole('heading', { level: 1, name: 'Test Movie B' })).toBeTruthy();
 
 		// item A's request finally resolves, late — it must be discarded.
 		resolveA(itemFixture('item-a', 'Test Movie A'));
 		await Promise.resolve();
 		await Promise.resolve();
 
-		expect(screen.queryByRole('heading', { level: 2, name: 'Test Movie A' })).toBeNull();
-		expect(screen.getByRole('heading', { level: 2, name: 'Test Movie B' })).toBeTruthy();
+		expect(screen.queryByRole('heading', { level: 1, name: 'Test Movie A' })).toBeNull();
+		expect(screen.getByRole('heading', { level: 1, name: 'Test Movie B' })).toBeTruthy();
 	});
 });

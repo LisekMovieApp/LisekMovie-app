@@ -41,6 +41,8 @@ LisekMovie indexes your movie and TV libraries, fetches metadata and artwork, an
 - **Hardware acceleration** — NVENC/NVDEC, VAAPI and QSV encoding and decoding; **hardware HDR → SDR tone mapping** (`tonemap_cuda` with BT.2390, Dolby Vision, OpenCL, or libplacebo/Vulkan) with [jellyfin-ffmpeg](https://github.com/jellyfin/jellyfin-ffmpeg). Admin → Playback lists what the configured FFmpeg build supports.
 - **Subtitles** — text subtitles converted to WebVTT, image subtitles burned in when needed.
 - **End time** — the player shows when the title will finish ("Ends at 13:15"); paused, the time moves on with the clock.
+- **Pick before you play** — the detail page lists the file's picture ("4K HEVC HDR"), audio tracks and subtitles; Play starts with the chosen lektor and subtitles.
+- **Scenes** — chapters of MKV/MP4 files (or one scene every 10 minutes when a file has none) as a carousel of thumbnails, cut by FFmpeg on first view; a scene opens the player at its exact time.
 - **Resume and "Next up"** — playback position saved per account, the next episode offered at the end credits.
 - **Seek-bar previews (trickplay)** — thumbnail sheets generated in the background after each scan; progress under Admin → Thumbnails.
 - **Remote-viewer limits** — bitrate caps for viewers outside the local network, with trusted-proxy support so the real client address is used.
@@ -50,8 +52,13 @@ LisekMovie indexes your movie and TV libraries, fetches metadata and artwork, an
 - **Library scanner** with live progress, queued scan jobs and stored FFprobe results.
 - **Metadata plugins** — [TMDB](https://www.themoviedb.org/) and [TheTVDB](https://thetvdb.com/) providers behind one plugin API; provider API keys are stored encrypted (`LISEK_SECRET_KEY`).
 - **Fix Match** — search the providers by title and year and pin an item (or a whole series) to the right entry; old artwork is replaced and the item is locked against automatic re-matching.
+- **Rich details** — original title, tagline, TMDB rating, runtime, genres, tags (keywords), studios, directors, writers and IMDb/TheTVDB/TMDB links.
 - **Metadata editor** with per-field locking, optional `.nfo`-style saving of artwork next to the video, and a six-hourly background refresh.
 - **Cast & crew** — main actors (with the parts they play), directors and writers from TMDB, profile photos cached locally. A person's page shows the photo, biography, birth and death dates with the age, IMDb/TMDB links and every title of *your* libraries they appear in. Biographies are fetched the first time a page is opened, so scans stay fast.
+- **Series pages** — season cards (season poster, episodes left to watch, play / watched / favourite on hover or remote focus) and a season page listing every episode with its still, title, runtime, score, end time and synopsis; "Information" on an episode offers the same audio and subtitle picks as a film.
+- **Jellyfin folder layout** — a series' artwork is saved in the series folder (`poster.jpg`, `backdrop.jpg`, `logo.png`, `season01-poster.jpg` ...); season folders keep only the videos, episode stills stay in the server's cache.
+- **Global search** — the magnifier in the top bar (or `Ctrl+K` / `/`) opens a full-screen search across films, series, episode titles, tags, genres, original titles, people and collections, grouped into rows and fully usable with a TV remote; backed by `pg_trgm` indexes in PostgreSQL.
+- **Alpha picker** — library grids of posters with `#` and A–Z: a column on the right on desktop and TV (reachable with the remote), a strip on tablets, a "Jump to…" menu on phones; a letter loads the right page and focuses its first title.
 - **Collections** — films of one series (TMDB collections such as Star Wars) are linked automatically; library pages can fold them into a single card.
 
 ### Accounts and access

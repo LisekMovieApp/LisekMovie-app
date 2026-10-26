@@ -292,10 +292,14 @@ fn is_image_path(path: &str) -> bool {
     let collection = segments.len() == 5 && segments[1] == "api" && segments[2] == "collections";
     let person = segments.len() == 5 && segments[1] == "api" && segments[2] == "people";
     // `/api/media/{id}/poster|backdrop|logo`, the trickplay sprite
-    // sheets `/api/media/{id}/trickplay/{n}` (CSS backgrounds),
+    // sheets `/api/media/{id}/trickplay/{n}` (CSS backgrounds), chapter
+    // thumbnails `/api/media/{id}/chapters/{n}/image`,
     // `/api/collections/{id}/poster|backdrop` and `/api/people/{id}/image`.
     (media && segments.len() == 5 && matches!(segments[4], "poster" | "backdrop" | "logo"))
         || (media && segments.len() == 6 && segments[4] == "trickplay")
+        || (media && segments.len() == 7 && segments[4] == "chapters" && segments[6] == "image")
+        || (media && segments.len() == 7 && segments[4] == "seasons" && segments[6] == "poster")
+        || (media && segments.len() == 5 && segments[4] == "thumb")
         || (collection && matches!(segments[4], "poster" | "backdrop"))
         || (person && segments[4] == "image")
 }
@@ -439,6 +443,11 @@ mod tests {
         assert!(is_image_path(&format!("{id}/poster")));
         assert!(is_image_path(&format!("{id}/trickplay/3")));
         assert!(!is_image_path(&format!("{id}/trickplay")), "the manifest is JSON, read with the header");
+        assert!(is_image_path(&format!("{id}/chapters/4/image")));
+        assert!(is_image_path(&format!("{id}/seasons/1/poster")));
+        assert!(is_image_path(&format!("{id}/thumb")));
+        assert!(!is_image_path(&format!("{id}/seasons/1/episodes")), "the episode list is JSON");
+        assert!(!is_image_path(&format!("{id}/details")), "details are JSON");
         assert!(!is_image_path(&format!("{id}/next")));
         assert!(!is_image_path("/api/libraries"));
         let collection = "/api/collections/0b7d9c2e-0000-0000-0000-000000000000";

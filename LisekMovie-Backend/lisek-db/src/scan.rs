@@ -274,7 +274,8 @@ async fn upsert_batch(
                 THEN media_items.probed_at
             END,
             updated_at = CASE WHEN media_items.metadata_locked THEN media_items.updated_at ELSE now() END
-        RETURNING id, file_path, forced_provider, metadata_locked, (probed_at IS NULL) AS needs_probe
+        RETURNING id, file_path, forced_provider, metadata_locked,
+                  (probed_at IS NULL OR NOT chapters_probed) AS needs_probe
         "#,
     )
     .bind(library_id)
@@ -326,6 +327,13 @@ pub async fn attach_provider_metadata(
                 ($3::jsonb) || CASE
                     WHEN 'overview' = ANY(locked_fields) AND metadata->'provider_data' ? 'overview'
                     THEN jsonb_build_object('overview', metadata->'provider_data'->'overview')
+                    ELSE '{}'::jsonb
+                END
+                -- An episode keeps its own data (title, still ...) when this
+                -- match came without it (the episode lookup failed).
+                || CASE
+                    WHEN NOT ($3::jsonb ? 'episode') AND metadata->'provider_data' ? 'episode'
+                    THEN jsonb_build_object('episode', metadata->'provider_data'->'episode')
                     ELSE '{}'::jsonb
                 END
             ),

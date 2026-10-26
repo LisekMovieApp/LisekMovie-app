@@ -18,6 +18,9 @@ import {
 describe('imageUrl', () => {
 	it('appends the token as a query param', () => {
 		expect(imageUrl('/api/media/abc/poster', 'tok123')).toBe('/api/media/abc/poster?token=tok123');
+		expect(imageUrl('/api/media/abc/chapters/1/image?v=4000', 'tok123')).toBe(
+			'/api/media/abc/chapters/1/image?v=4000&token=tok123'
+		);
 	});
 
 	it('encodes characters a token could contain', () => {

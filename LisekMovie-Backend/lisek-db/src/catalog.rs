@@ -757,7 +757,7 @@ fn filter_clauses(filter: &LibraryFilter<'_>) -> (String, String, Vec<String>) {
     (movie, series, binds)
 }
 
-fn escape_like(value: &str) -> String {
+pub(crate) fn escape_like(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for ch in value.chars() {
         if matches!(ch, '\\' | '%' | '_') {
@@ -860,9 +860,96 @@ pub async fn count_items_by_library(
     Ok(query.fetch_one(pool).await?)
 }
 
+/// Accented letters folded to their base capital for the alpha picker, so
+/// "Łowcy" and "Émilie" are found under L and E. Pairs line up by position
+/// (`ALPHA_FOLD_FROM[i]` → `ALPHA_FOLD_TO[i]`); a unit test checks the
+/// lengths. Lower case is listed too: `upper()` leaves non-ASCII letters
+/// alone under a `C` ctype.
+const ALPHA_FOLD_FROM: &str =
+    "ĄĆĘŁŃÓŚŹŻÀÁÂÃÄÅÇÈÉÊËÌÍÎÏÑÒÔÕÖØÙÚÛÜÝČĎĚŇŘŠŤŮŽąćęłńóśźżàáâãäåçèéêëìíîïñòôõöøùúûüýčďěňřšťůž";
+const ALPHA_FOLD_TO: &str =
+    "ACELNOSZZAAAAAACEEEEIIIINOOOOOUUUUYCDENRSTUZACELNOSZZAAAAAACEEEEIIIINOOOOOUUUUYCDENRSTUZ";
+
+/// Where each letter starts in a library's "all items" list: the
+/// position (0-based, in the given sort) of the first card whose title
+/// begins with that letter. Letters are `A`..`Z` (accented capitals folded,
+/// see [`ALPHA_FOLD_FROM`]) and `#` for everything else (digits, symbols,
+/// other scripts). Only letters with at least one card are returned, in
+/// list order.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct LetterIndex {
+    pub letter: String,
+    pub index: i64,
+}
+
+/// The alpha picker's jump table for [`list_items_by_library_page`]'s
+/// unfiltered list: the same cards (series once, grouped collections as
+/// one card), numbered with the same ORDER BY, so `index / page_size + 1`
+/// is the page and `index % page_size` the card on it. One sort of the
+/// library's titles; no per-letter queries.
+pub async fn library_letter_index(
+    pool: &PgPool,
+    library_id: Uuid,
+    sort: LibrarySort,
+    group_collections: bool,
+    access: &Restrictions,
+) -> Result<Vec<LetterIndex>, DbError> {
+    let [_, _, _, merged_order] = order_clauses(sort);
+    let filter = LibraryFilter {
+        group_collections,
+        ..LibraryFilter::default()
+    };
+    let (movie_filter, series_filter, binds) = filter_clauses(&filter);
+    debug_assert!(binds.is_empty());
+    let (cte, collection_branch) = if filter.grouping() {
+        (
+            GROUPED_CTE,
+            " UNION ALL SELECT k.id, k.name AS title, g.created_at \
+             FROM grouped g JOIN collections k ON k.id = g.collection_id",
+        )
+    } else {
+        ("", "")
+    };
+    let sql = format!(
+        "{cte}SELECT letter, (min(rn) - 1)::bigint AS index FROM ( \
+           SELECT CASE WHEN f.initial ~ '^[A-Z]$' THEN f.initial ELSE '#' END AS letter, \
+                  row_number() OVER (ORDER BY {merged_order}) AS rn \
+           FROM (SELECT m.id, m.title, m.created_at FROM media_items m \
+                 WHERE m.item_type = 'movie' AND m.library_id = $1 \
+                 AND lisek_visible(m.library_id, m.age_rating, $2, $3, $4){movie_filter} \
+                 UNION ALL \
+                 SELECT s.representative_item_id, s.title, s.last_episode_added_at \
+                 FROM series s JOIN media_items r ON r.id = s.representative_item_id \
+                 WHERE s.library_id = $1 \
+                 AND lisek_visible(s.library_id, r.age_rating, $2, $3, $4){series_filter}\
+                 {collection_branch}) c \
+           CROSS JOIN LATERAL (SELECT translate(upper(left(c.title, 1)), $5, $6) AS initial) f \
+         ) numbered GROUP BY letter ORDER BY 2"
+    );
+    let (libraries, max_age, block_unrated) = access.binds();
+    Ok(sqlx::query_as::<_, LetterIndex>(AssertSqlSafe(sql))
+        .bind(library_id)
+        .bind(libraries)
+        .bind(max_age)
+        .bind(block_unrated)
+        .bind(ALPHA_FOLD_FROM)
+        .bind(ALPHA_FOLD_TO)
+        .fetch_all(pool)
+        .await?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn alpha_fold_pairs_line_up() {
+        assert_eq!(
+            ALPHA_FOLD_FROM.chars().count(),
+            ALPHA_FOLD_TO.chars().count()
+        );
+        assert!(ALPHA_FOLD_TO.chars().all(|c| c.is_ascii_uppercase()));
+    }
 
     #[test]
     fn filters_number_their_placeholders_after_the_library_and_restrictions() {

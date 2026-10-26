@@ -12,8 +12,11 @@
 	import { getSessionCookieClientSide } from '$lib/auth';
 	import { fetchMediaDetail, imageUrl, type MediaItem } from '$lib/media/api';
 	import Player from '$lib/player/Player.svelte';
+	import { parseWatchQuery } from '$lib/media/details';
 
 	const id = $derived(page.params.id ?? '');
+	/** `?audio=&sub=&t=` from the detail page (streams, a scene). */
+	const picked = $derived(parseWatchQuery(page.url.searchParams));
 	let token = $state<string | null>(null);
 	let item = $state<MediaItem | null>(null);
 	let cameFromApp = false;
@@ -49,7 +52,8 @@
 				: null
 	);
 
-	/** The next episode replaces this page in history: Back leaves the player. */
+	/** The next episode replaces this page in history: Back leaves the player.
+	 * It starts with its own defaults: no query is carried over. */
 	function playNext(nextId: string) {
 		void goto(resolve('/watch/[id]', { id: nextId }), { replaceState: true });
 	}
@@ -67,6 +71,9 @@
 		<Player
 			{id}
 			{token}
+			initialAudio={picked.audio}
+			initialSubtitle={picked.subtitle}
+			startAt={picked.start}
 			heading={item?.title ?? null}
 			{subheading}
 			backdrop={item && token ? imageUrl(item.backdrop_url, token) : null}

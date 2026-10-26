@@ -19,6 +19,19 @@ pub struct MediaProbe {
     /// seconds for MPEG-TS/M2TS. `None` for probes stored before 0015.
     pub start_time_seconds: Option<f64>,
     pub streams: Vec<MediaStream>,
+    /// Chapters (scenes) from the container, in playback time (the
+    /// container's `start_time` already subtracted). Empty when the file
+    /// has none, and on probes read back for playback.
+    pub chapters: Vec<MediaChapter>,
+}
+
+/// One chapter of a Matroska/MP4 file (`ffprobe -show_chapters`).
+#[derive(Debug, Clone, PartialEq, Serialize, utoipa::ToSchema)]
+pub struct MediaChapter {
+    pub start_seconds: f64,
+    pub end_seconds: Option<f64>,
+    /// The container's `title` tag, e.g. "Chapter 3" or a scene name.
+    pub title: Option<String>,
 }
 
 /// One elementary stream. Fields that do not apply to a stream's kind
@@ -211,6 +224,7 @@ mod tests {
             duration_seconds: None,
             bitrate_kbps: None,
             start_time_seconds: None,
+            chapters: Vec::new(),
             streams: vec![stream(0, StreamKind::Video, "mjpeg"), stream(1, StreamKind::Video, "hevc")],
         };
         assert_eq!(probe.primary_video().unwrap().index, 1);
@@ -225,6 +239,7 @@ mod tests {
             duration_seconds: None,
             bitrate_kbps: None,
             start_time_seconds: None,
+            chapters: Vec::new(),
             streams: vec![stream(1, StreamKind::Audio, "aac"), second],
         };
         assert_eq!(probe.primary_audio().unwrap().index, 2);

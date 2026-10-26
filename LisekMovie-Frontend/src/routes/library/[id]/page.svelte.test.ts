@@ -38,13 +38,19 @@ vi.mock('$app/paths', () => ({
 	assets: ''
 }));
 
-const { fetchLibraryRecent, fetchLibraryRecommended, fetchLibraryPopular, fetchLibraryItems } =
-	vi.hoisted(() => ({
-		fetchLibraryRecent: vi.fn(),
-		fetchLibraryRecommended: vi.fn(),
-		fetchLibraryPopular: vi.fn(),
-		fetchLibraryItems: vi.fn()
-	}));
+const {
+	fetchLibraryRecent,
+	fetchLibraryRecommended,
+	fetchLibraryPopular,
+	fetchLibraryItems,
+	fetchLibraryLetters
+} = vi.hoisted(() => ({
+	fetchLibraryRecent: vi.fn(),
+	fetchLibraryRecommended: vi.fn(),
+	fetchLibraryPopular: vi.fn(),
+	fetchLibraryItems: vi.fn(),
+	fetchLibraryLetters: vi.fn()
+}));
 
 vi.mock('$lib/media/api', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/media/api')>();
@@ -53,7 +59,8 @@ vi.mock('$lib/media/api', async (importOriginal) => {
 		fetchLibraryRecent,
 		fetchLibraryRecommended,
 		fetchLibraryPopular,
-		fetchLibraryItems
+		fetchLibraryItems,
+		fetchLibraryLetters
 	};
 });
 
@@ -117,6 +124,8 @@ describe('/library/[id] page', () => {
 		fetchLibraryRecommended.mockReset();
 		fetchLibraryPopular.mockReset();
 		fetchLibraryItems.mockReset();
+		fetchLibraryLetters.mockReset();
+		fetchLibraryLetters.mockResolvedValue([]);
 		document.cookie = 'lisek_session=test-token; Path=/';
 		mockParams.id = 'lib-a';
 	});
@@ -229,9 +238,8 @@ describe('/library/[id] page', () => {
 		expect(screen.getByLabelText('Sort by')).toBeTruthy();
 		expect(screen.getByText('Comfortable view')).toBeTruthy();
 		expect(screen.getByText('Compact view')).toBeTruthy();
-		expect(screen.getByText('All')).toBeTruthy(); // the letter-row's own "reset" button
-		expect(screen.getByText('A')).toBeTruthy();
-		expect(screen.getByText('Z')).toBeTruthy();
+		// Faza 12: the letter filter row gave way to the alpha picker.
+		expect(screen.queryByText('All')).toBeNull();
 
 		// The regression guard for the alignment fix itself: the "All"
 		// section's own wrapper no longer centers it in a `max-w-6xl` column
@@ -242,5 +250,51 @@ describe('/library/[id] page', () => {
 		expect(allSection).toBeTruthy();
 		expect(allSection?.className).not.toMatch(/\bmx-auto\b/);
 		expect(allSection?.className).not.toMatch(/\bmax-w-/);
+	});
+
+	// Faza 12 — the alpha picker: letters without titles are disabled, and
+	// picking one on another page loads that page and focuses the card.
+	it('jumps to the first title of a letter, loading its page', async () => {
+		fetchLibraryRecent.mockResolvedValue(rowFixture('lib-a', 'Filmy'));
+		fetchLibraryRecommended.mockResolvedValue(rowFixture('lib-a', 'Filmy'));
+		fetchLibraryPopular.mockResolvedValue(rowFixture('lib-a', 'Filmy'));
+		const page = (n: number, titles: string[]): LibraryItems => ({
+			library: { id: 'lib-a', name: 'Filmy', library_type: 'movies' },
+			items: titles.map((title, i) => mediaItemFixture(`p${n}-${i}`, title)),
+			total: 4,
+			page: n,
+			page_size: 2
+		});
+		fetchLibraryItems.mockImplementation(
+			(_token: string, _id: string, options: { page?: number }) =>
+				Promise.resolve(
+					options.page === 2 ? page(2, ['Matrix', 'Zodiac']) : page(1, ['Alien', 'Blade'])
+				)
+		);
+		fetchLibraryLetters.mockResolvedValue([
+			{ letter: 'A', index: 0 },
+			{ letter: 'B', index: 1 },
+			{ letter: 'M', index: 2 },
+			{ letter: 'Z', index: 3 }
+		]);
+
+		render(LibraryPage);
+		expect(await screen.findByText('Alien')).toBeTruthy();
+		const picker = await screen.findAllByRole('button', { name: 'Jump to M' });
+		const q = screen.getAllByRole('button', { name: 'Jump to Q' });
+		expect(q.every((b) => (b as HTMLButtonElement).disabled)).toBe(true);
+
+		picker[0].click();
+		await waitFor(() => expect(document.activeElement?.textContent).toContain('Matrix'));
+		expect(fetchLibraryItems).toHaveBeenLastCalledWith(
+			'test-token',
+			'lib-a',
+			expect.objectContaining({ page: 2, sort: 'title_asc' })
+		);
+		expect(
+			screen
+				.getAllByRole('button', { name: 'Jump to M' })
+				.some((b) => b.getAttribute('aria-current') === 'true')
+		).toBe(true);
 	});
 });

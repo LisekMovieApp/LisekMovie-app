@@ -5,7 +5,7 @@
 use chrono::{DateTime, SubsecRound, Utc};
 use uuid::Uuid;
 
-use lisek_core::media_probe::{MediaProbe, MediaStream, StreamKind};
+use lisek_core::media_probe::{MediaChapter, MediaProbe, MediaStream, StreamKind};
 
 use crate::{DbError, PgPool};
 
@@ -110,7 +110,8 @@ pub async fn save_probe(
             file_modified_at = CASE WHEN $5 THEN $7 ELSE file_modified_at END,
             -- 0 when ffprobe reported none, so the row no longer looks
             -- like a pre-0015 probe.
-            start_time_seconds = COALESCE($8, 0)
+            start_time_seconds = COALESCE($8, 0),
+            chapters_probed = true
         WHERE id = $1
         "#,
     )
@@ -125,15 +126,97 @@ pub async fn save_probe(
     .execute(&mut *tx)
     .await?;
 
+    // Chapters: replaced only when they changed, so the playback-time
+    // re-probe of an unchanged file writes nothing here.
+    let chapters = &probe.chapters;
+    let starts: Vec<f64> = chapters.iter().map(|c| c.start_seconds).collect();
+    let ends: Vec<Option<f64>> = chapters.iter().map(|c| c.end_seconds).collect();
+    let titles: Vec<Option<&str>> = chapters.iter().map(|c| c.title.as_deref()).collect();
+    sqlx::query(
+        r#"
+        WITH wanted AS (
+            SELECT (n - 1)::int AS chapter_index, start_seconds, end_seconds, title
+            FROM UNNEST($2::float8[], $3::float8[], $4::text[])
+                 WITH ORDINALITY AS c(start_seconds, end_seconds, title, n)
+        ), removed AS (
+            DELETE FROM media_chapters mc
+            WHERE mc.media_item_id = $1
+              AND NOT EXISTS (SELECT 1 FROM wanted w
+                              WHERE w.chapter_index = mc.chapter_index)
+        )
+        INSERT INTO media_chapters (media_item_id, chapter_index, start_seconds, end_seconds, title)
+        SELECT $1, chapter_index, start_seconds, end_seconds, title FROM wanted
+        ON CONFLICT (media_item_id, chapter_index) DO UPDATE SET
+            start_seconds = EXCLUDED.start_seconds,
+            end_seconds = EXCLUDED.end_seconds,
+            title = EXCLUDED.title
+        WHERE (media_chapters.start_seconds, media_chapters.end_seconds, media_chapters.title)
+              IS DISTINCT FROM (EXCLUDED.start_seconds, EXCLUDED.end_seconds, EXCLUDED.title)
+        "#,
+    )
+    .bind(item_id)
+    .bind(&starts)
+    .bind(&ends)
+    .bind(&titles)
+    .execute(&mut *tx)
+    .await?;
+
     tx.commit().await?;
     Ok(())
+}
+
+/// What the detail page reads from an item row: its whole `metadata`
+/// (provider data: tagline, genres, ids ...), the probed duration and
+/// whether chapters were read from the file yet.
+pub async fn details_source(
+    pool: &PgPool,
+    item_id: Uuid,
+) -> Result<Option<(serde_json::Value, Option<f64>, bool)>, DbError> {
+    Ok(sqlx::query_as(
+        "SELECT metadata, duration_seconds, chapters_probed AND probe_error IS NULL
+         FROM media_items WHERE id = $1",
+    )
+    .bind(item_id)
+    .fetch_optional(pool)
+    .await?)
+}
+
+/// Which of `ids` still name an item (the chapter thumbnail sweep).
+pub async fn existing_items(pool: &PgPool, ids: &[Uuid]) -> Result<Vec<Uuid>, DbError> {
+    let rows: Vec<(Uuid,)> = sqlx::query_as("SELECT id FROM media_items WHERE id = ANY($1)")
+        .bind(ids)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
+/// An item's chapters in start order (empty when the file has none or was
+/// not probed yet).
+pub async fn chapters(pool: &PgPool, item_id: Uuid) -> Result<Vec<MediaChapter>, DbError> {
+    let rows: Vec<(f64, Option<f64>, Option<String>)> = sqlx::query_as(
+        "SELECT start_seconds, end_seconds, title FROM media_chapters
+         WHERE media_item_id = $1 ORDER BY chapter_index",
+    )
+    .bind(item_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(start_seconds, end_seconds, title)| MediaChapter {
+            start_seconds,
+            end_seconds,
+            title,
+        })
+        .collect())
 }
 
 /// Records that ffprobe could not read this file, so an unchanged broken
 /// file is skipped by later scans. A changed file clears the mark (see the
 /// scan upsert).
 pub async fn save_probe_error(pool: &PgPool, item_id: Uuid, error: &str) -> Result<(), DbError> {
-    sqlx::query("UPDATE media_items SET probed_at = now(), probe_error = $2 WHERE id = $1")
+    sqlx::query(
+        "UPDATE media_items SET probed_at = now(), probe_error = $2, chapters_probed = true WHERE id = $1",
+    )
         .bind(item_id)
         .bind(error)
         .execute(pool)
@@ -250,6 +333,8 @@ pub async fn stored_probe(
             bitrate_kbps: facts.bitrate_kbps,
             start_time_seconds: facts.start_time_seconds,
             streams: streams.into_iter().map(MediaStream::from).collect(),
+            // Playback does not need them; `chapters()` reads them.
+            chapters: Vec::new(),
         },
         FileStamp {
             size: facts.file_size,

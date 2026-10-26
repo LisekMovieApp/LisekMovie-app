@@ -96,24 +96,30 @@ pub fn filter_chain(plan: &Plan, hdr_transfer: Option<&str>, tools: &FfmpegTools
         format!("scale={}:{}:flags=bilinear", plan.width, plan.height),
         "setsar=1".to_owned(),
     ];
-    if let Some(transfer) = hdr_transfer.filter(|t| is_hdr_transfer(Some(t)))
-        && tools.filters.contains("zscale")
-        && tools.filters.contains("tonemap")
-    {
-        filters.push(format!(
-            "setparams=color_primaries=bt2020:color_trc={transfer}:colorspace=bt2020nc"
-        ));
-        filters.push(format!(
-            "zscale=tin={transfer}:min=bt2020nc:pin=bt2020:rin=tv:t=linear:npl=100"
-        ));
-        filters.push("format=gbrpf32le".to_owned());
-        filters.push("zscale=p=bt709".to_owned());
-        filters.push("tonemap=tonemap=hable:desat=0".to_owned());
-        filters.push("zscale=t=bt709:m=bt709:r=tv".to_owned());
-        filters.push("format=yuv420p".to_owned());
-    }
+    filters.extend(tone_map_filters(hdr_transfer, tools));
     filters.push(format!("tile={}x{}", plan.columns, plan.rows));
     filters.join(",")
+}
+
+/// Software tone mapping of an already scaled HDR picture to SDR (zscale +
+/// tonemap, cheap at thumbnail size). Empty for SDR, or when the build
+/// lacks the filters (the picture is then washed out, not broken).
+pub fn tone_map_filters(hdr_transfer: Option<&str>, tools: &FfmpegTools) -> Vec<String> {
+    let Some(transfer) = hdr_transfer.filter(|t| is_hdr_transfer(Some(t))) else {
+        return Vec::new();
+    };
+    if !(tools.filters.contains("zscale") && tools.filters.contains("tonemap")) {
+        return Vec::new();
+    }
+    vec![
+        format!("setparams=color_primaries=bt2020:color_trc={transfer}:colorspace=bt2020nc"),
+        format!("zscale=tin={transfer}:min=bt2020nc:pin=bt2020:rin=tv:t=linear:npl=100"),
+        "format=gbrpf32le".to_owned(),
+        "zscale=p=bt709".to_owned(),
+        "tonemap=tonemap=hable:desat=0".to_owned(),
+        "zscale=t=bt709:m=bt709:r=tv".to_owned(),
+        "format=yuv420p".to_owned(),
+    ]
 }
 
 /// Below this length every frame is decoded: it costs seconds, and short

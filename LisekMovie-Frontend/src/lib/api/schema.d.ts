@@ -867,6 +867,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/libraries/{library_id}/letters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The alpha picker's jump table (Faza 12) for one library's "all items"
+         *     grid: where each letter's first title sits in the list, for the same
+         *     sort and collection grouping. Accented capitals count as their base
+         *     letter (Ł under L).
+         */
+        get: operations["library_letters"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/libraries/{library_id}/popular": {
         parameters: {
             query?: never;
@@ -1009,6 +1031,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/media/{item_id}/chapters/{index}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A chapter's thumbnail (JPEG), made on the first request. */
+        get: operations["chapter_image"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/media/{item_id}/collection": {
         parameters: {
             query?: never;
@@ -1021,6 +1060,22 @@ export interface paths {
          *     page's "Z kolekcji" row). 204 when it belongs to none.
          */
         get: operations["item_collection"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/{item_id}/details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["item_details"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1187,6 +1242,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/media/{item_id}/season-cards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["season_cards"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/media/{item_id}/seasons": {
         parameters: {
             query?: never;
@@ -1211,6 +1282,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/media/{item_id}/seasons/{season}/episodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["season_page"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/{item_id}/seasons/{season}/poster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A season's poster: `<series folder>/seasonNN-poster.jpg`, the local
+         *     cache, else the series poster.
+         */
+        get: operations["season_poster"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/{item_id}/seasons/{season}/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Watched and/or favourite for every episode of the season (this viewer). */
+        put: operations["set_season_state"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/media/{item_id}/state": {
         parameters: {
             query?: never;
@@ -1220,6 +1344,26 @@ export interface paths {
         };
         get: operations["media_state"];
         put: operations["set_flags"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/{item_id}/thumb": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An episode's thumbnail (16:9): the provider's still, a frame cut from
+         *     the file, else the series backdrop.
+         */
+        get: operations["episode_thumb"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1417,6 +1561,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["search"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/setup/database/test": {
         parameters: {
             query?: never;
@@ -1490,6 +1650,19 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AudioOption: {
+            /** Format: int32 */
+            channels?: number | null;
+            codec?: string | null;
+            /**
+             * Format: int32
+             * @description ffprobe stream index: `audio_stream_index` of the playback request.
+             */
+            index: number;
+            is_default: boolean;
+            language?: string | null;
+            title?: string | null;
+        };
         AudioTrack: {
             channel_layout?: string | null;
             /** Format: int32 */
@@ -1523,6 +1696,15 @@ export interface components {
         ChangePassword: {
             current_password?: string | null;
             new_password: string;
+        };
+        ChapterResponse: {
+            /** @description `/api/media/{id}/chapters/{index}/image?v=...` (`?token=` works). */
+            image_url: string;
+            index: number;
+            /** Format: double */
+            start_seconds: number;
+            /** @description The file's own chapter name; `None` for numbered or generated ones. */
+            title?: string | null;
         };
         /**
          * @description Decoding abilities of one client. Codec names are FFmpeg codec names;
@@ -1635,6 +1817,12 @@ export interface components {
             /** @description `"Actor"`, `"Director"` or `"Writer"`. */
             role: string;
         };
+        /** @description A director or writer, linking to their page. */
+        CrewMember: {
+            name: string;
+            /** Format: uuid */
+            person_id: string;
+        };
         CurrentJob: {
             /** Format: int32 */
             episode?: number | null;
@@ -1713,6 +1901,45 @@ export interface components {
             name: string;
             subscribed_events: string[];
             url: string;
+        };
+        EpisodeRowResponse: {
+            air_date?: string | null;
+            /** Format: double */
+            duration_seconds?: number | null;
+            /** Format: int32 */
+            end_episode?: number | null;
+            /** Format: int32 */
+            episode: number;
+            favorite: boolean;
+            /** Format: uuid */
+            id: string;
+            overview?: string | null;
+            /** Format: double */
+            position_seconds: number;
+            /** Format: double */
+            rating?: number | null;
+            /**
+             * Format: int32
+             * @description The file's length, else the provider's runtime.
+             */
+            runtime_minutes?: number | null;
+            /** @description `/api/media/{id}/thumb` (`?token=` works). */
+            thumb_url: string;
+            /** @description The provider's title; `None` before enrichment ("Odcinek N"). */
+            title?: string | null;
+            watched: boolean;
+        };
+        EpisodeSearchResult: {
+            /** Format: int32 */
+            episode: number;
+            /** Format: uuid */
+            id: string;
+            /** Format: int32 */
+            season: number;
+            series_title: string;
+            /** @description `/api/media/{id}/thumb` (16:9; `?token=` works). */
+            thumb_url: string;
+            title: string;
         };
         /**
          * @description Every item currently flagged `metadata_fallback` — the Admin Panel's
@@ -1795,6 +2022,42 @@ export interface components {
             /** Format: int32 */
             year?: number | null;
         };
+        ItemDetailsResponse: {
+            audio_tracks: components["schemas"]["AudioOption"][];
+            chapters: components["schemas"]["ChapterResponse"][];
+            /**
+             * @description `true` when the file has no chapters and `chapters` are evenly
+             *     spaced scenes instead.
+             */
+            chapters_generated: boolean;
+            /**
+             * Format: int32
+             * @description The audio stream played when none is picked.
+             */
+            default_audio_index?: number | null;
+            directors: components["schemas"]["CrewMember"][];
+            /** @description IMDb, TheTVDB, TMDB, in that order, when the item has those ids. */
+            external_links: components["schemas"]["NamedLink"][];
+            genres: string[];
+            /** @description Shown under the title when it differs from it. */
+            original_title?: string | null;
+            /**
+             * Format: double
+             * @description TMDB user score, 0-10.
+             */
+            rating?: number | null;
+            /**
+             * Format: int32
+             * @description Length of the file (or of an episode, from the provider).
+             */
+            runtime_minutes?: number | null;
+            studios: string[];
+            subtitle_tracks: components["schemas"]["SubtitleOption"][];
+            tagline?: string | null;
+            tags: string[];
+            video?: null | components["schemas"]["VideoSummary"];
+            writers: components["schemas"]["CrewMember"][];
+        };
         ItemPeopleResponse: {
             /** @description Directors, writers, then the cast in billing order. */
             items: components["schemas"]["CreditResponse"][];
@@ -1808,6 +2071,20 @@ export interface components {
             page_size: number;
             /** Format: int64 */
             total: number;
+        };
+        LibraryLetter: {
+            /**
+             * Format: int64
+             * @description 0-based position of the letter's first card in the unfiltered
+             *     list: page `index / page_size + 1`, card `index % page_size`.
+             */
+            index: number;
+            /** @description `A`..`Z`, or `#` for titles starting with anything else. */
+            letter: string;
+        };
+        LibraryLettersResponse: {
+            /** @description Letters with at least one card, in list order. */
+            letters: components["schemas"]["LibraryLetter"][];
         };
         LibraryResponse: {
             /** Format: uuid */
@@ -2009,6 +2286,10 @@ export interface components {
             /** @description Parental controls limit what this account sees. */
             restricted: boolean;
         };
+        NamedLink: {
+            name: string;
+            url: string;
+        };
         /** @description The episode a player offers when one ends ("Następny odcinek"). */
         NextEpisodeResponse: {
             backdrop_url: string;
@@ -2047,6 +2328,18 @@ export interface components {
             imdb_url?: string | null;
             name: string;
             tmdb_url: string;
+        };
+        PersonSearchResult: {
+            character?: string | null;
+            image_url?: string | null;
+            name: string;
+            /** Format: uuid */
+            person_id: string;
+            /**
+             * @description `"Actor"`, `"Director"` or `"Writer"`: what they are best known
+             *     for here.
+             */
+            role: string;
         };
         /** @description One progress report (`POST /api/telemetry/playback-progress`). */
         PlaybackProgress: {
@@ -2435,6 +2728,57 @@ export interface components {
             /** Format: int32 */
             score: number;
         };
+        SearchResponse: {
+            /** @description Collection cards (`item_type` `"collection"`). */
+            collections: components["schemas"]["MediaItemResponse"][];
+            episodes: components["schemas"]["EpisodeSearchResult"][];
+            movies: components["schemas"]["MediaItemResponse"][];
+            people: components["schemas"]["PersonSearchResult"][];
+            /** @description The query as searched (trimmed). */
+            query: string;
+            series: components["schemas"]["MediaItemResponse"][];
+        };
+        SeasonCardResponse: {
+            /** Format: int32 */
+            air_year?: number | null;
+            /** Format: int64 */
+            episode_count: number;
+            /** @description Every episode is one of the viewer's favourites. */
+            favorite: boolean;
+            /**
+             * @description The provider's name ("Sezon 1", "Odcinki specjalne"); `None` before
+             *     enrichment.
+             */
+            name?: string | null;
+            /**
+             * Format: uuid
+             * @description The episode "Play" opens: the first one not watched yet.
+             */
+            play_id: string;
+            /** @description Always set: the season's own poster, else the series poster. */
+            poster_url: string;
+            /** Format: int32 */
+            season: number;
+            /** Format: int64 */
+            unwatched_count: number;
+        };
+        SeasonCardsResponse: {
+            items: components["schemas"]["SeasonCardResponse"][];
+        };
+        SeasonFlagsRequest: {
+            favorite?: boolean | null;
+            watched?: boolean | null;
+        };
+        SeasonPageResponse: {
+            /** Format: int32 */
+            air_year?: number | null;
+            episodes: components["schemas"]["EpisodeRowResponse"][];
+            name?: string | null;
+            overview?: string | null;
+            poster_url: string;
+            /** Format: int32 */
+            season: number;
+        };
         /**
          * @description One episode, as the "Sezony" section renders it — see
          *     `lisek_db::list_series_seasons`'s doc comment for exactly why this is
@@ -2569,6 +2913,21 @@ export interface components {
         };
         /** @enum {string} */
         SubtitleDelivery: "external" | "hls" | "burn_in";
+        SubtitleOption: {
+            codec?: string | null;
+            external: boolean;
+            forced: boolean;
+            /**
+             * @description `subtitle` of the playback request: `s<index>` embedded, `x<n>` a
+             *     file next to the video.
+             */
+            id: string;
+            is_default: boolean;
+            /** @description `"text"` or `"image"` (image subtitles are burnt into the picture). */
+            kind: string;
+            language?: string | null;
+            title?: string | null;
+        };
         SubtitleTrack: {
             codec?: string | null;
             /** @description A file next to the video rather than a stream inside it. */
@@ -2727,6 +3086,15 @@ export interface components {
         UserRestrictionsResponse: components["schemas"]["Restrictions"] & {
             /** @description `false` for an administrator: administrators always see everything. */
             enforced: boolean;
+        };
+        /** @description The picture, as one line ("4K HEVC HDR"). */
+        VideoSummary: {
+            codec?: string | null;
+            /** @description `"HDR"`, `"HLG"`, `"Dolby Vision"`. */
+            hdr?: string | null;
+            label: string;
+            /** @description `"4K"`, `"1080p"`, `"720p"`, `"SD"`. */
+            resolution?: string | null;
         };
     };
     responses: never;
@@ -5108,6 +5476,60 @@ export interface operations {
             };
         };
     };
+    library_letters: {
+        parameters: {
+            query?: {
+                sort?: string;
+                group_collections?: boolean;
+            };
+            header?: never;
+            path: {
+                library_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryLettersResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     library_popular: {
         parameters: {
             query?: never;
@@ -5442,6 +5864,45 @@ export interface operations {
             };
         };
     };
+    chapter_image: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+                index: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JPEG */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     item_collection: {
         parameters: {
             query?: never;
@@ -5481,6 +5942,45 @@ export interface operations {
                 content?: never;
             };
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    item_details: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemDetailsResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5917,6 +6417,45 @@ export interface operations {
             };
         };
     };
+    season_cards: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonCardsResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     media_item_seasons: {
         parameters: {
             query?: never;
@@ -5961,6 +6500,127 @@ export interface operations {
                 content?: never;
             };
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    season_page: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+                season: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonPageResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    season_poster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+                season: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JPEG */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_season_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+                season: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeasonFlagsRequest"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6035,6 +6695,44 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    episode_thumb: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JPEG */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6463,6 +7161,48 @@ export interface operations {
                 content?: never;
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    search: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description What to look for (2-100 characters; shorter gives empty groups). */
+                q: string;
+                /** @description Results per group (default 20, at most 50). */
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

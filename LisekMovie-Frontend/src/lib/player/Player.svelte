@@ -77,6 +77,12 @@
 		onexit: () => void;
 		/** Plays another item (the next episode) in place of this one. */
 		onnext?: (id: string) => void;
+		/** Faza 9 — picked on the detail page: the audio stream (ffprobe
+		 * index), the subtitle (`''` off) and where to start (a scene).
+		 * `null` leaves each to the server / the resume point. */
+		initialAudio?: number | null;
+		initialSubtitle?: string | null;
+		startAt?: number | null;
 	}
 
 	let {
@@ -86,7 +92,10 @@
 		subheading = null,
 		backdrop = null,
 		onexit,
-		onnext
+		onnext,
+		initialAudio = null,
+		initialSubtitle = null,
+		startAt: requestedStart = null
 	}: Props = $props();
 
 	/** Error codes with their own message; anything else is `player.failed`. */
@@ -317,6 +326,8 @@
 			clearTimeout(resumeTimer);
 			resumeTimer = setTimeout(() => (resumedAt = null), 8000);
 		}
+		// Picked on the detail page: already in this session.
+		if (initialSubtitle !== null) return;
 		// The subtitle language picked last time, when it can switch in place.
 		const language = prefs.subtitleLanguage;
 		if (language === null) return;
@@ -1042,7 +1053,11 @@
 		}
 
 		if (!token) fail('invalid_token');
-		else void open(null);
+		else {
+			if (initialAudio !== null) audio = initialAudio;
+			if (initialSubtitle !== null) subtitle = initialSubtitle;
+			void open(requestedStart);
+		}
 
 		return () => {
 			destroyed = true;

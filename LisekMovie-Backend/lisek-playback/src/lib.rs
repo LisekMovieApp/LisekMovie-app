@@ -3,6 +3,7 @@
 //!
 //! Independent of the HTTP framework and the database: the server feeds
 //! in stored probes and settings and serves what [`session`] produces.
+pub mod chapters;
 pub mod command;
 pub mod decision;
 pub mod downmix;

@@ -27,8 +27,8 @@ use crate::auth::{AdminUser, SessionUser};
 use crate::openapi::ApiDoc;
 use crate::state::SharedState;
 use crate::{
-    admin, auth, browser_notifications, collections, download, games, identify, media,
-    notifications, people, playback, scan_jobs, setup, telemetry, trickplay, users,
+    admin, auth, browser_notifications, collections, details, download, games, identify, media,
+    notifications, people, playback, scan_jobs, search, series, setup, telemetry, trickplay, users,
 };
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -75,6 +75,7 @@ fn user() -> OpenApiRouter<SharedState> {
         .routes(routes!(media::home_feed))
         .routes(routes!(media::list_libraries))
         .routes(routes!(media::library_items))
+        .routes(routes!(media::library_letters))
         .routes(routes!(media::library_recent))
         .routes(routes!(media::library_recommended))
         .routes(routes!(media::library_popular))
@@ -83,6 +84,14 @@ fn user() -> OpenApiRouter<SharedState> {
         .routes(routes!(media::next_episode))
         .routes(routes!(collections::item_collection))
         .routes(routes!(people::item_people))
+        .routes(routes!(details::item_details))
+        .routes(routes!(details::chapter_image))
+        .routes(routes!(search::search))
+        .routes(routes!(series::season_cards))
+        .routes(routes!(series::season_page))
+        .routes(routes!(series::set_season_state))
+        .routes(routes!(series::season_poster))
+        .routes(routes!(series::episode_thumb))
         .routes(routes!(people::get_person))
         .routes(routes!(people::person_image))
         .routes(routes!(download::ticket))

@@ -21,6 +21,8 @@
 	import logoText from '$lib/assets/logo_text.svg';
 	import Icon from './Icon.svelte';
 	import UserMenu from './UserMenu.svelte';
+	import SearchOverlay from './SearchOverlay.svelte';
+	import { isSearchShortcut } from '$lib/media/search';
 
 	interface Props {
 		username: string;
@@ -33,6 +35,23 @@
 	let scrolled = $state(false);
 	let drawer = $state(false);
 	let libraries: LibrarySummary[] = $state([]);
+	/** Faza 11: the omnibox layer, and the button that gets focus back. */
+	let searching = $state(false);
+	let searchButton: HTMLButtonElement | undefined = $state();
+	const searchToken = $derived(searching ? (getSessionCookieClientSide() ?? '') : '');
+
+	function closeSearch() {
+		if (!searching) return;
+		searching = false;
+		queueMicrotask(() => searchButton?.focus({ preventScroll: true }));
+	}
+
+	function onShortcut(event: KeyboardEvent) {
+		if (searching || !isSearchShortcut(event)) return;
+		event.preventDefault();
+		drawer = false;
+		searching = true;
+	}
 
 	/** Shared by every nav link: active and inactive share the same sizing
 	 * so a link doesn't change shape when it turns on or off, only its
@@ -167,8 +186,28 @@
 		</nav>
 	</div>
 
-	<UserMenu {username} {isAdmin} />
+	<div class="flex shrink-0 items-center gap-1 md:gap-2">
+		<button
+			bind:this={searchButton}
+			type="button"
+			class="grid size-10 place-items-center rounded-full text-white transition-colors hover:bg-white/10 hover:text-gold focus-visible:bg-white/15 focus-visible:text-gold md:size-11"
+			aria-label={t('search.open')}
+			title={t('search.open_hint')}
+			aria-haspopup="dialog"
+			aria-expanded={searching}
+			onclick={() => (searching = true)}
+		>
+			<Icon name="search" class="size-6" />
+		</button>
+		<UserMenu {username} {isAdmin} />
+	</div>
 </header>
+
+<svelte:window onkeydown={onShortcut} />
+
+{#if searching && searchToken}
+	<SearchOverlay token={searchToken} onclose={closeSearch} />
+{/if}
 
 {#if drawer}
 	<button

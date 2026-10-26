@@ -453,9 +453,21 @@ def main():
             # Faza 8: cast and crew.
             from people_smoke import check_people
             check_people(request,ok_json,sql,token,item_id,other_token,other_id)
+            # Faza 9: detail page extras and chapters.
+            from details_smoke import check_details
+            check_details(request,ok_json,sql,token,item_id,other_token,other_id,bool(args.ffmpeg and args.ffprobe))
             if args.ffmpeg and args.ffprobe:
                 # After the checks that count items and webhook deliveries.
                 check_hls_engine(args,root,request,ok_json,sql,token,base)
+            # Faza 10: series pages (after the checks that count items).
+            from series_smoke import check_series
+            check_series(request,ok_json,sql,token,other_token,other_id,root,movie_path,bool(args.ffmpeg and args.ffprobe))
+            # Faza 11: global search (after the series checks).
+            from search_smoke import check_search
+            check_search(request,ok_json,sql,token,other_token,other_id)
+            # Faza 12: the alpha picker's jump table.
+            from search_smoke import check_letters
+            check_letters(request,ok_json,token,library_id,other_token,other_id)
             ok_json("/api/auth/logout","POST",{},token)
             if args.node:
                 event=notification_queue.get(timeout=15)
@@ -476,7 +488,7 @@ def main():
             server.wait(timeout=10)
             log.close()
             server = None
-            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls, fix match, downloads, cast and crew")
+            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls, fix match, downloads, cast and crew, details and chapters, series pages, global search, alpha picker")
     finally:
         if server:
             server.terminate()

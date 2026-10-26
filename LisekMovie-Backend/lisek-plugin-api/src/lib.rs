@@ -79,6 +79,37 @@ pub struct ProviderMatch {
     /// lookup failed — the item keeps the people it has. `Some(empty)`:
     /// the provider says nobody is credited.
     pub people: Option<Vec<ProviderPerson>>,
+    /// A series' seasons (Faza 10): names, synopses and posters. Empty for
+    /// movies and providers without season data.
+    pub seasons: Vec<ProviderSeason>,
+}
+
+/// One season of a series match.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ProviderSeason {
+    /// 0 for specials.
+    pub number: i32,
+    pub name: Option<String>,
+    pub overview: Option<String>,
+    pub poster_url: Option<String>,
+    pub episode_count: Option<i32>,
+    pub air_year: Option<i32>,
+}
+
+/// One episode of a season ([`MetadataProvider::season_episodes`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ProviderEpisode {
+    pub season: i32,
+    pub episode: i32,
+    pub title: Option<String>,
+    pub overview: Option<String>,
+    pub runtime_minutes: Option<u32>,
+    /// User score 0-10, only with votes.
+    pub rating: Option<f64>,
+    /// A 16:9 still from the episode.
+    pub still_url: Option<String>,
+    /// `YYYY-MM-DD`.
+    pub air_date: Option<String>,
 }
 
 /// What a credited person did on a title. Stored as the variant name
@@ -215,6 +246,18 @@ pub trait MetadataProvider: Send + Sync {
         _primary_language: &str,
     ) -> Result<Option<ProviderMatch>, ProviderError> {
         Ok(None)
+    }
+
+    /// Every episode of one season of a series this provider matched
+    /// (`series_id`: the provider's own id, as in `fields.tmdb_id`). Empty
+    /// for a provider without episode data.
+    async fn season_episodes(
+        &self,
+        _series_id: &str,
+        _season: i32,
+        _primary_language: &str,
+    ) -> Result<Vec<ProviderEpisode>, ProviderError> {
+        Ok(Vec::new())
     }
 
     /// One person's biography and dates, for an id this provider returned

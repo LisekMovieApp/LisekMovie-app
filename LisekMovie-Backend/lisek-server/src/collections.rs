@@ -27,7 +27,7 @@ const LIBRARY_COLLECTION_LIMIT: i64 = 60;
 /// A collection card in the shape every other card has: `item_type`
 /// `"collection"`, artwork under `/api/collections/{id}/...`, `year` the
 /// first film's year.
-fn card(summary: &CollectionSummary) -> MediaItemResponse {
+pub(crate) fn card(summary: &CollectionSummary) -> MediaItemResponse {
     MediaItemResponse::from(lisek_core::MediaItem {
         id: summary.id,
         library_id: Uuid::nil(),

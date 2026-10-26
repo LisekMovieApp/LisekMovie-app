@@ -264,9 +264,13 @@ pub async fn identify(
             continue;
         };
         let file_path = std::path::PathBuf::from(file_path);
+        let artwork_dir = match kind {
+            MediaKind::Movie => file_path.parent().map(std::path::Path::to_path_buf),
+            MediaKind::Series => lisek_metadata::layout::series_folder(&file_path),
+        };
         if library.save_metadata_in_media_folder
             && matched.logo_url.is_none()
-            && let Some(dir) = file_path.parent()
+            && let Some(dir) = artwork_dir
         {
             let _ = tokio::fs::remove_file(dir.join("logo.png")).await;
         }
@@ -280,6 +284,8 @@ pub async fn identify(
             &file_path,
             library.save_metadata_in_media_folder,
             &req.provider,
+            &api_key,
+            &auth.user.ui_language,
             &matched,
         )
         .await;

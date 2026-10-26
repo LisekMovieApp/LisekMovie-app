@@ -706,6 +706,7 @@ pub(crate) mod tests {
             bitrate_kbps: Some(30000),
             start_time_seconds: Some(0.0),
             streams: vec![video, dts, lektor, pgs, srt],
+            chapters: Vec::new(),
         }
     }
 

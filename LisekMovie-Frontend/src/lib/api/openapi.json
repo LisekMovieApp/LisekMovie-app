@@ -2426,6 +2426,74 @@
         ]
       }
     },
+    "/api/libraries/{library_id}/letters": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "The alpha picker's jump table (Faza 12) for one library's \"all items\"\ngrid: where each letter's first title sits in the list, for the same\nsort and collection grouping. Accented capitals count as their base\nletter (Ł under L).",
+        "operationId": "library_letters",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group_collections",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryLettersResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/libraries/{library_id}/popular": {
       "get": {
         "tags": [
@@ -2745,6 +2813,54 @@
         ]
       }
     },
+    "/api/media/{item_id}/chapters/{index}/image": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "A chapter's thumbnail (JPEG), made on the first request.",
+        "operationId": "chapter_image",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "index",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JPEG"
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/media/{item_id}/collection": {
       "get": {
         "tags": [
@@ -2784,6 +2900,51 @@
             "description": ""
           },
           "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/media/{item_id}/details": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "operationId": "item_details",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemDetailsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
             "description": ""
           },
           "503": {
@@ -3228,6 +3389,51 @@
         ]
       }
     },
+    "/api/media/{item_id}/season-cards": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "operationId": "season_cards",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeasonCardsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/media/{item_id}/seasons": {
       "get": {
         "tags": [
@@ -3273,6 +3479,166 @@
             "description": ""
           },
           "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/media/{item_id}/seasons/{season}/episodes": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "operationId": "season_page",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "season",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeasonPageResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/media/{item_id}/seasons/{season}/poster": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "A season's poster: `<series folder>/seasonNN-poster.jpg`, the local\ncache, else the series poster.",
+        "operationId": "season_poster",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "season",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JPEG"
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/media/{item_id}/seasons/{season}/state": {
+      "put": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Watched and/or favourite for every episode of the season (this viewer).",
+        "operationId": "set_season_state",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "season",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeasonFlagsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
             "description": ""
           },
           "503": {
@@ -3353,6 +3719,45 @@
             "description": ""
           },
           "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/media/{item_id}/thumb": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "An episode's thumbnail (16:9): the provider's still, a frame cut from\nthe file, else the series backdrop.",
+        "operationId": "episode_thumb",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JPEG"
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "503": {
             "description": ""
           }
         },
@@ -3851,6 +4256,64 @@
         ]
       }
     },
+    "/api/search": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "operationId": "search",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "path",
+            "description": "What to look for (2-100 characters; shorter gives empty groups).",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "Results per group (default 20, at most 50).",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/setup/database/test": {
       "post": {
         "tags": [
@@ -4030,6 +4493,48 @@
   },
   "components": {
     "schemas": {
+      "AudioOption": {
+        "type": "object",
+        "required": [
+          "index",
+          "is_default"
+        ],
+        "properties": {
+          "channels": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "codec": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "index": {
+            "type": "integer",
+            "format": "int32",
+            "description": "ffprobe stream index: `audio_stream_index` of the playback request."
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "AudioTrack": {
         "type": "object",
         "required": [
@@ -4157,6 +4662,35 @@
           },
           "new_password": {
             "type": "string"
+          }
+        }
+      },
+      "ChapterResponse": {
+        "type": "object",
+        "required": [
+          "index",
+          "start_seconds",
+          "image_url"
+        ],
+        "properties": {
+          "image_url": {
+            "type": "string",
+            "description": "`/api/media/{id}/chapters/{index}/image?v=...` (`?token=` works)."
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "start_seconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The file's own chapter name; `None` for numbered or generated ones."
           }
         }
       },
@@ -4412,6 +4946,23 @@
           }
         }
       },
+      "CrewMember": {
+        "type": "object",
+        "description": "A director or writer, linking to their page.",
+        "required": [
+          "person_id",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "person_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "CurrentJob": {
         "type": "object",
         "required": [
@@ -4658,6 +5209,125 @@
             }
           },
           "url": {
+            "type": "string"
+          }
+        }
+      },
+      "EpisodeRowResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "episode",
+          "thumb_url",
+          "watched",
+          "favorite",
+          "position_seconds"
+        ],
+        "properties": {
+          "air_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "duration_seconds": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "end_episode": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "episode": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "favorite": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "overview": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "position_seconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "rating": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "runtime_minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The file's length, else the provider's runtime.",
+            "minimum": 0
+          },
+          "thumb_url": {
+            "type": "string",
+            "description": "`/api/media/{id}/thumb` (`?token=` works)."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The provider's title; `None` before enrichment (\"Odcinek N\")."
+          },
+          "watched": {
+            "type": "boolean"
+          }
+        }
+      },
+      "EpisodeSearchResult": {
+        "type": "object",
+        "required": [
+          "id",
+          "series_title",
+          "season",
+          "episode",
+          "title",
+          "thumb_url"
+        ],
+        "properties": {
+          "episode": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "season": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "series_title": {
+            "type": "string"
+          },
+          "thumb_url": {
+            "type": "string",
+            "description": "`/api/media/{id}/thumb` (16:9; `?token=` works)."
+          },
+          "title": {
             "type": "string"
           }
         }
@@ -4927,6 +5597,131 @@
           }
         }
       },
+      "ItemDetailsResponse": {
+        "type": "object",
+        "required": [
+          "genres",
+          "tags",
+          "studios",
+          "external_links",
+          "directors",
+          "writers",
+          "audio_tracks",
+          "subtitle_tracks",
+          "chapters",
+          "chapters_generated"
+        ],
+        "properties": {
+          "audio_tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AudioOption"
+            }
+          },
+          "chapters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChapterResponse"
+            }
+          },
+          "chapters_generated": {
+            "type": "boolean",
+            "description": "`true` when the file has no chapters and `chapters` are evenly\nspaced scenes instead."
+          },
+          "default_audio_index": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The audio stream played when none is picked."
+          },
+          "directors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CrewMember"
+            }
+          },
+          "external_links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NamedLink"
+            },
+            "description": "IMDb, TheTVDB, TMDB, in that order, when the item has those ids."
+          },
+          "genres": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "original_title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Shown under the title when it differs from it."
+          },
+          "rating": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "TMDB user score, 0-10."
+          },
+          "runtime_minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Length of the file (or of an episode, from the provider).",
+            "minimum": 0
+          },
+          "studios": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "subtitle_tracks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubtitleOption"
+            }
+          },
+          "tagline": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "video": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VideoSummary",
+                "description": "Streams of the file (films; a series card's representative episode\nhas its own). `None` until the file was probed."
+              }
+            ]
+          },
+          "writers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CrewMember"
+            }
+          }
+        }
+      },
       "ItemPeopleResponse": {
         "type": "object",
         "required": [
@@ -4972,6 +5767,39 @@
           "total": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "LibraryLetter": {
+        "type": "object",
+        "required": [
+          "letter",
+          "index"
+        ],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "format": "int64",
+            "description": "0-based position of the letter's first card in the unfiltered\nlist: page `index / page_size + 1`, card `index % page_size`."
+          },
+          "letter": {
+            "type": "string",
+            "description": "`A`..`Z`, or `#` for titles starting with anything else."
+          }
+        }
+      },
+      "LibraryLettersResponse": {
+        "type": "object",
+        "required": [
+          "letters"
+        ],
+        "properties": {
+          "letters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LibraryLetter"
+            },
+            "description": "Letters with at least one card, in list order."
           }
         }
       },
@@ -5404,6 +6232,21 @@
           }
         }
       },
+      "NamedLink": {
+        "type": "object",
+        "required": [
+          "name",
+          "url"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
       "NextEpisodeResponse": {
         "type": "object",
         "description": "The episode a player offers when one ends (\"Następny odcinek\").",
@@ -5531,6 +6374,39 @@
           },
           "tmdb_url": {
             "type": "string"
+          }
+        }
+      },
+      "PersonSearchResult": {
+        "type": "object",
+        "required": [
+          "person_id",
+          "name",
+          "role"
+        ],
+        "properties": {
+          "character": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "person_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "description": "`\"Actor\"`, `\"Director\"` or `\"Writer\"`: what they are best known\nfor here."
           }
         }
       },
@@ -6282,6 +7158,179 @@
           }
         }
       },
+      "SearchResponse": {
+        "type": "object",
+        "required": [
+          "query",
+          "movies",
+          "series",
+          "episodes",
+          "people",
+          "collections"
+        ],
+        "properties": {
+          "collections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaItemResponse"
+            },
+            "description": "Collection cards (`item_type` `\"collection\"`)."
+          },
+          "episodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EpisodeSearchResult"
+            }
+          },
+          "movies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaItemResponse"
+            }
+          },
+          "people": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PersonSearchResult"
+            }
+          },
+          "query": {
+            "type": "string",
+            "description": "The query as searched (trimmed)."
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaItemResponse"
+            }
+          }
+        }
+      },
+      "SeasonCardResponse": {
+        "type": "object",
+        "required": [
+          "season",
+          "episode_count",
+          "unwatched_count",
+          "favorite",
+          "play_id",
+          "poster_url"
+        ],
+        "properties": {
+          "air_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "episode_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "favorite": {
+            "type": "boolean",
+            "description": "Every episode is one of the viewer's favourites."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The provider's name (\"Sezon 1\", \"Odcinki specjalne\"); `None` before\nenrichment."
+          },
+          "play_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The episode \"Play\" opens: the first one not watched yet."
+          },
+          "poster_url": {
+            "type": "string",
+            "description": "Always set: the season's own poster, else the series poster."
+          },
+          "season": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unwatched_count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "SeasonCardsResponse": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SeasonCardResponse"
+            }
+          }
+        }
+      },
+      "SeasonFlagsRequest": {
+        "type": "object",
+        "properties": {
+          "favorite": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "watched": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        }
+      },
+      "SeasonPageResponse": {
+        "type": "object",
+        "required": [
+          "season",
+          "poster_url",
+          "episodes"
+        ],
+        "properties": {
+          "air_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "episodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EpisodeRowResponse"
+            }
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "overview": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "poster_url": {
+            "type": "string"
+          },
+          "season": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "SeriesEpisodeResponse": {
         "type": "object",
         "description": "One episode, as the \"Sezony\" section renders it — see\n`lisek_db::list_series_seasons`'s doc comment for exactly why this is\nthis thin (no title/thumbnail/runtime/overview: none of it exists\nanywhere in this app yet). `poster_url`/`backdrop_url` reuse the exact\nsame `/api/media/{id}/...` routes as [`MediaItemResponse`] — `id` here\nis a real `media_items` row, so they resolve the same way.",
@@ -6625,6 +7674,53 @@
           "hls",
           "burn_in"
         ]
+      },
+      "SubtitleOption": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "forced",
+          "is_default",
+          "external"
+        ],
+        "properties": {
+          "codec": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "external": {
+            "type": "boolean"
+          },
+          "forced": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "description": "`subtitle` of the playback request: `s<index>` embedded, `x<n>` a\nfile next to the video."
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string",
+            "description": "`\"text\"` or `\"image\"` (image subtitles are burnt into the picture)."
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
       },
       "SubtitleTrack": {
         "type": "object",
@@ -7060,6 +8156,38 @@
           }
         ],
         "description": "An account's access restrictions (parental controls) as the admin\neditor shows them."
+      },
+      "VideoSummary": {
+        "type": "object",
+        "description": "The picture, as one line (\"4K HEVC HDR\").",
+        "required": [
+          "label"
+        ],
+        "properties": {
+          "codec": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hdr": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`\"HDR\"`, `\"HLG\"`, `\"Dolby Vision\"`."
+          },
+          "label": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`\"4K\"`, `\"1080p\"`, `\"720p\"`, `\"SD\"`."
+          }
+        }
       }
     },
     "securitySchemes": {

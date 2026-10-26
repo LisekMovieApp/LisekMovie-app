@@ -1,7 +1,7 @@
 //! FFmpeg and ffprobe binaries: locating them, probing files, and finding
 //! out what the installed build can do. The HLS engine itself lives in
 //! [`crate::session`].
-use lisek_core::media_probe::{MediaProbe, MediaStream, StreamKind};
+use lisek_core::media_probe::{MediaChapter, MediaProbe, MediaStream, StreamKind};
 use lisek_core::playback_settings::PlaybackSettings;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -34,6 +34,15 @@ struct Probe {
     #[serde(default)]
     streams: Vec<Stream>,
     format: Option<Format>,
+    #[serde(default)]
+    chapters: Vec<Chapter>,
+}
+#[derive(Deserialize)]
+struct Chapter {
+    start_time: Option<String>,
+    end_time: Option<String>,
+    #[serde(default)]
+    tags: HashMap<String, String>,
 }
 #[derive(Deserialize)]
 struct Stream {
@@ -338,7 +347,7 @@ pub async fn probe(path: &Path, config: &PlaybackSettings) -> Result<SourceInfo,
 /// `probe_timed_out`, `probe_failed` (the file itself is unreadable).
 pub async fn probe_media(path: &Path, config: &PlaybackSettings) -> Result<MediaProbe, String> {
     let mut cmd = command("ffprobe", config);
-    cmd.args(["-v", "error", "-show_streams", "-show_format", "-of", "json"])
+    cmd.args(["-v", "error", "-show_streams", "-show_format", "-show_chapters", "-of", "json"])
         .arg(path);
     let output = tokio::time::timeout(Duration::from_secs(20), cmd.output())
         .await
@@ -406,22 +415,63 @@ pub fn parse_probe(json: &[u8]) -> Result<MediaProbe, String> {
             }
         })
         .collect();
+    let duration = format
+        .duration
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0);
+    let start_time = format
+        .start_time
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|v| v.is_finite())
+        .unwrap_or(0.0);
     Ok(MediaProbe {
         container: format.format_name,
-        duration_seconds: format
-            .duration
-            .and_then(|v| v.parse::<f64>().ok())
-            .filter(|v| v.is_finite() && *v > 0.0),
+        duration_seconds: duration,
         bitrate_kbps: format.bit_rate.as_deref().and_then(kbps),
-        start_time_seconds: Some(
-            format
-                .start_time
-                .and_then(|v| v.parse::<f64>().ok())
-                .filter(|v| v.is_finite())
-                .unwrap_or(0.0),
-        ),
+        start_time_seconds: Some(start_time),
+        chapters: chapters_from(probe.chapters, start_time, duration),
         streams,
     })
+}
+
+/// Most chapters a file may contribute (a broken file can list thousands).
+pub const MAX_CHAPTERS: usize = 200;
+
+/// Chapters in playback time, sorted, without duplicates or ones starting
+/// past the end. Titles that only number the chapter ("Chapter 03",
+/// "00:12:30.000") are dropped, so the UI can name them consistently.
+fn chapters_from(raw: Vec<Chapter>, start_time: f64, duration: Option<f64>) -> Vec<MediaChapter> {
+    let time = |v: Option<&str>| v.and_then(|v| v.parse::<f64>().ok()).filter(|v| v.is_finite());
+    let mut chapters: Vec<MediaChapter> = raw
+        .into_iter()
+        .filter_map(|c| {
+            let start = (time(c.start_time.as_deref())? - start_time).max(0.0);
+            if duration.is_some_and(|d| start >= d - 1.0) {
+                return None;
+            }
+            let end = time(c.end_time.as_deref()).map(|e| (e - start_time).max(start));
+            let title = c
+                .tags
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("title"))
+                .map(|(_, v)| v.trim().to_owned())
+                .filter(|v| !v.is_empty() && !is_placeholder_title(v));
+            Some(MediaChapter { start_seconds: start, end_seconds: end, title })
+        })
+        .collect();
+    chapters.sort_by(|a, b| a.start_seconds.total_cmp(&b.start_seconds));
+    chapters.dedup_by(|a, b| (a.start_seconds - b.start_seconds).abs() < 0.5);
+    chapters.truncate(MAX_CHAPTERS);
+    chapters
+}
+
+fn is_placeholder_title(title: &str) -> bool {
+    let lower = title.to_ascii_lowercase();
+    let rest = ["chapter", "rozdział", "rozdzial", "kapitola", "chapitre", "kapitel"]
+        .iter()
+        .find_map(|word| lower.strip_prefix(word))
+        .unwrap_or(&lower);
+    rest.trim().chars().all(|c| c.is_ascii_digit() || matches!(c, ':' | '.' | ' '))
 }
 
 /// The transcoder's view of a probed file. Fails the same way the old
@@ -556,5 +606,32 @@ mod probe_tests {
         let no_duration = r#"{"streams":[{"index":0,"codec_type":"video","width":1,"height":1}],"format":{}}"#;
         assert_eq!(source_info(&parse_probe(no_duration.as_bytes()).unwrap()).unwrap_err(), "duration_unavailable");
         assert_eq!(parse_probe(b"not json").unwrap_err(), "probe_failed");
+    }
+
+    #[test]
+    fn chapters_are_read_in_playback_time() {
+        let json = r#"{
+            "format": {"duration": "600.0", "start_time": "1.000"},
+            "streams": [],
+            "chapters": [
+                {"start_time": "301.000", "end_time": "600.000", "tags": {"title": "Pościg"}},
+                {"start_time": "1.000", "end_time": "301.000", "tags": {"title": "Chapter 01"}},
+                {"start_time": "301.200", "end_time": "302.000", "tags": {"title": "dup"}},
+                {"start_time": "600.500", "tags": {"title": "after the end"}},
+                {"start_time": "x"}
+            ]
+        }"#;
+        let probe = parse_probe(json.as_bytes()).unwrap();
+        assert_eq!(
+            probe.chapters,
+            vec![
+                MediaChapter { start_seconds: 0.0, end_seconds: Some(300.0), title: None },
+                MediaChapter { start_seconds: 300.0, end_seconds: Some(599.0), title: Some("Pościg".into()) },
+            ]
+        );
+        assert!(is_placeholder_title("Rozdział 12"));
+        assert!(is_placeholder_title("00:12:30.000"));
+        assert!(!is_placeholder_title("Chapter of Doom"));
+        assert!(parse_probe(br#"{"streams": []}"#).unwrap().chapters.is_empty());
     }
 }

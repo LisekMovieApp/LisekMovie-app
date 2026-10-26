@@ -473,6 +473,63 @@ pub async fn library_items(
     }))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct LibraryLettersQuery {
+    /// Same values as the items endpoint (`title_asc`, `title_desc`,
+    /// `recent`); the picker asks for the order it is showing.
+    pub sort: Option<String>,
+    /// Same as the items endpoint: collections folded into one card.
+    pub group_collections: Option<bool>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct LibraryLetter {
+    /// `A`..`Z`, or `#` for titles starting with anything else.
+    pub letter: String,
+    /// 0-based position of the letter's first card in the unfiltered
+    /// list: page `index / page_size + 1`, card `index % page_size`.
+    pub index: i64,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct LibraryLettersResponse {
+    /// Letters with at least one card, in list order.
+    pub letters: Vec<LibraryLetter>,
+}
+
+/// The alpha picker's jump table (Faza 12) for one library's "all items"
+/// grid: where each letter's first title sits in the list, for the same
+/// sort and collection grouping. Accented capitals count as their base
+/// letter (Ł under L).
+#[utoipa::path(get,path="/api/libraries/{library_id}/letters",tag="media",params(("library_id"=uuid::Uuid,Path),("sort"=Option<String>,Query),("group_collections"=Option<bool>,Query)),responses((status=200,body=LibraryLettersResponse),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
+pub async fn library_letters(
+    auth: AuthUser,
+    State(state): State<SharedState>,
+    Path(library_id): Path<Uuid>,
+    Query(query): Query<LibraryLettersQuery>,
+) -> Result<Json<LibraryLettersResponse>, MediaError> {
+    let pool = state.pool().ok_or(MediaError::ServerNotReady)?;
+    visible_library(&pool, &auth, library_id).await?;
+    let letters = lisek_db::library_letter_index(
+        &pool,
+        library_id,
+        parse_library_sort(query.sort.as_deref()),
+        query.group_collections.unwrap_or(false),
+        &auth.access,
+    )
+    .await
+    .map_err(|_| MediaError::Internal)?;
+    Ok(Json(LibraryLettersResponse {
+        letters: letters
+            .into_iter()
+            .map(|l| LibraryLetter {
+                letter: l.letter,
+                index: l.index,
+            })
+            .collect(),
+    }))
+}
+
 /// Response shape shared by [`library_recent`]/[`library_recommended`]/
 /// [`library_popular`] (Runda 10) — deliberately identical to
 /// [`LibraryItemsResponse`]'s `library`+`items` fields minus the pagination
@@ -864,19 +921,28 @@ async fn read_media_folder_image(
         tracing::warn!(%item_id, %file_path, "stored file_path has no parent directory");
         return None;
     };
-    let media_path = parent.join(filename);
-    match tokio::fs::read(&media_path).await {
-        Ok(bytes) => Some(bytes),
-        Err(err) => {
-            tracing::debug!(
+    // An episode in `Season 01/`: the series folder first (Faza 10), then
+    // the season folder where older versions put the series' artwork.
+    let mut folders = Vec::with_capacity(2);
+    if let Some(series) = lisek_metadata::layout::series_folder(FsPath::new(&file_path))
+        && series != parent
+    {
+        folders.push(series);
+    }
+    folders.push(parent.to_path_buf());
+    for folder in folders {
+        let media_path = folder.join(filename);
+        match tokio::fs::read(&media_path).await {
+            Ok(bytes) => return Some(bytes),
+            Err(err) => tracing::debug!(
                 %item_id,
                 media_path = %media_path.display(),
                 %err,
-                "no media-folder image at this path — falling back to the local cache"
-            );
-            None
+                "no media-folder image at this path"
+            ),
         }
     }
+    None
 }
 
 pub(crate) fn image_response(bytes: Vec<u8>, content_type: &'static str) -> Response {
