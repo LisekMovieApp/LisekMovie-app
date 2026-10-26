@@ -103,7 +103,7 @@
                     </button>
                 </div>
                 <section class="min-w-40"><h2 class="mb-3 text-xl">{t('games.ranking')}</h2>
-                    <ol>{#each ranking as row}<li class="mb-2 flex justify-between gap-4"><span>{row.username}</span><span>{row.score}</span></li>{/each}</ol>
+                    <ol>{#each ranking as row, place (place)}<li class="mb-2 flex justify-between gap-4"><span>{row.username}</span><span>{row.score}</span></li>{/each}</ol>
                 </section>
             </div>
         {/if}

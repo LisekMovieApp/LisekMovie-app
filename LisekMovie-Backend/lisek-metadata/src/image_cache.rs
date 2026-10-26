@@ -161,10 +161,30 @@ async fn fetch_bytes(http: &reqwest::Client, url: &str) -> Result<Vec<u8>, Image
     Ok(response.bytes().await?.to_vec())
 }
 
+/// Writes through a temporary file next to `dest` and renames it into
+/// place, so a request reading the image meanwhile sees the old file or the
+/// new one, never half of one. Where the rename is refused (Windows, while
+/// another process holds the old file open) the file is written in place.
 async fn write_bytes(dest: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
+    let Some(name) = dest.file_name() else {
+        return tokio::fs::write(dest, bytes).await;
+    };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let mut temp_name = std::ffi::OsString::from(".");
+    temp_name.push(name);
+    temp_name.push(format!(".{}-{stamp}.tmp", std::process::id()));
+    let temp = dest.with_file_name(temp_name);
+    tokio::fs::write(&temp, bytes).await?;
+    if tokio::fs::rename(&temp, dest).await.is_ok() {
+        return Ok(());
+    }
+    let _ = tokio::fs::remove_file(&temp).await;
     tokio::fs::write(dest, bytes).await
 }
 

@@ -42,20 +42,27 @@ export function listRestricted(token: string): Promise<RestrictedUser[]> {
 
 /** Whether anything is actually limited. */
 export function isRestricted(r: Restrictions): boolean {
-	return (r.libraries !== null && r.libraries !== undefined) || (r.max_age_rating ?? null) !== null;
+	return (
+		(r.libraries !== null && r.libraries !== undefined) ||
+		(r.max_age_rating ?? null) !== null ||
+		r.can_download === false
+	);
 }
 
 /** The editor's form state turned into the request body: "every library"
- * sends `null`, the unrated switch only counts with an age limit. */
+ * sends `null`, the unrated switch only counts with an age limit,
+ * downloads stay on unless switched off (Faza 7). */
 export function toRequest(
 	allLibraries: boolean,
 	libraries: string[],
 	maxAge: number | null,
-	blockUnrated: boolean
+	blockUnrated: boolean,
+	canDownload = true
 ): Restrictions {
 	return {
 		libraries: allLibraries ? null : [...libraries].sort(),
 		max_age_rating: maxAge,
-		block_unrated: maxAge !== null && blockUnrated
+		block_unrated: maxAge !== null && blockUnrated,
+		can_download: canDownload
 	};
 }

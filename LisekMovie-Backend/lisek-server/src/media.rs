@@ -783,7 +783,7 @@ async fn ensure_image_visible(
     auth: &AuthUser,
     item_id: Uuid,
 ) -> Result<(), MediaError> {
-    if auth.access.is_unrestricted() {
+    if auth.access.browses_everything() {
         return Ok(());
     }
     let pool = state.pool().ok_or(MediaError::ServerNotReady)?;

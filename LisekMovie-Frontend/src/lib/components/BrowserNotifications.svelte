@@ -16,6 +16,7 @@
         let timer: ReturnType<typeof setTimeout> | undefined;
         let retry = 1000;
         let registration: ServiceWorkerRegistration | undefined;
+        // eslint-disable-next-line svelte/prefer-svelte-reactivity -- plain dedup cache, not UI state
         const seen = new Set<string>();
         try { enabled = supported && localStorage.getItem(key) === 'true' && Notification.permission === 'granted'; } catch { /* Storage may be unavailable. */ }
 
@@ -52,6 +53,7 @@
         }
         function connect() {
             if (!active || !enabled || !getSessionCookieClientSide()) return;
+            // eslint-disable-next-line svelte/prefer-svelte-reactivity -- one-off socket address
             const url = new URL('/api/notifications/socket', window.location.href);
             url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
             socket = new WebSocket(url);

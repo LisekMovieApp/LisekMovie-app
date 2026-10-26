@@ -19,6 +19,13 @@
 	import { fetchProviders, type ProviderConfig } from '$lib/admin/providers';
 	import MediaActions from '$lib/components/MediaActions.svelte';
 	import MediaItemEditorModal from '$lib/components/MediaItemEditorModal.svelte';
+	import FixMatchModal from '$lib/components/FixMatchModal.svelte';
+	import CastRow from '$lib/components/CastRow.svelte';
+	import { fetchItemPeople, type Credit } from '$lib/media/people';
+	import Icon from '$lib/components/Icon.svelte';
+	import { ApiError } from '$lib/playback/api';
+	import { downloadTicket, fetchMyAccess, startDownload } from '$lib/media/download';
+	import type { IdentifyResult } from '$lib/media/identify';
 
 	const itemId = $derived(page.params.id ?? '');
 
@@ -41,6 +48,42 @@
 	let selectedSeason = $state<number | null>(null);
 	/** Faza 6: the collection a movie belongs to ("Z kolekcji" row). */
 	let collection = $state<Collection | null>(null);
+	/** Faza 8: cast and crew ("Obsada i ekipa" row). */
+	let credits = $state<Credit[]>([]);
+	/** Faza 7: "Napraw dopasowanie" (admin) and downloads. */
+	let fixing = $state(false);
+	let fixedTitle = $state<string | null>(null);
+	let canDownload = $state(false);
+	let downloading = $state<string | null>(null);
+	let downloadErrorKey = $state<string | null>(null);
+	/** Changes after a fix so the browser loads the new artwork, not its
+	 * hour-long cached copy of the old one. */
+	let imageVersion = $state(0);
+	const img = (path: string) =>
+		imageUrl(path, token) + (imageVersion ? `&v=${imageVersion}` : '');
+
+	async function download(id: string) {
+		if (!token || downloading) return;
+		downloading = id;
+		downloadErrorKey = null;
+		try {
+			startDownload(await downloadTicket(token, id));
+		} catch (err) {
+			downloadErrorKey =
+				err instanceof ApiError && err.code === 'downloads_disabled'
+					? 'download.disabled'
+					: 'download.failed';
+		} finally {
+			downloading = null;
+		}
+	}
+
+	function identified(result: IdentifyResult) {
+		fixing = false;
+		fixedTitle = result.title;
+		imageVersion = Date.now();
+		triggerLoad(itemId);
+	}
 
 	/** Bumped once per load attempt; guards every state write below (the
 	 * primary fetch and both non-fatal secondary ones) against an older
@@ -69,6 +112,22 @@
 		if (mySeq !== loadSeq) return; // superseded — discard
 		item = loadedItem;
 		loading = false;
+
+		fetchItemPeople(sessionToken, loadedItem.id)
+			.then((loaded) => {
+				if (mySeq === loadSeq) credits = loaded;
+			})
+			.catch(() => {
+				// Decoration only: the page works without the row.
+			});
+
+		fetchMyAccess(sessionToken)
+			.then((access) => {
+				if (mySeq === loadSeq) canDownload = access.can_download;
+			})
+			.catch(() => {
+				// No button rather than a broken one.
+			});
 
 		if (page.data.user?.is_admin) {
 			try {
@@ -123,6 +182,7 @@
 		seasons = [];
 		selectedSeason = null;
 		collection = null;
+		credits = [];
 		loadForId(id, mySeq);
 	}
 
@@ -181,7 +241,7 @@
 		>
 			{#if !backdropFailed}
 				<img
-					src={imageUrl(item.backdrop_url, token)}
+					src={img(item.backdrop_url)}
 					alt=""
 					onerror={() => (backdropFailed = true)}
 					class="absolute inset-0 size-full object-cover"
@@ -232,7 +292,7 @@
 				<div class="flex min-h-24 items-end md:min-h-36">
 					{#if item.logo_url && !logoFailed}
 						<img
-							src={imageUrl(item.logo_url, token)}
+							src={img(item.logo_url)}
 							alt={item.title}
 							onerror={() => (logoFailed = true)}
 							class="max-h-24 max-w-full object-contain object-left drop-shadow-md md:max-h-36"
@@ -268,7 +328,7 @@
 					<div class="aspect-[2/3] overflow-hidden rounded-md bg-surface">
 						{#if !posterFailed}
 							<img
-								src={imageUrl(item.poster_url, token)}
+								src={img(item.poster_url)}
 								alt=""
 								onerror={() => (posterFailed = true)}
 								class="size-full object-cover"
@@ -302,6 +362,17 @@
 						>
 							{t('home.play')}
 						</a>
+						{#if canDownload && item.item_type === 'movie'}
+							<button
+								type="button"
+								disabled={downloading !== null}
+								onclick={() => item && download(item.id)}
+								class="flex items-center gap-2 rounded-md bg-white/20 px-5 py-2.5 font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30 disabled:opacity-50"
+							>
+								<Icon name="download" class="size-5" />
+								{downloading ? t('download.preparing') : t('download.button')}
+							</button>
+						{/if}
 						{#if page.data.user?.is_admin}
 							<button
 								type="button"
@@ -310,8 +381,23 @@
 							>
 								{t('admin.editor_title')}
 							</button>
+							<button
+								type="button"
+								onclick={() => (fixing = true)}
+								class="rounded-md bg-white/20 px-5 py-2.5 font-medium text-white backdrop-blur-sm transition-colors hover:bg-white/30"
+							>
+								{t('fix_match.button')}
+							</button>
 						{/if}
 					</div>
+					{#if downloadErrorKey}
+						<p role="alert" class="text-sm text-red-300">{t(downloadErrorKey)}</p>
+					{/if}
+					{#if fixedTitle}
+						<p role="status" class="text-sm text-gold">
+							{t('fix_match.done', { title: fixedTitle })}
+						</p>
+					{/if}
 
 					<MediaActions itemId={item.id} {token} />
 					{#if item.overview}
@@ -371,7 +457,7 @@
 								<div class="aspect-[2/3] overflow-hidden rounded bg-surface">
 									{#if !posterFailed}
 										<img
-											src={imageUrl(item.poster_url, token)}
+											src={img(item.poster_url)}
 											alt=""
 											loading="lazy"
 											class="size-full object-cover"
@@ -388,20 +474,36 @@
 					{#if activeSeasonEpisodes.length > 0}
 						<div class="mt-4 flex flex-wrap gap-2">
 							{#each activeSeasonEpisodes as ep (ep.id)}
-								<a href={resolve('/watch/[id]', { id: ep.id })} class="rounded-md bg-surface px-3 py-2 text-sm text-neutral-300 hover:text-gold focus-visible:outline-2">
-									{ep.end_episode !== null
-										? t('detail.episode_label_range', {
-												number: ep.episode,
-												end: ep.end_episode
-											})
-										: t('detail.episode_label', { number: ep.episode })}
-								</a>
+								<div class="flex overflow-hidden rounded-md bg-surface">
+									<a href={resolve('/watch/[id]', { id: ep.id })} class="px-3 py-2 text-sm text-neutral-300 hover:text-gold focus-visible:outline-2">
+										{ep.end_episode !== null
+											? t('detail.episode_label_range', {
+													number: ep.episode,
+													end: ep.end_episode
+												})
+											: t('detail.episode_label', { number: ep.episode })}
+									</a>
+									{#if canDownload}
+										<button
+											type="button"
+											disabled={downloading !== null}
+											onclick={() => download(ep.id)}
+											aria-label={t('download.episode', { number: ep.episode })}
+											title={t('download.episode', { number: ep.episode })}
+											class="border-l border-white/10 px-2 text-neutral-400 hover:text-gold focus-visible:outline-2 disabled:opacity-40"
+										>
+											<Icon name="download" class="size-4" />
+										</button>
+									{/if}
+								</div>
 							{/each}
 						</div>
 					{/if}
 				</div>
 			{/if}
 		</div>
+
+		<CastRow {credits} {token} />
 
 		{#if collection && collection.items.length > 1}
 			<section class="mt-2" aria-label={collection.name}>
@@ -432,5 +534,16 @@
 		{providers}
 		onClose={() => (editing = false)}
 		onSaved={() => triggerLoad(itemId)}
+	/>
+{/if}
+
+{#if fixing && item}
+	<FixMatchModal
+		itemId={item.id}
+		kind={item.item_type === 'movie' ? 'movie' : 'series'}
+		title={item.title}
+		year={item.year}
+		onClose={() => (fixing = false)}
+		onIdentified={identified}
 	/>
 {/if}

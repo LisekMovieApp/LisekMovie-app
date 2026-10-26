@@ -66,7 +66,7 @@ impl From<SessionError> for PlaybackError {
 pub(crate) async fn pool(state: &SharedState) -> Result<lisek_db::PgPool, PlaybackError> {
     state.pool().ok_or(PlaybackError(StatusCode::SERVICE_UNAVAILABLE, "server_not_ready"))
 }
-async fn checked_file(source: &db::Source) -> Result<PathBuf, PlaybackError> {
+pub(crate) async fn checked_file(source: &db::Source) -> Result<PathBuf, PlaybackError> {
     let missing = || PlaybackError(StatusCode::NOT_FOUND, "media_file_unavailable");
     let path = tokio::fs::canonicalize(&source.file_path).await.map_err(|_| missing())?;
     for root in &source.root_paths {

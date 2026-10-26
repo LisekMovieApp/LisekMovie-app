@@ -33,7 +33,7 @@ def check_collections_and_restrictions(request, ok_json, sql, admin_token, admin
         assert request(f'/api/admin/users/{other_id}/restrictions', 'PUT', {'max_age_rating': 30}, admin_token)[0] == 400
         saved = ok_json(f'/api/admin/users/{other_id}/restrictions', 'PUT',
                         {'libraries': None, 'max_age_rating': 12, 'block_unrated': True}, admin_token)
-        assert saved == {'libraries': None, 'max_age_rating': 12, 'block_unrated': True, 'enforced': True}, saved
+        assert saved == {'libraries': None, 'max_age_rating': 12, 'block_unrated': True, 'can_download': True, 'enforced': True}, saved
         assert [r['user_id'] for r in ok_json('/api/admin/user-restrictions', token=admin_token)] == [other_id]
         assert request(f'/api/media/{item_id}', token=other_token)[0] == 404
         assert request(f'/api/media/{item_id}/playback', 'POST', {}, other_token)[0] == 404

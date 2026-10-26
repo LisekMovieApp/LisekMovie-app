@@ -250,6 +250,7 @@ async fn restrictions_are_stored_normalized_and_never_bind_admins() {
         libraries: Some(vec![kids, kids]),
         max_age_rating: Some(7),
         block_unrated: true,
+        can_download: true,
     };
     assert!(access::set_restrictions(pool, child, &wanted).await.unwrap());
     assert!(access::set_restrictions(pool, admin, &wanted).await.unwrap());
@@ -327,5 +328,73 @@ async fn series_cards_use_their_episodes_rating() {
         lisek_db::list_recently_added(pool, Some(tv), 10, &Restrictions::NONE).await.unwrap()[0].item_type,
         "series"
     );
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn downloads_can_be_turned_off_without_hiding_anything() {
+    let Some(db) = TestDb::create().await else { return };
+    let pool = &db.pool;
+    let child = user(pool, "brat", false).await;
+    let no_downloads = Restrictions {
+        can_download: false,
+        ..Restrictions::NONE
+    };
+    assert!(no_downloads.browses_everything() && !no_downloads.is_unrestricted());
+    assert!(access::set_restrictions(pool, child, &no_downloads).await.unwrap());
+    let (_, stored) = access::get_restrictions(pool, child).await.unwrap().unwrap();
+    assert!(!stored.can_download);
+    assert_eq!(access::list_restrictions(pool).await.unwrap().len(), 1);
+    lisek_db::create_session(pool, child, "t", "c", "d", "i", chrono::Utc::now() + chrono::Duration::hours(1))
+        .await
+        .unwrap();
+    let (_, session) = access::find_session(pool, "t").await.unwrap().unwrap();
+    assert!(!session.can_download && session.browses_everything());
+    assert!(access::set_restrictions(pool, child, &Restrictions::NONE).await.unwrap());
+    assert!(access::list_restrictions(pool).await.unwrap().is_empty());
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn fix_match_renames_a_whole_series_and_pins_the_provider() {
+    let Some(db) = TestDb::create().await else { return };
+    let pool = &db.pool;
+    let tv = library(pool, "Seriale", "tv_shows").await;
+    let episodes: Vec<ScanResult> = (1..=2)
+        .map(|n| {
+            ScanResult::Episode(ScannedEpisode {
+                file_path: PathBuf::from(format!("/media/Seriale/IE/S01E0{n}.mkv")),
+                series_title: "Inazuma Elevn".into(),
+                season: 1,
+                episode: n,
+                end_episode: None,
+                file: facts(),
+            })
+        })
+        .collect();
+    lisek_db::persist_scan_results(pool, tv, &episodes).await.unwrap();
+    let (first,): (Uuid,) = sqlx::query_as("SELECT id FROM media_items WHERE file_path LIKE '%S01E01%'")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let ids = lisek_db::episodes::series_episode_ids(pool, first).await.unwrap();
+    assert_eq!(ids.len(), 2);
+    assert_eq!(
+        lisek_db::apply_identification(pool, &ids, "Inazuma Eleven", Some(2008), "tvdb").await.unwrap(),
+        2
+    );
+    let series: Vec<(String, i32)> = sqlx::query_as("SELECT title, episode_count FROM series")
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    assert_eq!(series, vec![("Inazuma Eleven".to_string(), 2)], "the episodes moved to the new series");
+    let detail = lisek_db::get_media_item_detail(pool, first).await.unwrap().unwrap();
+    assert!(detail.metadata_locked);
+    assert_eq!(detail.forced_provider.as_deref(), Some("tvdb"));
+    assert_eq!(detail.year, None, "an episode keeps no year of its own");
+    // A rescan with the old (wrong) file name leaves the fix alone.
+    lisek_db::persist_scan_results(pool, tv, &episodes).await.unwrap();
+    assert_eq!(lisek_db::get_media_item_detail(pool, first).await.unwrap().unwrap().title, "Inazuma Eleven");
+    assert_eq!(lisek_db::episodes::end_episode(pool, first).await.unwrap(), None);
     db.drop().await;
 }

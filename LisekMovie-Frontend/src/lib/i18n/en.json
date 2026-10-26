@@ -390,7 +390,8 @@
 		"next_in": "Starts in {seconds} s",
 		"play_now": "Play now",
 		"watch_credits": "Watch credits",
-		"episode_range": "S{season}:E{episode}-E{end}"
+		"episode_range": "S{season}:E{episode}-E{end}",
+		"ends_at": "Ends at {time}"
 	},
 	"games": {
 		"title": "Flappy Fox",
@@ -657,7 +658,9 @@
 		"block_unrated": "Also hide titles without an age rating",
 		"save": "Save restrictions",
 		"saved": "Restrictions saved.",
-		"restricted_badge": "Restricted account"
+		"restricted_badge": "Restricted account",
+		"can_download": "Allow downloading original files",
+		"can_download_hint": "Turn off to keep the account to streaming only."
 	},
 	"trickplay_admin": {
 		"tab": "Thumbnails",
@@ -701,5 +704,62 @@
 		"install_ios_hint": "In Safari, tap Share, then \"Add to Home Screen\".",
 		"offline_title": "You're offline",
 		"offline_hint": "LisekMovie needs a connection to your server. Check the network and try again."
+	},
+	"fix_match": {
+		"button": "Fix match",
+		"title": "Fix match",
+		"hint_movie": "Search the metadata providers for the right movie. The library keeps the new match and stops guessing.",
+		"hint_series": "Search the metadata providers for the right series. Every episode gets the new match.",
+		"query": "Title",
+		"year": "Year",
+		"provider": "Provider",
+		"all_providers": "All providers",
+		"search": "Search",
+		"searching": "Searching…",
+		"results": "Results",
+		"no_results": "Nothing found. Try another title or drop the year.",
+		"provider_failed_some": "Some providers did not answer: {providers}",
+		"confirm_movie": "Replace the metadata and artwork with \"{title}\"?",
+		"confirm_series": "Replace the metadata and artwork of the whole series with \"{title}\"?",
+		"cancel": "Cancel",
+		"apply": "Use this match",
+		"applying": "Applying…",
+		"done": "Match fixed: {title}",
+		"errors": {
+			"provider_not_configured": "This provider is not configured. Add its API key in the server settings.",
+			"provider_item_not_found": "The provider no longer has this entry.",
+			"provider_failed": "The provider did not answer. Try again in a moment.",
+			"invalid_query": "Type a title to search for.",
+			"generic": "Could not fix the match."
+		}
+	},
+	"download": {
+		"button": "Download",
+		"preparing": "Preparing…",
+		"episode": "Download episode {number}",
+		"disabled": "Downloads are turned off for this account.",
+		"failed": "The download could not start."
+	},
+	"people": {
+		"cast_title": "Cast & crew",
+		"role": {
+			"Actor": "Actor",
+			"Director": "Director",
+			"Writer": "Writer"
+		},
+		"not_found": "This person doesn't appear in any title you can see.",
+		"load_failed": "Couldn't load this person. Try again.",
+		"show_more": "Show more",
+		"show_less": "Show less",
+		"no_biography": "No biography yet.",
+		"born": "Born",
+		"birth_place": "Place of birth",
+		"died": "Died",
+		"age": "(age {age})",
+		"age_at_death": "(aged {age})",
+		"imdb": "IMDb",
+		"tmdb": "TMDB",
+		"movies": "Movies",
+		"series": "Series"
 	}
 }

@@ -27,6 +27,7 @@ pub mod collections;
 pub mod episodes;
 pub mod games;
 pub mod notifications;
+pub mod people;
 pub mod playback;
 pub mod scan_jobs;
 pub mod streams;

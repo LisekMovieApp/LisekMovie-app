@@ -34,12 +34,12 @@
         <label class="flex gap-3"><input type="checkbox" bind:checked={enabled} />{t('notifications.enabled')}</label>
         <button disabled={busy} class="rounded bg-gold px-4 py-3 text-black disabled:opacity-50">{t('notifications.add')}</button>
     </form>
-    {#each endpoints as endpoint}
+    {#each endpoints as endpoint (endpoint.id)}
         <div class="mb-3 flex items-center justify-between gap-3 rounded border border-white/10 p-4"><span>{endpoint.name} · {t(`notifications.formats.${endpoint.destination_type}`)} · {t(endpoint.enabled ? 'notifications.active' : 'notifications.inactive')}</span><button disabled={busy} class="rounded border border-white/20 px-3 py-2" onclick={() => remove(endpoint.id)}>{t('notifications.remove')}</button></div>
     {/each}
     <h2 class="mt-8 mb-3 text-xl">{t('notifications.deliveries')}</h2>
     <button class="mb-4 rounded border border-white/20 px-3 py-2" onclick={() => load().catch(() => (failed = true))}>{t('notifications.refresh')}</button>
-    {#each deliveries as delivery}
+    {#each deliveries as delivery (delivery.id)}
         <p class="mb-2 rounded bg-surface p-3">{delivery.name} · {t('notifications.' + delivery.status)} · {t('notifications.attempts', { count: delivery.attempt_count })} {delivery.response_code ?? ''}</p>
     {/each}
     {#if failed}<p role="alert" class="mt-4 text-gold">{t('player.save_failed')}</p>{/if}

@@ -29,6 +29,7 @@
 		| 'stack'
 		| 'lock'
 		| 'download'
+		| 'external'
 		| 'refresh';
 
 	interface Shape {
@@ -69,6 +70,7 @@
 		stack: { d: 'M4 8.5h16v11H4zM6.5 6h11M9 3.5h6' },
 		lock: { d: 'M6.5 10.5h11a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1zM8.5 10.5V7.5a3.5 3.5 0 0 1 7 0v3M12 14.5v2.5' },
 		download: { d: 'M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14' },
+		external: { d: 'M14 4.5h5.5V10M19.5 4.5L11 13M17 14v4.5a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1H10' },
 		refresh: { d: 'M20 11.5A8 8 0 0 0 6.3 6.3L4 8.5M4 4v4.5h4.5M4 12.5a8 8 0 0 0 13.7 5.2L20 15.5M20 20v-4.5h-4.5' }
 	};
 </script>

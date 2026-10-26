@@ -390,7 +390,8 @@
 		"next_in": "Start za {seconds} s",
 		"play_now": "Odtwórz teraz",
 		"watch_credits": "Napisy końcowe",
-		"episode_range": "S{season}:O{episode}-O{end}"
+		"episode_range": "S{season}:O{episode}-O{end}",
+		"ends_at": "Zakończenie o {time}"
 	},
 	"games": {
 		"title": "Flappy Fox",
@@ -657,7 +658,9 @@
 		"block_unrated": "Ukryj też tytuły bez kategorii wiekowej",
 		"save": "Zapisz ograniczenia",
 		"saved": "Zapisano ograniczenia.",
-		"restricted_badge": "Konto z ograniczeniami"
+		"restricted_badge": "Konto z ograniczeniami",
+		"can_download": "Pozwól pobierać oryginalne pliki",
+		"can_download_hint": "Wyłącz, aby konto mogło tylko oglądać strumieniowo."
 	},
 	"trickplay_admin": {
 		"tab": "Miniatury",
@@ -701,5 +704,62 @@
 		"install_ios_hint": "W Safari stuknij Udostępnij, a potem „Do ekranu początk.”.",
 		"offline_title": "Brak połączenia",
 		"offline_hint": "LisekMovie potrzebuje połączenia z Twoim serwerem. Sprawdź sieć i spróbuj ponownie."
+	},
+	"fix_match": {
+		"button": "Napraw dopasowanie",
+		"title": "Napraw dopasowanie",
+		"hint_movie": "Wyszukaj właściwy film u dostawców metadanych. Biblioteka zapamięta nowe dopasowanie i przestanie zgadywać.",
+		"hint_series": "Wyszukaj właściwy serial u dostawców metadanych. Nowe dopasowanie dostaną wszystkie odcinki.",
+		"query": "Tytuł",
+		"year": "Rok",
+		"provider": "Dostawca",
+		"all_providers": "Wszyscy dostawcy",
+		"search": "Szukaj",
+		"searching": "Szukam…",
+		"results": "Wyniki",
+		"no_results": "Nic nie znaleziono. Spróbuj innego tytułu albo usuń rok.",
+		"provider_failed_some": "Niektórzy dostawcy nie odpowiedzieli: {providers}",
+		"confirm_movie": "Zastąpić metadane i grafiki pozycją „{title}”?",
+		"confirm_series": "Zastąpić metadane i grafiki całego serialu pozycją „{title}”?",
+		"cancel": "Anuluj",
+		"apply": "Użyj tego dopasowania",
+		"applying": "Zapisuję…",
+		"done": "Dopasowanie naprawione: {title}",
+		"errors": {
+			"provider_not_configured": "Ten dostawca nie jest skonfigurowany. Dodaj jego klucz API w ustawieniach serwera.",
+			"provider_item_not_found": "Dostawca nie ma już tej pozycji.",
+			"provider_failed": "Dostawca nie odpowiedział. Spróbuj za chwilę.",
+			"invalid_query": "Wpisz tytuł do wyszukania.",
+			"generic": "Nie udało się naprawić dopasowania."
+		}
+	},
+	"download": {
+		"button": "Pobierz",
+		"preparing": "Przygotowuję…",
+		"episode": "Pobierz odcinek {number}",
+		"disabled": "Pobieranie jest wyłączone dla tego konta.",
+		"failed": "Nie udało się rozpocząć pobierania."
+	},
+	"people": {
+		"cast_title": "Obsada i ekipa",
+		"role": {
+			"Actor": "Aktor",
+			"Director": "Reżyseria",
+			"Writer": "Scenariusz"
+		},
+		"not_found": "Ta osoba nie występuje w żadnej pozycji, którą możesz zobaczyć.",
+		"load_failed": "Nie udało się wczytać tej osoby. Spróbuj ponownie.",
+		"show_more": "Pokaż więcej",
+		"show_less": "Pokaż mniej",
+		"no_biography": "Brak biografii.",
+		"born": "Data urodzenia",
+		"birth_place": "Miejsce urodzenia",
+		"died": "Data śmierci",
+		"age": "(wiek: {age})",
+		"age_at_death": "(w wieku: {age})",
+		"imdb": "IMDb",
+		"tmdb": "TMDB",
+		"movies": "Filmy",
+		"series": "Seriale"
 	}
 }

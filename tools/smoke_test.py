@@ -447,6 +447,12 @@ def main():
             from collections_smoke import check_collections_and_restrictions
             admin_id=sql(f"SELECT id FROM users WHERE username='{config['admin_username']}'")
             check_collections_and_restrictions(request,ok_json,sql,token,admin_id,item_id,library_id,other_token,other_id)
+            # Faza 7: Fix Match validation and original-file downloads.
+            from downloads_smoke import check_fix_match_and_downloads
+            check_fix_match_and_downloads(request,ok_json,token,item_id,other_token,other_id)
+            # Faza 8: cast and crew.
+            from people_smoke import check_people
+            check_people(request,ok_json,sql,token,item_id,other_token,other_id)
             if args.ffmpeg and args.ffprobe:
                 # After the checks that count items and webhook deliveries.
                 check_hls_engine(args,root,request,ok_json,sql,token,base)
@@ -470,7 +476,7 @@ def main():
             server.wait(timeout=10)
             log.close()
             server = None
-            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls")
+            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls, fix match, downloads, cast and crew")
     finally:
         if server:
             server.terminate()

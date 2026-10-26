@@ -161,7 +161,7 @@ impl AuthUser {
         pool: &lisek_db::PgPool,
         item_id: uuid::Uuid,
     ) -> Result<bool, lisek_db::DbError> {
-        if self.access.is_unrestricted() {
+        if self.access.browses_everything() {
             return Ok(true);
         }
         Ok(lisek_db::access::item_visible(pool, item_id, &self.access)
@@ -290,12 +290,14 @@ fn is_image_path(path: &str) -> bool {
     let segments: Vec<_> = path.split('/').collect();
     let media = segments.len() >= 5 && segments[1] == "api" && segments[2] == "media";
     let collection = segments.len() == 5 && segments[1] == "api" && segments[2] == "collections";
+    let person = segments.len() == 5 && segments[1] == "api" && segments[2] == "people";
     // `/api/media/{id}/poster|backdrop|logo`, the trickplay sprite
-    // sheets `/api/media/{id}/trickplay/{n}` (CSS backgrounds) and
-    // `/api/collections/{id}/poster|backdrop`.
+    // sheets `/api/media/{id}/trickplay/{n}` (CSS backgrounds),
+    // `/api/collections/{id}/poster|backdrop` and `/api/people/{id}/image`.
     (media && segments.len() == 5 && matches!(segments[4], "poster" | "backdrop" | "logo"))
         || (media && segments.len() == 6 && segments[4] == "trickplay")
         || (collection && matches!(segments[4], "poster" | "backdrop"))
+        || (person && segments[4] == "image")
 }
 
 #[derive(Debug)]
@@ -372,6 +374,9 @@ impl IntoResponse for AuthError {
     }
 }
 
+pub type AuthReply = ([(axum::http::HeaderName,&'static str);1],Json<LoginResponse>);
+pub fn no_store(body:LoginResponse)->AuthReply { ([(axum::http::header::CACHE_CONTROL,"no-store")],Json(body)) }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,9 +445,8 @@ mod tests {
         assert!(is_image_path(&format!("{collection}/poster")));
         assert!(is_image_path(&format!("{collection}/backdrop")));
         assert!(!is_image_path(collection), "the collection itself is JSON");
+        let person = "/api/people/0b7d9c2e-0000-0000-0000-000000000000";
+        assert!(is_image_path(&format!("{person}/image")));
+        assert!(!is_image_path(person), "the person page is JSON");
     }
 }
-
-
-pub type AuthReply = ([(axum::http::HeaderName,&'static str);1],Json<LoginResponse>);
-pub fn no_store(body:LoginResponse)->AuthReply { ([(axum::http::header::CACHE_CONTROL,"no-store")],Json(body)) }

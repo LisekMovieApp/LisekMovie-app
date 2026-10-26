@@ -7,7 +7,7 @@ use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 
 #[derive(OpenApi)]
 #[openapi(
-    info(title = "LisekMovie", version = "0.1.0"),
+    info(title = "LisekMovie", version = env!("CARGO_PKG_VERSION")),
     modifiers(&SecurityAddon),
     tags(
         (name = "setup", description = "Health and the First-Run Wizard"),
@@ -26,7 +26,7 @@ impl Modify for SecurityAddon {
             "lisek_auth",
             SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::with_description(
                 "Authorization",
-                "LisekMovie Client=\"web\", Device=\"Browser\", DeviceId=\"...\", Version=\"0.1.0\", Token=\"...\"",
+                "LisekMovie Client=\"web\", Device=\"Browser\", DeviceId=\"...\", Version=\"1.0.0-beta\", Token=\"...\"",
             ))),
         );
     }

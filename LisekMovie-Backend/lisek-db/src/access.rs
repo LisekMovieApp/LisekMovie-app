@@ -29,6 +29,13 @@ pub struct Restrictions {
     /// With an age limit, also hide items that have no rating at all.
     #[serde(default)]
     pub block_unrated: bool,
+    /// The account may download original files (`GET /api/media/{id}/download`).
+    #[serde(default = "allowed")]
+    pub can_download: bool,
+}
+
+fn allowed() -> bool {
+    true
 }
 
 impl Restrictions {
@@ -36,9 +43,16 @@ impl Restrictions {
         libraries: None,
         max_age_rating: None,
         block_unrated: false,
+        can_download: true,
     };
 
+    /// Nothing limits what the account sees or does.
     pub fn is_unrestricted(&self) -> bool {
+        self.browses_everything() && self.can_download
+    }
+
+    /// The catalogue is not filtered (downloads may still be off).
+    pub fn browses_everything(&self) -> bool {
         self.libraries.is_none() && self.max_age_rating.is_none()
     }
 
@@ -71,17 +85,19 @@ impl Restrictions {
     }
 }
 
-type RestrictionsRow = (Option<Vec<Uuid>>, Option<i32>, bool);
-/// `(is_admin, libraries, max_age_rating, block_unrated)`, the last three
-/// NULL without a row.
-type EditorRow = (bool, Option<Vec<Uuid>>, Option<i32>, Option<bool>);
-type ListRow = (Uuid, Option<Vec<Uuid>>, Option<i32>, bool);
+/// `(libraries, max_age_rating, block_unrated, can_download)`.
+type RestrictionsRow = (Option<Vec<Uuid>>, Option<i32>, bool, bool);
+/// `(is_admin, libraries, max_age_rating, block_unrated, can_download)`,
+/// the last four NULL without a row.
+type EditorRow = (bool, Option<Vec<Uuid>>, Option<i32>, Option<bool>, Option<bool>);
+type ListRow = (Uuid, Option<Vec<Uuid>>, Option<i32>, bool, bool);
 
 fn restrictions_from_row(row: Option<RestrictionsRow>) -> Restrictions {
-    row.map(|(libraries, max_age_rating, block_unrated)| Restrictions {
+    row.map(|(libraries, max_age_rating, block_unrated, can_download)| Restrictions {
         libraries,
         max_age_rating,
         block_unrated,
+        can_download,
     })
     .unwrap_or_default()
     .normalized()
@@ -96,17 +112,22 @@ pub async fn get_restrictions(
     user_id: Uuid,
 ) -> Result<Option<(bool, Restrictions)>, DbError> {
     let row: Option<EditorRow> = sqlx::query_as(
-        "SELECT u.is_admin, r.libraries, r.max_age_rating, r.block_unrated
+        "SELECT u.is_admin, r.libraries, r.max_age_rating, r.block_unrated, r.can_download
          FROM users u LEFT JOIN user_restrictions r ON r.user_id = u.id
          WHERE u.id = $1",
     )
     .bind(user_id)
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|(is_admin, libraries, max_age_rating, block_unrated)| {
+    Ok(row.map(|(is_admin, libraries, max_age_rating, block_unrated, can_download)| {
         (
             is_admin,
-            restrictions_from_row(Some((libraries, max_age_rating, block_unrated.unwrap_or(false)))),
+            restrictions_from_row(Some((
+                libraries,
+                max_age_rating,
+                block_unrated.unwrap_or(false),
+                can_download.unwrap_or(true),
+            ))),
         )
     }))
 }
@@ -134,18 +155,20 @@ pub async fn set_restrictions(
         return Ok(true);
     }
     sqlx::query(
-        "INSERT INTO user_restrictions (user_id, libraries, max_age_rating, block_unrated)
-         VALUES ($1, $2, $3, $4)
+        "INSERT INTO user_restrictions (user_id, libraries, max_age_rating, block_unrated, can_download)
+         VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (user_id) DO UPDATE SET
              libraries = EXCLUDED.libraries,
              max_age_rating = EXCLUDED.max_age_rating,
              block_unrated = EXCLUDED.block_unrated,
+             can_download = EXCLUDED.can_download,
              updated_at = now()",
     )
     .bind(user_id)
     .bind(restrictions.libraries.as_deref())
     .bind(restrictions.max_age_rating)
     .bind(restrictions.block_unrated)
+    .bind(restrictions.can_download)
     .execute(pool)
     .await?;
     Ok(true)
@@ -155,17 +178,21 @@ pub async fn set_restrictions(
 /// them — the admin user list marks these accounts.
 pub async fn list_restrictions(pool: &PgPool) -> Result<Vec<(Uuid, Restrictions)>, DbError> {
     let rows: Vec<ListRow> = sqlx::query_as(
-        "SELECT r.user_id, r.libraries, r.max_age_rating, r.block_unrated
+        "SELECT r.user_id, r.libraries, r.max_age_rating, r.block_unrated, r.can_download
          FROM user_restrictions r JOIN users u ON u.id = r.user_id
-         WHERE NOT u.is_admin AND (r.libraries IS NOT NULL OR r.max_age_rating IS NOT NULL)
+         WHERE NOT u.is_admin
+           AND (r.libraries IS NOT NULL OR r.max_age_rating IS NOT NULL OR NOT r.can_download)
          ORDER BY u.username",
     )
     .fetch_all(pool)
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, libraries, max_age_rating, block_unrated)| {
-            (id, restrictions_from_row(Some((libraries, max_age_rating, block_unrated))))
+        .map(|(id, libraries, max_age_rating, block_unrated, can_download)| {
+            (
+                id,
+                restrictions_from_row(Some((libraries, max_age_rating, block_unrated, can_download))),
+            )
         })
         .collect())
 }
@@ -190,12 +217,13 @@ pub async fn find_session(
         libraries: Option<Vec<Uuid>>,
         max_age_rating: Option<i32>,
         block_unrated: Option<bool>,
+        can_download: Option<bool>,
     }
     let row = sqlx::query_as::<_, Row>(
         r#"
         SELECT u.id, u.username, u.is_admin, u.ui_language, u.email, u.created_at,
                u.must_change_password, u.disabled,
-               r.libraries, r.max_age_rating, r.block_unrated
+               r.libraries, r.max_age_rating, r.block_unrated, r.can_download
         FROM sessions s
         JOIN users u ON u.id = s.user_id
         LEFT JOIN user_restrictions r ON r.user_id = u.id
@@ -224,6 +252,7 @@ pub async fn find_session(
                 row.libraries,
                 row.max_age_rating,
                 row.block_unrated.unwrap_or(false),
+                row.can_download.unwrap_or(true),
             )))
         };
         (user_from_row(user_row), restrictions)
@@ -278,6 +307,7 @@ mod tests {
             libraries: None,
             max_age_rating: None,
             block_unrated: true,
+            can_download: true,
         }
         .normalized();
         assert!(!r.block_unrated);
@@ -292,6 +322,7 @@ mod tests {
             libraries: Some(vec![a, b, a]),
             max_age_rating: Some(99),
             block_unrated: true,
+            can_download: true,
         }
         .normalized();
         assert_eq!(r.libraries, Some(vec![b, a]));

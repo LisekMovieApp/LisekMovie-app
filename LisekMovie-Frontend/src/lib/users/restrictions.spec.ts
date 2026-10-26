@@ -6,13 +6,16 @@ describe('account restrictions', () => {
 		expect(toRequest(true, ['b'], null, true)).toEqual({
 			libraries: null,
 			max_age_rating: null,
-			block_unrated: false
+			block_unrated: false,
+			can_download: true
 		});
 		expect(toRequest(false, ['b', 'a'], 7, true)).toEqual({
 			libraries: ['a', 'b'],
 			max_age_rating: 7,
-			block_unrated: true
+			block_unrated: true,
+			can_download: true
 		});
+		expect(toRequest(true, [], null, false, false).can_download).toBe(false);
 		expect(toRequest(false, [], null, false).libraries).toEqual([]);
 	});
 
@@ -21,5 +24,7 @@ describe('account restrictions', () => {
 		expect(isRestricted({ libraries: [], max_age_rating: null })).toBe(true);
 		expect(isRestricted({ max_age_rating: 0 })).toBe(true);
 		expect(isRestricted({ block_unrated: true })).toBe(false);
+		expect(isRestricted({ can_download: false })).toBe(true);
+		expect(isRestricted({ can_download: true })).toBe(false);
 	});
 });

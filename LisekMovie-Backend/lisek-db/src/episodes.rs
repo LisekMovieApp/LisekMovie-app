@@ -44,3 +44,27 @@ pub async fn next_episode(pool: &PgPool, item_id: Uuid) -> Result<Option<NextEpi
     .fetch_optional(pool)
     .await?)
 }
+
+/// Every episode of the series `item_id` (an episode) belongs to, in
+/// season/episode order. Empty for a movie or an unknown id.
+pub async fn series_episode_ids(pool: &PgPool, item_id: Uuid) -> Result<Vec<Uuid>, DbError> {
+    let rows: Vec<(Uuid,)> = sqlx::query_as(
+        "SELECT e.media_item_id FROM episodes e
+         WHERE e.series_id = (SELECT series_id FROM episodes WHERE media_item_id = $1)
+         ORDER BY e.season_number, e.episode_number, e.media_item_id",
+    )
+    .bind(item_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
+/// The last episode number of a multi-episode file (`S01E01-E02` → 2).
+pub async fn end_episode(pool: &PgPool, item_id: Uuid) -> Result<Option<i32>, DbError> {
+    let row: Option<(Option<i32>,)> =
+        sqlx::query_as("SELECT end_episode_number FROM media_items WHERE id = $1")
+            .bind(item_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.and_then(|(end,)| end))
+}

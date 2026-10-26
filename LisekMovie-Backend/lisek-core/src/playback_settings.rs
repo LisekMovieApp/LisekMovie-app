@@ -171,7 +171,7 @@ impl PlaybackSettings {
                     | "veryslow"
             )
             && (144..=4320).contains(&self.max_output_height)
-            && self.max_output_height % 2 == 0
+            && self.max_output_height.is_multiple_of(2)
             && (100..=200000).contains(&self.video_bitrate_kbps)
             && (32..=512).contains(&self.audio_bitrate_kbps)
             && self.downmix_audio_boost.is_finite()

@@ -27,14 +27,16 @@ use crate::auth::{AdminUser, SessionUser};
 use crate::openapi::ApiDoc;
 use crate::state::SharedState;
 use crate::{
-    admin, auth, browser_notifications, collections, games, media, notifications, playback,
-    scan_jobs, setup, telemetry, trickplay, users,
+    admin, auth, browser_notifications, collections, download, games, identify, media,
+    notifications, people, playback, scan_jobs, setup, telemetry, trickplay, users,
 };
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct HealthResponse {
     pub status: &'static str,
     pub service: &'static str,
+    /// The running server's version (`1.0.0-beta`).
+    pub version: &'static str,
 }
 
 #[utoipa::path(get,path="/api/health",tag="setup",responses((status=200,body=HealthResponse)))]
@@ -42,6 +44,7 @@ pub async fn health() -> axum::Json<HealthResponse> {
     axum::Json(HealthResponse {
         status: "ok",
         service: "lisek-server",
+        version: env!("CARGO_PKG_VERSION"),
     })
 }
 
@@ -56,6 +59,7 @@ fn public() -> OpenApiRouter<SharedState> {
         // string, not a session: <video>, hls.js and <track> cannot send
         // headers.
         .routes(routes!(playback::stream))
+        .routes(routes!(download::download))
         .routes(routes!(playback::hls))
         .routes(routes!(playback::subtitles))
         // Authenticates with its first WebSocket frame: browsers cannot set
@@ -78,6 +82,13 @@ fn user() -> OpenApiRouter<SharedState> {
         .routes(routes!(media::media_item_seasons))
         .routes(routes!(media::next_episode))
         .routes(routes!(collections::item_collection))
+        .routes(routes!(people::item_people))
+        .routes(routes!(people::get_person))
+        .routes(routes!(people::person_image))
+        .routes(routes!(download::ticket))
+        .routes(routes!(download::my_access))
+        .routes(routes!(identify::search))
+        .routes(routes!(identify::identify))
         .routes(routes!(collections::library_collections))
         .routes(routes!(collections::get_collection))
         .routes(routes!(collections::collection_poster))

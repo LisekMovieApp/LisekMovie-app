@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { parseCue } from './cues';
-import { bufferedEnd, clampTime, formatTime } from './format';
+import { bufferedEnd, clampTime, endsAt, formatClock, formatTime } from './format';
 import { commandOf, seekStep } from './keys';
 import { audioTrackLabel, languageName, subtitleTrackLabel } from './labels';
 import { parsePreferences } from './preferences';
@@ -189,5 +189,22 @@ describe('trickplay and next episode', () => {
 		expect(nextUpDue(120, 2400, false)).toBe(false);
 		expect(nextUpDue(30, 200, false), 'not before the end of a short extra').toBe(false);
 		expect(nextUpDue(0, 200, true)).toBe(true);
+	});
+});
+
+describe('end time', () => {
+	it('is now plus what is left, and moves on while paused', () => {
+		const start = Date.UTC(2026, 9, 26, 11, 0, 0);
+		expect(endsAt(start, 75 * 60)?.getTime()).toBe(start + 75 * 60_000);
+		// Paused for ten minutes: same remaining time, later end.
+		expect(endsAt(start + 10 * 60_000, 75 * 60)?.getTime()).toBe(start + 85 * 60_000);
+		expect(endsAt(start, Number.NaN)).toBeNull();
+		expect(endsAt(start, -1)).toBeNull();
+	});
+
+	it('reads as a wall clock in the UI language', () => {
+		const at = new Date(2026, 9, 26, 13, 5);
+		expect(formatClock(at, 'pl')).toBe('13:05');
+		expect(formatClock(at, 'en')).toMatch(/^1:05\s?PM$/);
 	});
 });

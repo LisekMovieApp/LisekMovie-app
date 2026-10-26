@@ -109,6 +109,8 @@ pub struct AppState {
     pub has_accounts: std::sync::atomic::AtomicBool,
     /// What the trickplay worker is doing right now (admin progress view).
     pub trickplay_progress: std::sync::Mutex<crate::trickplay::Progress>,
+    /// Download URLs handed out (`download`).
+    pub download_tickets: crate::download::DownloadTickets,
 }
 
 impl AppState {
@@ -123,6 +125,7 @@ impl AppState {
             trickplay_wakeup: Notify::new(),
             has_accounts: std::sync::atomic::AtomicBool::new(false),
             trickplay_progress: std::sync::Mutex::default(),
+            download_tickets: crate::download::DownloadTickets::default(),
         }
     }
 

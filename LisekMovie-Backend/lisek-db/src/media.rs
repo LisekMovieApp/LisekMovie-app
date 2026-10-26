@@ -319,3 +319,39 @@ pub async fn list_fallback_items(pool: &PgPool) -> Result<Vec<FallbackItem>, DbE
         })
         .collect())
 }
+
+/// "Fix match": gives the items the title (and, for a movie, the year) of
+/// the provider entry an administrator picked, pins that provider and
+/// locks the items, so neither a rescan nor the background refresh
+/// searches by the (wrong) file name again. Episodes keep their numbers;
+/// renaming them moves them to the series of the new title (the series
+/// triggers follow). Returns how many rows changed.
+pub async fn apply_identification(
+    pool: &PgPool,
+    item_ids: &[Uuid],
+    title: &str,
+    year: Option<i32>,
+    provider_key: &str,
+) -> Result<u64, DbError> {
+    let result = sqlx::query(
+        r#"
+        UPDATE media_items
+        SET title = $2,
+            metadata = CASE
+                WHEN item_type = 'movie' AND $3::int IS NOT NULL
+                    THEN (metadata - 'year') || jsonb_build_object('year', $3::int)
+                ELSE metadata END,
+            metadata_locked = true,
+            forced_provider = $4,
+            updated_at = now()
+        WHERE id = ANY($1)
+        "#,
+    )
+    .bind(item_ids)
+    .bind(title)
+    .bind(year)
+    .bind(provider_key)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}

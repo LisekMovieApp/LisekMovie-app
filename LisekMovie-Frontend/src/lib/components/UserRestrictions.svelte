@@ -47,6 +47,7 @@
 	let chosen = $state<string[]>([]);
 	let maxAge = $state<number | null>(null);
 	let blockUnrated = $state(false);
+	let canDownload = $state(true);
 
 	async function load(id: string) {
 		loaded = false;
@@ -59,6 +60,7 @@
 			chosen = current.libraries ?? [];
 			maxAge = current.max_age_rating ?? null;
 			blockUnrated = current.block_unrated ?? false;
+			canDownload = current.can_download ?? true;
 			loaded = true;
 			onchange?.(current.enforced && isRestricted(current));
 		} catch (e) {
@@ -93,7 +95,7 @@
 			const result = await saveRestrictions(
 				token,
 				userId,
-				toRequest(allLibraries, chosen, maxAge, blockUnrated)
+				toRequest(allLibraries, chosen, maxAge, blockUnrated, canDownload)
 			);
 			saved = true;
 			onchange?.(result.enforced && isRestricted(result));
@@ -174,6 +176,12 @@
 			<input type="checkbox" bind:checked={blockUnrated} disabled={maxAge === null} />
 			{t('restrictions.block_unrated')}
 		</label>
+
+		<label class="check">
+			<input type="checkbox" bind:checked={canDownload} onchange={() => (saved = false)} />
+			{t('restrictions.can_download')}
+		</label>
+		<p class="-mt-2 text-xs text-neutral-500">{t('restrictions.can_download_hint')}</p>
 
 		{#if error}<p role="alert" class="text-sm text-red-300">{t(error)}</p>{/if}
 		{#if saved}<p role="status" class="text-sm text-gold">{t('restrictions.saved')}</p>{/if}

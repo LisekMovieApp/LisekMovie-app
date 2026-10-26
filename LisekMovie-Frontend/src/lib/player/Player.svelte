@@ -29,7 +29,7 @@
 	import Hls, { type ErrorData } from 'hls.js';
 	import { onMount, untrack } from 'svelte';
 	import { fade } from 'svelte/transition';
-	import { t } from '$lib/i18n';
+	import { getLocale, t } from '$lib/i18n';
 	import Icon, { type IconName } from '$lib/components/Icon.svelte';
 	import {
 		ApiError,
@@ -47,7 +47,7 @@
 	import { directionOf } from '$lib/spatial/geometry';
 	import { focusables, navScope } from '$lib/spatial/spatial';
 	import { activeLines, isSubtitleTrack, type CueSegment } from './cues';
-	import { bufferedEnd, clampTime, formatTime } from './format';
+	import { bufferedEnd, clampTime, endsAt, formatClock, formatTime } from './format';
 	import { commandOf, seekStep, type PlayerCommand } from './keys';
 	import {
 		autoAdvanceAllowed,
@@ -189,6 +189,14 @@
 		duration > 0 && Number.isFinite(duration) ? duration : (session?.duration_seconds ?? 0)
 	);
 	const remaining = $derived(Math.max(0, total - (pending ?? currentTime)));
+	/** Wall clock for the end-time readout (Faza 8). Ticks only while the
+	 * controls are on screen; paused, the end time moves on with it. */
+	let now = $state(Date.now());
+	const endTime = $derived.by(() => {
+		if (!(total > 0)) return null;
+		const end = endsAt(now, remaining);
+		return end ? formatClock(end, getLocale()) : null;
+	});
 	const title = $derived(heading ?? session?.title ?? '');
 	const volumeIcon = $derived<IconName>(
 		muted || volume === 0 ? 'muted' : volume < 0.5 ? 'volume_low' : 'volume'
@@ -966,6 +974,13 @@
 	});
 
 	$effect(() => {
+		if (!showChrome) return;
+		now = Date.now();
+		const timer = setInterval(() => (now = Date.now()), 1000);
+		return () => clearInterval(timer);
+	});
+
+	$effect(() => {
 		if (menu !== 'settings') return;
 		const timer = setInterval(updateStats, 1000);
 		return () => clearInterval(timer);
@@ -1389,6 +1404,13 @@
 				<span class="ml-2 hidden text-sm text-neutral-100 tabular-nums sm:inline md:text-[1rem]">
 					{formatTime(pending ?? currentTime)} / {formatTime(total)}
 				</span>
+				{#if endTime}
+					<span
+						class="ml-1 hidden text-sm text-neutral-300 tabular-nums md:inline md:text-[1rem]"
+						data-testid="player-ends-at"
+						>{t('player.ends_at', { time: endTime })}</span
+					>
+				{/if}
 				<div class="ml-auto flex items-center gap-1 md:gap-2">
 					{#if next && onnext}
 						<button

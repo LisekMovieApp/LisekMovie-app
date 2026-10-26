@@ -932,6 +932,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["my_access"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/list": {
         parameters: {
             query?: never;
@@ -1013,6 +1029,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/media/{item_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The original file as an attachment; supports HTTP Range (resume). */
+        get: operations["download"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/{item_id}/download-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A download URL for an item's original file. */
+        post: operations["ticket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/{item_id}/identify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pin the right provider entry on a film or a whole series ("Fix match"). */
+        post: operations["identify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/media/{item_id}/logo": {
         parameters: {
             query?: never;
@@ -1055,6 +1122,26 @@ export interface paths {
          *     episode — see `lisek_db::episodes::next_episode`.
          */
         get: operations["next_episode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media/{item_id}/people": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The cast and crew of a film or series (a series card's id is one of its
+         *     episodes; every episode carries the series' credits).
+         */
+        get: operations["item_people"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1196,6 +1283,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/people/{person_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A person's profile: biography, dates, links and the titles of this
+         *     server crediting them.
+         */
+        get: operations["get_person"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/people/{person_id}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A person's profile photo (`?token=` works, as for posters). */
+        get: operations["person_image"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/playback/{session_id}": {
         parameters: {
             query?: never;
@@ -1268,6 +1392,23 @@ export interface paths {
             cookie?: never;
         };
         get: operations["subtitles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/providers/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search the configured metadata providers by hand ("Fix match"). */
+        get: operations["search"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1482,6 +1623,18 @@ export interface components {
             temporary_password: string;
             user: components["schemas"]["User"];
         };
+        /** @description One person credited on an item. */
+        CreditResponse: {
+            /** @description The part an actor plays. */
+            character?: string | null;
+            /** @description `/api/people/{id}/image`, when there is a photo. */
+            image_url?: string | null;
+            name: string;
+            /** Format: uuid */
+            person_id: string;
+            /** @description `"Actor"`, `"Director"` or `"Writer"`. */
+            role: string;
+        };
         CurrentJob: {
             /** Format: int32 */
             episode?: number | null;
@@ -1521,6 +1674,18 @@ export interface components {
             video_copied: boolean;
             /** Format: int32 */
             width: number;
+        };
+        DownloadTicketResponse: {
+            /**
+             * Format: int64
+             * @description Seconds the URL keeps working.
+             */
+            expires_in: number;
+            file_name: string;
+            /** Format: int64 */
+            size_bytes: number;
+            /** @description Open this URL (no header needed) to download. */
+            url: string;
         };
         /**
          * @description What the client asked for. `Auto` lets the server choose.
@@ -1567,6 +1732,13 @@ export interface components {
             library_id: string;
             title: string;
         };
+        /** @description One title of a person's filmography. */
+        FilmographyItemResponse: {
+            character?: string | null;
+            item: components["schemas"]["MediaItemResponse"];
+            /** @description What they did on it: `"Actor"`, `"Director"`, `"Writer"`. */
+            roles: string[];
+        };
         FinishRequest: {
             admin_password: string;
             admin_username: string;
@@ -1591,6 +1763,8 @@ export interface components {
         HealthResponse: {
             service: string;
             status: string;
+            /** @description The running server's version (`1.0.0-beta`). */
+            version: string;
         };
         /**
          * @description How the client plays HLS.
@@ -1603,6 +1777,27 @@ export interface components {
             recently_added: components["schemas"]["MediaItemResponse"][];
             recommended: components["schemas"]["MediaItemResponse"][];
             top10: components["schemas"]["MediaItemResponse"][];
+        };
+        IdentifyRequest: {
+            /** @description `tmdb` or `tvdb`. */
+            provider: string;
+            /** @description The provider's id of the right film or series (from the search). */
+            provider_id: string;
+        };
+        IdentifyResponse: {
+            /** @description At least one new image was saved. */
+            image_saved: boolean;
+            /** Format: uuid */
+            item_id: string;
+            /** @description Films or episodes updated (a series counts every episode). */
+            items_updated: number;
+            title: string;
+            /** Format: int32 */
+            year?: number | null;
+        };
+        ItemPeopleResponse: {
+            /** @description Directors, writers, then the cast in billing order. */
+            items: components["schemas"]["CreditResponse"][];
         };
         LibraryItemsResponse: {
             items: components["schemas"]["MediaItemResponse"][];
@@ -1682,6 +1877,13 @@ export interface components {
          *     checkboxes use, so the frontend never needs a translation table.
          */
         MediaItemDetail: {
+            /**
+             * Format: int32
+             * @description An administrator's own age rating (parental controls), which wins
+             *     over the provider's. `None`: the provider's value applies.
+             */
+            age_rating?: number | null;
+            certification?: string | null;
             /** Format: int32 */
             episode?: number | null;
             forced_provider?: string | null;
@@ -1694,6 +1896,11 @@ export interface components {
             metadata_locked: boolean;
             original_title?: string | null;
             overview?: string | null;
+            /**
+             * Format: int32
+             * @description What the provider says (shown next to the override in the editor).
+             */
+            provider_age_rating?: number | null;
             /** Format: int32 */
             season?: number | null;
             title: string;
@@ -1795,6 +2002,13 @@ export interface components {
              */
             direction: string;
         };
+        /** @description What the signed-in account may do beyond browsing. */
+        MyAccessResponse: {
+            /** @description Downloads are allowed (the "Download" button shows). */
+            can_download: boolean;
+            /** @description Parental controls limit what this account sees. */
+            restricted: boolean;
+        };
         /** @description The episode a player offers when one ends ("Następny odcinek"). */
         NextEpisodeResponse: {
             backdrop_url: string;
@@ -1812,6 +2026,27 @@ export interface components {
             season: number;
             /** @description Series title (episodes carry no title of their own yet). */
             title: string;
+        };
+        PersonResponse: {
+            /**
+             * Format: int32
+             * @description Age today, or at death.
+             */
+            age?: number | null;
+            biography?: string | null;
+            /** Format: date */
+            birth_date?: string | null;
+            birth_place?: string | null;
+            /** Format: date */
+            death_date?: string | null;
+            /** @description Titles in this server's libraries the account can see, newest first. */
+            filmography: components["schemas"]["FilmographyItemResponse"][];
+            /** Format: uuid */
+            id: string;
+            image_url?: string | null;
+            imdb_url?: string | null;
+            name: string;
+            tmdb_url: string;
         };
         /** @description One progress report (`POST /api/telemetry/playback-progress`). */
         PlaybackProgress: {
@@ -2068,6 +2303,15 @@ export interface components {
             /** Format: double */
             position_seconds: number;
         };
+        ProviderCandidateResponse: {
+            overview: string;
+            poster_url?: string | null;
+            provider: string;
+            provider_id: string;
+            title: string;
+            /** Format: int32 */
+            year?: number | null;
+        };
         ProviderConfigResponse: {
             display_name: string;
             enabled: boolean;
@@ -2078,6 +2322,16 @@ export interface components {
         };
         ProviderOrderPayload: {
             provider_order: string[];
+        };
+        ProviderSearchFailure: {
+            error: string;
+            provider: string;
+        };
+        ProviderSearchResponse: {
+            /** @description Providers whose search failed (network, rejected key). */
+            failures: components["schemas"]["ProviderSearchFailure"][];
+            /** @description Candidates of every provider asked, each provider's best first. */
+            results: components["schemas"]["ProviderCandidateResponse"][];
         };
         /**
          * @description One library as the Navbar/`/library/[id]` grid consume it — deliberately
@@ -2103,6 +2357,8 @@ export interface components {
         Restrictions: {
             /** @description With an age limit, also hide items that have no rating at all. */
             block_unrated?: boolean;
+            /** @description The account may download original files (`GET /api/media/{id}/download`). */
+            can_download?: boolean;
             /**
              * @description `None`: every library. `Some`: only these (an empty list hides the
              *     whole catalog).
@@ -2423,6 +2679,13 @@ export interface components {
             paused_for_playback: boolean;
         };
         UpdateMediaItemRequest: {
+            /**
+             * Format: int32
+             * @description Faza 6: the administrator's own age rating (minimum viewer age,
+             *     0–21) for parental controls; `null` or absent leaves the
+             *     provider's rating in charge.
+             */
+            age_rating?: number | null;
             forced_provider?: string | null;
             locked_fields: string[];
             metadata_locked: boolean;
@@ -5016,6 +5279,31 @@ export interface operations {
             };
         };
     };
+    my_access: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyAccessResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     my_list: {
         parameters: {
             query?: never;
@@ -5206,6 +5494,167 @@ export interface operations {
             };
         };
     };
+    download: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+                /** @description From `POST /api/media/{item_id}/download-ticket`. */
+                ticket: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Part of the file (Range) */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_ticket */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ticket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DownloadTicketResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description downloads_disabled */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    identify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdentifyRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentifyResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     logo_image: {
         parameters: {
             query?: never;
@@ -5289,6 +5738,51 @@ export interface operations {
                 content?: never;
             };
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    item_people: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemPeopleResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5650,6 +6144,89 @@ export interface operations {
             };
         };
     };
+    get_person: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                person_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    person_image: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                person_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     stop: {
         parameters: {
             query?: never;
@@ -5834,6 +6411,58 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    search: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Title to search for, as typed. */
+                query: string;
+                /** @description Release (or first-air) year; narrows the search. */
+                year: number | null;
+                /** @description `movie` or `series`. */
+                kind: string;
+                /** @description Only this provider (`tmdb`, `tvdb`); every configured one when absent. */
+                provider: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderSearchResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

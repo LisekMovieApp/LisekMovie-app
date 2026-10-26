@@ -67,8 +67,11 @@ pub async fn insert_admin_user(
 /// running a dummy password verification in that case, so a request for a
 /// nonexistent username doesn't respond measurably faster than a wrong
 /// password for a real one.
+/// A `users` row plus its password hash.
+type UserWithHashRow = (Uuid, String, bool, String, Option<String>, DateTime<Utc>, bool, bool, String);
+
 pub async fn find_user_with_password_hash(pool:&PgPool,username:&str)->Result<Option<(User,String)>,DbError>{
-    let row:Option<(Uuid,String,bool,String,Option<String>,DateTime<Utc>,bool,bool,String)>=sqlx::query_as("SELECT id,username,is_admin,ui_language,email,created_at,must_change_password,disabled,password_hash FROM users WHERE username=$1")
+    let row:Option<UserWithHashRow>=sqlx::query_as("SELECT id,username,is_admin,ui_language,email,created_at,must_change_password,disabled,password_hash FROM users WHERE username=$1")
         .bind(username).fetch_optional(pool).await?;
     Ok(row.map(|(id,name,admin,lang,email,created,change,disabled,hash)|(user_from_row((id,name,admin,lang,email,created,change,disabled)),hash)))
 }

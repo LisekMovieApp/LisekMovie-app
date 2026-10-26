@@ -24,7 +24,7 @@
 </script>
 <main class="mx-auto max-w-3xl px-4 py-8 text-white">
     <h1 class="mb-6 text-2xl">{t('nav.games')}</h1>
-    {#each games as game}
+    {#each games as game (game.game_key)}
         <div class="flex items-center justify-between rounded-lg bg-surface p-4">
             <span>{game.name}</span>
             <button class="rounded-md border border-gold px-4 py-2 text-gold disabled:opacity-50" disabled={busy} aria-pressed={game.enabled} onclick={() => toggle(game.game_key, !game.enabled)}>{t(game.enabled ? 'games.disable' : 'games.enable')}</button>

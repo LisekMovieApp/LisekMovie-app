@@ -42,3 +42,5 @@ arc-swap = "1"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+# Database-backed enrichment tests (opt-in, LISEK_TEST_DATABASE_URL).
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres"] }

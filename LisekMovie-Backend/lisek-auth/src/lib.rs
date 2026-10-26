@@ -94,6 +94,13 @@ pub fn hash_session_token(token: &str) -> String {
     URL_SAFE_NO_PAD.encode(digest)
 }
 
+/// 144 random bits, represented as a copyable 24-character temporary password.
+pub fn generate_temporary_password() -> String {
+    let mut bytes=[0u8;18];
+    rand::fill(&mut bytes[..]);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,11 +153,4 @@ mod tests {
         let b = hash_password("correct-horse-battery").unwrap();
         assert_ne!(a, b);
     }
-}
-
-/// 144 random bits, represented as a copyable 24-character temporary password.
-pub fn generate_temporary_password() -> String {
-    let mut bytes=[0u8;18];
-    rand::fill(&mut bytes[..]);
-    URL_SAFE_NO_PAD.encode(bytes)
 }

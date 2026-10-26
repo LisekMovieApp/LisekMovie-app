@@ -75,6 +75,76 @@ pub struct ProviderMatch {
     pub backdrop_url: Option<String>,
     pub logo_url: Option<String>,
     pub banner_url: Option<String>,
+    /// Cast and crew (Faza 8). `None`: the provider has no credits or the
+    /// lookup failed — the item keeps the people it has. `Some(empty)`:
+    /// the provider says nobody is credited.
+    pub people: Option<Vec<ProviderPerson>>,
+}
+
+/// What a credited person did on a title. Stored as the variant name
+/// (`media_people.role`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PersonRole {
+    Actor,
+    Director,
+    Writer,
+}
+
+impl PersonRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PersonRole::Actor => "Actor",
+            PersonRole::Director => "Director",
+            PersonRole::Writer => "Writer",
+        }
+    }
+}
+
+/// One credit of a [`ProviderMatch`]: a person and their part.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderPerson {
+    /// The provider's own person id (TMDB: a number).
+    pub provider_id: String,
+    pub name: String,
+    pub role: PersonRole,
+    /// The character an actor plays.
+    pub character: Option<String>,
+    /// Billing order within the role, 0 first.
+    pub order: i32,
+    /// A profile photo, when the provider has one.
+    pub profile_url: Option<String>,
+}
+
+/// A person's own page ([`MetadataProvider::person`]). Dates are
+/// `YYYY-MM-DD`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProviderPersonDetails {
+    pub name: String,
+    pub biography: String,
+    pub birth_date: Option<String>,
+    pub death_date: Option<String>,
+    pub birth_place: Option<String>,
+    pub imdb_id: Option<String>,
+    pub profile_url: Option<String>,
+}
+
+/// What kind of item a manual search or lookup ("Fix match") is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaKind {
+    Movie,
+    Series,
+}
+
+/// One search result offered to an administrator fixing a wrong match.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderCandidate {
+    /// The provider's own id, as [`MetadataProvider::lookup`] takes it.
+    pub provider_id: String,
+    pub title: String,
+    pub year: Option<i32>,
+    pub overview: String,
+    /// A small poster to recognize the title by, when the provider has one.
+    pub poster_url: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -119,6 +189,44 @@ pub trait MetadataProvider: Send + Sync {
         query: &SeriesQuery<'_>,
         primary_language: &str,
     ) -> Result<Option<ProviderMatch>, ProviderError>;
+
+    /// Up to ~10 candidates for a title typed by an administrator ("Fix
+    /// match"), best first. `title` is searched as given (no automatic
+    /// shortening); `year` narrows when set. A provider that does not cover
+    /// `kind` returns an empty list.
+    async fn search(
+        &self,
+        _kind: MediaKind,
+        _title: &str,
+        _year: Option<i32>,
+        _primary_language: &str,
+    ) -> Result<Vec<ProviderCandidate>, ProviderError> {
+        Ok(Vec::new())
+    }
+
+    /// The full match for one of this provider's ids (a candidate the
+    /// administrator picked). Same shape as `find_movie`/`find_series`,
+    /// plus `fields.title` and `fields.year` with the provider's own title
+    /// and release year. `Ok(None)`: no such id.
+    async fn lookup(
+        &self,
+        _kind: MediaKind,
+        _provider_id: &str,
+        _primary_language: &str,
+    ) -> Result<Option<ProviderMatch>, ProviderError> {
+        Ok(None)
+    }
+
+    /// One person's biography and dates, for an id this provider returned
+    /// in [`ProviderMatch::people`]. `Ok(None)`: no such person, or the
+    /// provider has no people at all.
+    async fn person(
+        &self,
+        _provider_id: &str,
+        _primary_language: &str,
+    ) -> Result<Option<ProviderPersonDetails>, ProviderError> {
+        Ok(None)
+    }
 }
 
 /// Lowercases `title` and turns punctuation a provider's search backend

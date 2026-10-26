@@ -39,7 +39,7 @@ use lisek_metadata::image_cache::{
     backdrop_cache_path, download_image, fetch_image, logo_cache_path, poster_cache_path,
     store_image,
 };
-use lisek_plugin_api::{MovieQuery, ProviderMatch, SeriesQuery};
+use lisek_plugin_api::{MovieQuery, ProviderMatch, ProviderPerson, SeriesQuery};
 use uuid::Uuid;
 
 use crate::provider_registry;
@@ -167,6 +167,9 @@ pub struct EnrichCache {
     /// Collections whose artwork was checked this pass (every film of a
     /// collection names the same images).
     collections_done: HashSet<Uuid>,
+    /// People whose profile photo was checked this pass (an actor of a
+    /// series is credited on every episode).
+    people_done: HashSet<Uuid>,
 }
 
 impl EnrichCache {
@@ -289,6 +292,38 @@ pub async fn enrich_item_cached(
         tracing::debug!(%item_id, ?target, "no provider match");
         return EnrichOutcome::default();
     };
+    apply_match(
+        cache,
+        pool,
+        http,
+        config_dir,
+        item_id,
+        target,
+        file_path,
+        save_in_media_folder,
+        &provider_key,
+        &matched,
+    )
+    .await
+}
+
+/// Saves one provider match onto an item: its fields (`provider_data`),
+/// the collection it names (movies) and its poster/backdrop/logo, written
+/// next to the video or into the local cache. Shared by enrichment and
+/// "Fix match" (`identify`).
+#[allow(clippy::too_many_arguments)]
+pub async fn apply_match(
+    cache: &mut EnrichCache,
+    pool: &PgPool,
+    http: &reqwest::Client,
+    config_dir: &Path,
+    item_id: Uuid,
+    target: &EnrichTarget,
+    file_path: &Path,
+    save_in_media_folder: bool,
+    provider_key: &str,
+    matched: &ProviderMatch,
+) -> EnrichOutcome {
     tracing::debug!(
         %item_id,
         provider = provider_key,
@@ -299,14 +334,16 @@ pub async fn enrich_item_cached(
     );
 
     if let Err(err) =
-        lisek_db::attach_provider_metadata(pool, item_id, &provider_key, &matched.fields).await
+        lisek_db::attach_provider_metadata(pool, item_id, provider_key, &matched.fields).await
     {
         tracing::warn!(%item_id, provider_key, %err, "failed to save provider metadata");
     }
     if matches!(target, EnrichTarget::Movie { .. }) {
-        sync_collection(cache, pool, http, config_dir, item_id, &provider_key, &matched.fields)
+        sync_collection(cache, pool, http, config_dir, item_id, provider_key, &matched.fields)
             .await;
     }
+    sync_people(cache, pool, http, config_dir, item_id, provider_key, matched.people.as_deref())
+        .await;
 
     let mut used_fallback = false;
     let mut image_saved = false;
@@ -455,20 +492,16 @@ async fn sync_collection(
 
     let poster = sync_artwork(
         http,
-        config_dir,
-        stored.id,
+        &collection_image_path(config_dir, stored.id, "poster.jpg"),
         name,
-        "poster.jpg",
         stored.poster_url.clone(),
         poster_url,
     )
     .await;
     let backdrop = sync_artwork(
         http,
-        config_dir,
-        stored.id,
+        &collection_image_path(config_dir, stored.id, "backdrop.jpg"),
         name,
-        "backdrop.jpg",
         stored.backdrop_url.clone(),
         backdrop_url,
     )
@@ -486,10 +519,11 @@ async fn sync_collection(
     }
 }
 
-/// Brings one collection image on disk in line with the provider: keeps an
+/// Brings one stored image (a collection's poster or backdrop, a person's
+/// profile photo) on disk at `path` in line with the provider: keeps an
 /// up-to-date file, downloads a new or changed one, removes one the
-/// provider dropped (the first film's own artwork then stands in). Returns
-/// the source URL now on disk.
+/// provider dropped. Returns the source URL now on disk. `label` only
+/// names the image in the logs.
 ///
 /// No `.await` inside a `match` guard here, on purpose. rustc 1.97
 /// miscompiles `match array[i] { Some(x) if cond(x).await => .., Some(x)
@@ -499,34 +533,134 @@ async fn sync_collection(
 /// Windows that crashed the whole server with STATUS_ACCESS_VIOLATION
 /// right after a scan started (`artwork_sync_survives_a_dirty_stack`
 /// guards against it coming back).
-async fn sync_artwork(
+pub(crate) async fn sync_artwork(
     http: &reqwest::Client,
-    config_dir: &Path,
-    collection_id: Uuid,
-    collection: &str,
-    file_name: &str,
+    path: &Path,
+    label: &str,
     stored_url: Option<String>,
     wanted_url: Option<&str>,
 ) -> Option<String> {
-    let path = collection_image_path(config_dir, collection_id, file_name);
     let Some(url) = wanted_url else {
         if stored_url.is_some() {
-            tracing::debug!(collection, image = file_name, "provider dropped this collection image");
+            tracing::debug!(label, path = %path.display(), "provider dropped this image");
         }
-        let _ = tokio::fs::remove_file(&path).await;
+        let _ = tokio::fs::remove_file(path).await;
         return None;
     };
     let unchanged = stored_url.as_deref() == Some(url);
-    if unchanged && tokio::fs::try_exists(&path).await.unwrap_or(false) {
+    if unchanged && tokio::fs::try_exists(path).await.unwrap_or(false) {
         return stored_url;
     }
-    tracing::debug!(collection, image = file_name, url, path = %path.display(), "downloading collection artwork");
-    match download_image(http, url, &path).await {
+    tracing::debug!(label, url, path = %path.display(), "downloading artwork");
+    match download_image(http, url, path).await {
         Ok(()) => Some(url.to_owned()),
         Err(err) => {
-            tracing::warn!(collection, %err, image = file_name, "failed to download collection artwork");
+            tracing::warn!(label, %err, path = %path.display(), "failed to download artwork");
             // Whatever was on disk before is still there.
             stored_url
+        }
+    }
+}
+
+/// Where a person's profile photo is kept:
+/// `config/metadata/people/<id>/profile.jpg`.
+pub fn person_image_path(config_dir: &Path, person_id: Uuid) -> PathBuf {
+    config_dir
+        .join("metadata")
+        .join("people")
+        .join(person_id.to_string())
+        .join("profile.jpg")
+}
+
+/// The URL to compare against the stored one: TMDB serves one picture in
+/// several sizes (`/t/p/w185/x.jpg`, `/t/p/h632/x.jpg`), and the person
+/// page may have stored a larger size of the same picture the credits now
+/// name — that is no reason to download it again.
+fn same_picture_or<'a>(stored: Option<&'a str>, wanted: Option<&'a str>) -> Option<&'a str> {
+    let file = |url: &'a str| url.rsplit('/').next().filter(|f| !f.is_empty());
+    match (stored, wanted) {
+        (Some(stored), Some(wanted)) if file(stored).is_some() && file(stored) == file(wanted) => {
+            Some(stored)
+        }
+        (_, wanted) => wanted,
+    }
+}
+
+/// Stores the item's cast and crew (only when the provider answered; TMDB
+/// ids only, the one provider with people) and keeps each person's profile
+/// photo current. Failures are logged; the item's own metadata is saved.
+async fn sync_people(
+    cache: &mut EnrichCache,
+    pool: &PgPool,
+    http: &reqwest::Client,
+    config_dir: &Path,
+    item_id: Uuid,
+    provider_key: &str,
+    people: Option<&[ProviderPerson]>,
+) {
+    let Some(people) = people else { return };
+    if provider_key != "tmdb" {
+        return;
+    }
+    let credits: Vec<lisek_db::people::NewCredit> = people
+        .iter()
+        .filter_map(|p| {
+            Some(lisek_db::people::NewCredit {
+                tmdb_id: p.provider_id.parse().ok()?,
+                name: p.name.clone(),
+                role: p.role.as_str().to_string(),
+                character: p.character.clone(),
+                order: p.order,
+            })
+        })
+        .collect();
+    let linked = match lisek_db::people::replace_credits(pool, item_id, &credits).await {
+        Ok(linked) => linked,
+        Err(err) => {
+            tracing::warn!(%item_id, %err, "failed to save cast and crew");
+            return;
+        }
+    };
+    tracing::debug!(%item_id, credits = credits.len(), people = linked.len(), "cast and crew saved");
+    let photos: HashMap<i64, &str> = people
+        .iter()
+        .filter_map(|p| Some((p.provider_id.parse().ok()?, p.profile_url.as_deref()?)))
+        .collect();
+    for person in linked {
+        if !cache.people_done.insert(person.id) {
+            continue;
+        }
+        let wanted = photos.get(&person.tmdb_id).copied();
+        let wanted = same_picture_or(person.profile_url.as_deref(), wanted);
+        let path = person_image_path(config_dir, person.id);
+        let label = person.tmdb_id.to_string();
+        let now = sync_artwork(http, &path, &label, person.profile_url.clone(), wanted).await;
+        if now != person.profile_url
+            && let Err(err) = lisek_db::people::set_profile_url(pool, person.id, now.as_deref()).await
+        {
+            tracing::warn!(person_id = %person.id, %err, "failed to record a profile photo");
+        }
+    }
+}
+
+/// Deletes people no title credits any more, with their photos, plus photo
+/// folders no person owns.
+pub async fn prune_people(pool: &PgPool, config_dir: &Path) {
+    if let Err(err) = lisek_db::people::prune_orphans(pool).await {
+        tracing::warn!(%err, "failed to remove uncredited people");
+        return;
+    }
+    let Ok(ids) = lisek_db::people::all_ids(pool).await else {
+        return;
+    };
+    let keep: HashSet<String> = ids.into_iter().map(|id| id.to_string()).collect();
+    let root = config_dir.join("metadata").join("people");
+    let Ok(mut entries) = tokio::fs::read_dir(&root).await else {
+        return;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if !keep.contains(entry.file_name().to_string_lossy().as_ref()) {
+            let _ = tokio::fs::remove_dir_all(entry.path()).await;
         }
     }
 }
@@ -534,6 +668,8 @@ async fn sync_artwork(
 /// Deletes collections left without films (after a scan or refresh) and
 /// their artwork, plus artwork folders no collection owns.
 pub async fn prune_collections(pool: &PgPool, config_dir: &Path) {
+    // Credits go with deleted items too; sweep their people in the same pass.
+    prune_people(pool, config_dir).await;
     if let Err(err) = lisek_db::collections::prune_empty(pool).await {
         tracing::warn!(%err, "failed to remove empty collections");
         return;
@@ -635,20 +771,190 @@ mod tests {
             dirty_stack();
             let url = "http://127.0.0.1:9/poster.jpg";
             // Unchanged URL and the file is there: kept, nothing downloaded.
-            let kept = sync_artwork(&http, &dir, id, "Saga", "poster.jpg", Some(url.into()), Some(url)).await;
+            let kept = sync_artwork(&http, &poster, "Saga", Some(url.into()), Some(url)).await;
             assert_eq!(kept.as_deref(), Some(url));
             // A new URL that cannot be downloaded: the old one stays.
             let failed = sync_artwork(
-                &http, &dir, id, "Saga", "poster.jpg", Some(url.into()), Some("http://127.0.0.1:9/new.jpg"),
+                &http, &poster, "Saga", Some(url.into()), Some("http://127.0.0.1:9/new.jpg"),
             )
             .await;
             assert_eq!(failed.as_deref(), Some(url));
             // The provider dropped the image: file and URL go.
-            let dropped = sync_artwork(&http, &dir, id, "Saga", "poster.jpg", Some(url.into()), None).await;
+            let dropped = sync_artwork(&http, &poster, "Saga", Some(url.into()), None).await;
             assert_eq!(dropped, None);
         });
         assert!(!poster.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A tiny HTTP server answering every request with the same bytes,
+    /// counting requests.
+    async fn image_server() -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut buf = [0u8; 2048];
+                let _ = socket.read(&mut buf).await;
+                let body = b"jpeg";
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = socket.write_all(head.as_bytes()).await;
+                let _ = socket.write_all(body).await;
+            }
+        });
+        (base, hits)
+    }
+
+    /// End to end against a real database (opt-in, `LISEK_TEST_DATABASE_URL`):
+    /// credits saved, photos downloaded once, a larger stored size of the
+    /// same picture kept, `None` keeps the cast, an empty list clears it and
+    /// the sweep removes people with their photos.
+    #[tokio::test]
+    async fn people_are_saved_with_their_photos_once() {
+        use lisek_plugin_api::PersonRole;
+        use sqlx::{AssertSqlSafe, ConnectOptions};
+        use std::sync::atomic::Ordering;
+        let Ok(url) = std::env::var("LISEK_TEST_DATABASE_URL") else {
+            eprintln!("LISEK_TEST_DATABASE_URL not set; skipping database test");
+            return;
+        };
+        let admin_options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
+        let admin = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .connect_with(admin_options.clone())
+            .await
+            .unwrap();
+        let name = format!("lisek_test_{}", Uuid::new_v4().simple());
+        sqlx::query(AssertSqlSafe(format!("CREATE DATABASE {name}")))
+            .execute(&admin)
+            .await
+            .unwrap();
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_with(admin_options.database(&name).disable_statement_logging())
+            .await
+            .unwrap();
+        lisek_db::run_migrations(&pool).await.unwrap();
+
+        let library = lisek_db::create_library(&pool, "Filmy", "movies", &["/media/Filmy".into()], false)
+            .await
+            .unwrap()
+            .id;
+        lisek_db::persist_scan_results(
+            &pool,
+            library,
+            &[lisek_library::ScanResult::Movie(lisek_library::ScannedMovie {
+                file_path: PathBuf::from("/media/Filmy/Star Wars.mkv"),
+                title: "Star Wars".into(),
+                year: Some(1977),
+                file: lisek_library::FileFacts {
+                    size_bytes: Some(1),
+                    modified: None,
+                },
+            })],
+        )
+        .await
+        .unwrap();
+        let (item_id,): (Uuid,) = sqlx::query_as("SELECT id FROM media_items").fetch_one(&pool).await.unwrap();
+
+        let (base, hits) = image_server().await;
+        let small = format!("{base}/t/p/w185/hf.jpg");
+        let people = vec![
+            ProviderPerson {
+                provider_id: "3".into(),
+                name: "Harrison Ford".into(),
+                role: PersonRole::Actor,
+                character: Some("Han Solo".into()),
+                order: 0,
+                profile_url: Some(small.clone()),
+            },
+            ProviderPerson {
+                provider_id: "1".into(),
+                name: "George Lucas".into(),
+                role: PersonRole::Director,
+                character: None,
+                order: 0,
+                profile_url: None,
+            },
+        ];
+        let config = std::env::temp_dir().join(format!("lisek-people-{}", Uuid::new_v4()));
+        let http = reqwest::Client::new();
+        let sync = |people: Option<Vec<ProviderPerson>>| {
+            let (pool, http, config) = (pool.clone(), http.clone(), config.clone());
+            async move {
+                let mut cache = EnrichCache::default();
+                sync_people(&mut cache, &pool, &http, &config, item_id, "tmdb", people.as_deref()).await;
+            }
+        };
+
+        sync(Some(people.clone())).await;
+        let credits = lisek_db::people::item_credits(&pool, item_id, 10).await.unwrap();
+        assert_eq!(
+            credits.iter().map(|c| (c.name.as_str(), c.has_image)).collect::<Vec<_>>(),
+            [("George Lucas", false), ("Harrison Ford", true)]
+        );
+        let ford = credits[1].person_id;
+        let photo = person_image_path(&config, ford);
+        assert_eq!(std::fs::read(&photo).unwrap(), b"jpeg");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+
+        // Again (the six-hourly refresh): nothing downloaded.
+        sync(Some(people.clone())).await;
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        // The person page stored a bigger size of the same picture: kept.
+        let large = format!("{base}/t/p/h632/hf.jpg");
+        lisek_db::people::set_profile_url(&pool, ford, Some(&large)).await.unwrap();
+        sync(Some(people.clone())).await;
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        let (stored,): (Option<String>,) = sqlx::query_as("SELECT profile_url FROM people WHERE id = $1")
+            .bind(ford)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, Some(large));
+
+        // Another provider, or no answer: the cast stays.
+        let mut cache = EnrichCache::default();
+        sync_people(&mut cache, &pool, &http, &config, item_id, "tvdb", Some(&[])).await;
+        sync(None).await;
+        assert_eq!(lisek_db::people::item_credits(&pool, item_id, 10).await.unwrap().len(), 2);
+
+        // Nobody credited any more: the sweep removes people and photos.
+        sync(Some(Vec::new())).await;
+        assert!(lisek_db::people::item_credits(&pool, item_id, 10).await.unwrap().is_empty());
+        std::fs::create_dir_all(config.join("metadata/people/stray")).unwrap();
+        prune_people(&pool, &config).await;
+        assert!(lisek_db::people::all_ids(&pool).await.unwrap().is_empty());
+        assert!(!photo.exists());
+        assert!(!config.join("metadata/people/stray").exists());
+
+        pool.close().await;
+        sqlx::query(AssertSqlSafe(format!("DROP DATABASE {name} WITH (FORCE)")))
+            .execute(&admin)
+            .await
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn a_bigger_size_of_the_same_picture_counts_as_unchanged() {
+        let small = "https://image.tmdb.org/t/p/w185/abc.jpg";
+        let large = "https://image.tmdb.org/t/p/h632/abc.jpg";
+        let other = "https://image.tmdb.org/t/p/w185/xyz.jpg";
+        assert_eq!(same_picture_or(Some(large), Some(small)), Some(large));
+        assert_eq!(same_picture_or(Some(large), Some(other)), Some(other));
+        assert_eq!(same_picture_or(None, Some(small)), Some(small));
+        assert_eq!(same_picture_or(Some(large), None), None);
+        assert_eq!(
+            person_image_path(Path::new("/cfg"), Uuid::nil()),
+            Path::new("/cfg/metadata/people/00000000-0000-0000-0000-000000000000/profile.jpg")
+        );
     }
 
     #[test]
