@@ -116,6 +116,11 @@ pub fn binary_path(name: &str, config: &PlaybackSettings) -> PathBuf {
 pub(crate) fn command(name: &str, config: &PlaybackSettings) -> Command {
     let mut command = Command::new(binary_path(name, config));
     command.kill_on_drop(true);
+    // GPU numbers in the settings and in load balancing are `nvidia-smi`'s
+    // (PCI order); CUDA's default order is "fastest first".
+    if std::env::var_os("CUDA_DEVICE_ORDER").is_none() {
+        command.env("CUDA_DEVICE_ORDER", "PCI_BUS_ID");
+    }
     #[cfg(windows)]
     command.creation_flags(0x08000000);
     command
@@ -131,6 +136,8 @@ pub struct FfmpegTools {
     pub filters: BTreeSet<String>,
     pub encoders: BTreeSet<String>,
     pub hwaccels: BTreeSet<String>,
+    /// Quick Sync decoders (`h264_qsv` ...), from `ffmpeg -decoders`.
+    pub decoders: BTreeSet<String>,
 }
 
 /// Filters, encoders and hardware methods the planner may use. Anything
@@ -147,10 +154,13 @@ const INTERESTING_FILTERS: &[&str] = &[
     "overlay_cuda",
     "subtitles",
     "hwupload_cuda",
+    "scale_qsv",
+    "vpp_qsv",
+    "scale_vaapi",
 ];
 const INTERESTING_ENCODERS: &[&str] = &[
-    "libx264", "libx265", "h264_nvenc", "hevc_nvenc", "aac", "libfdk_aac", "ac3", "eac3",
-    "webvtt",
+    "libx264", "libx265", "h264_nvenc", "hevc_nvenc", "h264_qsv", "hevc_qsv", "h264_vaapi",
+    "hevc_vaapi", "aac", "libfdk_aac", "ac3", "eac3", "webvtt",
 ];
 
 impl FfmpegTools {
@@ -159,6 +169,20 @@ impl FfmpegTools {
     }
     pub fn has_encoder(&self, name: &str) -> bool {
         self.encoders.contains(name)
+    }
+    pub fn has_decoder(&self, name: &str) -> bool {
+        self.decoders.contains(name)
+    }
+
+    /// Adds the Quick Sync decoders listed by `ffmpeg -decoders`.
+    pub fn with_decoders(mut self, decoders: &str) -> Self {
+        self.decoders = decoders
+            .lines()
+            .filter_map(|line| line.split_whitespace().nth(1))
+            .filter(|name| name.ends_with("_qsv"))
+            .map(str::to_owned)
+            .collect();
+        self
     }
 
     /// Parses `ffmpeg -version`, `-filters`, `-encoders` and `-hwaccels`
@@ -186,6 +210,7 @@ impl FfmpegTools {
                 .filter(|l| !l.is_empty())
                 .map(str::to_owned)
                 .collect(),
+            decoders: BTreeSet::new(),
         }
     }
 }
@@ -223,18 +248,20 @@ pub async fn tools(config: &PlaybackSettings) -> FfmpegTools {
     {
         return cached.tools.clone();
     }
-    let (version, filters, encoders, hwaccels) = tokio::join!(
+    let (version, filters, encoders, hwaccels, decoders) = tokio::join!(
         ffmpeg_output(config, &["-version"]),
         ffmpeg_output(config, &["-filters"]),
         ffmpeg_output(config, &["-encoders"]),
         ffmpeg_output(config, &["-hwaccels"]),
+        ffmpeg_output(config, &["-decoders"]),
     );
     let tools = FfmpegTools::parse(
         version.as_deref().unwrap_or_default(),
         filters.as_deref().unwrap_or_default(),
         encoders.as_deref().unwrap_or_default(),
         hwaccels.as_deref().unwrap_or_default(),
-    );
+    )
+    .with_decoders(decoders.as_deref().unwrap_or_default());
     if version.is_some() {
         *TOOLS.lock().unwrap_or_else(|e| e.into_inner()) = Some(CachedTools {
             binary,

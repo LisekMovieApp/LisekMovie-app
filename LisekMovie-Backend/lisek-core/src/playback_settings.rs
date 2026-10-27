@@ -42,6 +42,24 @@ pub struct PlaybackSettings {
     /// GPU used for decoding, filtering and encoding (CUDA device order,
     /// see `nvidia-smi -L`).
     pub hardware_device_index: u32,
+    /// Share GPU transcodes between several NVIDIA GPUs (Faza 13): each new
+    /// session goes to the card with the fewest sessions (then the most
+    /// free memory). Off: every session uses `hardware_device_index`.
+    pub gpu_load_balancing: bool,
+    /// GPUs to share between (`nvidia-smi` indices). Empty: every GPU
+    /// `nvidia-smi` reports, or `hardware_device_index` without it.
+    pub hardware_devices: Vec<u32>,
+    /// Device for `qsv` / `vaapi` (Faza 14): a Linux render node
+    /// (`/dev/dri/renderD128`), on Windows a DirectX adapter number (`0`)
+    /// or `auto` (Quick Sync only). Empty: `/dev/dri/renderD128` / `auto`.
+    pub hardware_device_path: String,
+    /// Output codecs the hardware encoder may produce (`h264`, `hevc`);
+    /// others are encoded on the CPU.
+    pub hardware_encode_codecs: Vec<String>,
+    /// Transcoding devices of `hardware_acceleration = "pool"` (Faza 14):
+    /// NVIDIA, Intel and AMD GPUs side by side, each with its share of
+    /// sessions and the codecs it decodes and encodes.
+    pub hardware_pool: Vec<HardwareDevice>,
     /// Encode HEVC instead of H.264 for clients that decode HEVC (NVENC
     /// only). Same quality at a lower bitrate.
     pub hevc_encoding: bool,
@@ -114,6 +132,11 @@ impl Default for PlaybackSettings {
             tonemapping_param: None,
             tonemapping_backend: "auto".into(),
             hardware_device_index: 0,
+            gpu_load_balancing: true,
+            hardware_devices: Vec::new(),
+            hardware_device_path: String::new(),
+            hardware_encode_codecs: vec!["h264".into(), "hevc".into()],
+            hardware_pool: Vec::new(),
             hevc_encoding: false,
             allow_remux: true,
             hls_segment_seconds: 4,
@@ -126,6 +149,80 @@ impl Default for PlaybackSettings {
         }
     }
 }
+/// One transcoding device of the pool (Faza 14).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct HardwareDevice {
+    /// `nvenc` (NVIDIA), `qsv` (Intel Quick Sync) or `vaapi` (Intel/AMD on Linux).
+    pub api: String,
+    /// `nvenc`: the `nvidia-smi` index (`0`). `qsv`/`vaapi` on Linux: the
+    /// render node (`/dev/dri/renderD128`); `qsv` on Windows: the DirectX
+    /// adapter number or `auto`.
+    pub device: String,
+    /// Shown in the admin panel (from the diagnostics).
+    pub name: String,
+    pub enabled: bool,
+    /// Share of sessions, 1–16: a device with 2 gets twice the sessions
+    /// of one with 1 before both are equally loaded.
+    pub weight: u32,
+    /// Most sessions at once on this device; 0 = no limit. A full pool
+    /// transcodes on the CPU.
+    pub max_sessions: u32,
+    /// Source codecs this device decodes (empty: decoding on the CPU).
+    pub decode_codecs: Vec<String>,
+    /// Output codecs it encodes (`h264`, `hevc`; empty: CPU encoding).
+    pub encode_codecs: Vec<String>,
+}
+
+impl Default for HardwareDevice {
+    fn default() -> Self {
+        Self {
+            api: "nvenc".into(),
+            device: "0".into(),
+            name: String::new(),
+            enabled: false,
+            weight: 1,
+            max_sessions: 0,
+            decode_codecs: Vec::new(),
+            encode_codecs: vec!["h264".into(), "hevc".into()],
+        }
+    }
+}
+
+const DECODE_CODECS: [&str; 8] = ["h264", "hevc", "mpeg2video", "mpeg4", "vc1", "vp8", "vp9", "av1"];
+
+/// `/dev/dri/renderD<n>`, an adapter number or `auto`: values that go
+/// into FFmpeg's `-init_hw_device`, so nothing else is accepted.
+pub fn valid_device(value: &str) -> bool {
+    let digits = |s: &str| !s.is_empty() && s.len() <= 3 && s.bytes().all(|b| b.is_ascii_digit());
+    value == "auto" || digits(value) || value.strip_prefix("/dev/dri/renderD").is_some_and(digits)
+}
+
+impl HardwareDevice {
+    /// `api:device`, how sessions and the balancer name the device.
+    pub fn id(&self) -> String {
+        format!("{}:{}", self.api, self.device)
+    }
+
+    pub fn validate(&self) -> bool {
+        let device_ok = match self.api.as_str() {
+            "nvenc" => self.device.parse::<u32>().is_ok_and(|n| n <= 15),
+            "qsv" => valid_device(&self.device),
+            "vaapi" => self.device.starts_with("/dev/dri/") && valid_device(&self.device),
+            _ => false,
+        };
+        device_ok
+            && self.name.len() <= 200
+            && !self.name.contains('\0')
+            && (1..=16).contains(&self.weight)
+            && self.max_sessions <= 64
+            && self.decode_codecs.len() <= 8
+            && self.decode_codecs.iter().all(|c| DECODE_CODECS.contains(&c.as_str()))
+            && self.encode_codecs.len() <= 2
+            && self.encode_codecs.iter().all(|c| matches!(c.as_str(), "h264" | "hevc"))
+    }
+}
+
 impl PlaybackSettings {
     pub fn validate(&self) -> bool {
         self.min_resume_percentage.is_finite()
@@ -148,13 +245,15 @@ impl PlaybackSettings {
             && !self.ffmpeg_path.contains('\0')
             && self.transcoding_temp_path.len() <= 4096
             && !self.transcoding_temp_path.contains('\0')
-            && matches!(self.hardware_acceleration.as_str(), "none" | "nvenc")
+            && matches!(self.hardware_acceleration.as_str(), "none" | "nvenc" | "qsv" | "vaapi" | "pool")
+            && (self.hardware_device_path.is_empty() || valid_device(&self.hardware_device_path))
+            && self.hardware_encode_codecs.len() <= 2
+            && self.hardware_encode_codecs.iter().all(|c| matches!(c.as_str(), "h264" | "hevc"))
+            && self.hardware_pool.len() <= 16
+            && self.hardware_pool.iter().all(HardwareDevice::validate)
             && self.hardware_decoding_codecs.len() <= 8
             && self.hardware_decoding_codecs.iter().all(|s| {
-                matches!(
-                    s.as_str(),
-                    "h264" | "hevc" | "mpeg2video" | "mpeg4" | "vc1" | "vp8" | "vp9" | "av1"
-                )
+                DECODE_CODECS.contains(&s.as_str())
             })
             && self.encoding_threads <= 256
             && self.h264_crf <= 51
@@ -194,6 +293,8 @@ impl PlaybackSettings {
                 "auto" | "cuda" | "libplacebo" | "opencl" | "software"
             )
             && self.hardware_device_index <= 15
+            && self.hardware_devices.len() <= 16
+            && self.hardware_devices.iter().all(|d| *d <= 15)
             && (2..=10).contains(&self.hls_segment_seconds)
             && (10..=600).contains(&self.throttle_lead_seconds)
             && (10..=3600).contains(&self.segment_retention_seconds)
@@ -277,6 +378,34 @@ pub fn client_address(peer: IpAddr, forwarded: Option<&str>, trusted: &[String])
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pool_devices_are_validated() {
+        let intel = HardwareDevice {
+            api: "qsv".into(),
+            device: "/dev/dri/renderD128".into(),
+            decode_codecs: vec!["h264".into(), "hevc".into()],
+            ..Default::default()
+        };
+        assert!(intel.validate());
+        assert_eq!(intel.id(), "qsv:/dev/dri/renderD128");
+        let windows = HardwareDevice { device: "auto".into(), ..intel.clone() };
+        assert!(windows.validate());
+        assert!(!HardwareDevice { api: "vaapi".into(), device: "auto".into(), ..intel.clone() }.validate());
+        assert!(!HardwareDevice { device: "/dev/dri/renderD128,child_device=x".into(), ..intel.clone() }.validate());
+        assert!(!HardwareDevice { device: "/etc/passwd".into(), ..intel.clone() }.validate());
+        assert!(!HardwareDevice { api: "amf".into(), ..intel.clone() }.validate());
+        assert!(!HardwareDevice { weight: 0, ..intel.clone() }.validate());
+        assert!(!HardwareDevice { encode_codecs: vec!["av1".into()], ..intel.clone() }.validate());
+        assert!(HardwareDevice::default().validate(), "NVIDIA GPU 0");
+        assert!(!HardwareDevice { device: "16".into(), ..Default::default() }.validate());
+        let settings = PlaybackSettings { hardware_acceleration: "pool".into(), hardware_pool: vec![intel], ..Default::default() };
+        assert!(settings.validate());
+        assert!(!PlaybackSettings { hardware_device_path: "/tmp/x".into(), ..Default::default() }.validate());
+        // Settings saved before Faza 14 still load.
+        let old: PlaybackSettings = serde_json::from_str(r#"{"hardware_acceleration":"nvenc"}"#).unwrap();
+        assert_eq!((old.hardware_pool.len(), old.hardware_encode_codecs.len()), (0, 2));
+    }
     #[test]
     fn resume_boundaries() {
         let c = PlaybackSettings::default();

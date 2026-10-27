@@ -1,6 +1,7 @@
 //! A linear FFmpeg video filter chain that tracks where frames live
-//! (system memory, CUDA, Vulkan, OpenCL) and inserts the uploads and
-//! downloads between filters, so a chain is written as a list of steps.
+//! (system memory, CUDA, Quick Sync, VA-API, Vulkan, OpenCL) and inserts
+//! the uploads and downloads between filters, so a chain is written as a
+//! list of steps.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Frames {
@@ -9,11 +10,21 @@ pub enum Frames {
     Cuda { sw: &'static str },
     Vulkan,
     Opencl,
+    /// In Intel Quick Sync memory (Faza 14), `sw` as for CUDA.
+    Qsv { sw: &'static str },
+    /// In VA-API surfaces (Intel/AMD on Linux).
+    Vaapi { sw: &'static str },
 }
 
 impl Frames {
     pub fn is_cuda(self) -> bool {
         matches!(self, Frames::Cuda { .. })
+    }
+    pub fn is_qsv(self) -> bool {
+        matches!(self, Frames::Qsv { .. })
+    }
+    pub fn is_vaapi(self) -> bool {
+        matches!(self, Frames::Vaapi { .. })
     }
 }
 
@@ -26,6 +37,9 @@ pub struct VideoChain {
     pub uses_cuda: bool,
     pub uses_vulkan: bool,
     pub uses_opencl: bool,
+    /// Uploads to Quick Sync / VA-API: needs `-filter_hw_device`.
+    pub uses_qsv: bool,
+    pub uses_vaapi: bool,
 }
 
 impl VideoChain {
@@ -40,6 +54,8 @@ impl VideoChain {
             uses_cuda: frames.is_cuda(),
             uses_vulkan: false,
             uses_opencl: false,
+            uses_qsv: frames.is_qsv(),
+            uses_vaapi: frames.is_vaapi(),
         }
     }
 
@@ -63,7 +79,7 @@ impl VideoChain {
     pub fn to_cpu(&mut self) {
         match self.frames {
             Frames::Cpu => {}
-            Frames::Cuda { sw } => {
+            Frames::Cuda { sw } | Frames::Qsv { sw } | Frames::Vaapi { sw } => {
                 self.push("hwdownload");
                 self.push(format!("format={sw}"));
                 self.frames = Frames::Cpu;
@@ -76,12 +92,57 @@ impl VideoChain {
 
     /// Brings frames to CUDA memory.
     pub fn to_cuda(&mut self) {
-        if self.frames == Frames::Cpu {
+        if !self.frames.is_cuda() {
+            self.to_cpu();
             let layout = self.cuda_layout();
             self.push(format!("format={layout}"));
             self.push(format!("hwupload_cuda=device={}", self.device));
             self.frames = Frames::Cuda { sw: layout };
             self.uses_cuda = true;
+        }
+    }
+
+    /// Brings frames to Quick Sync memory (encoder input).
+    pub fn to_qsv(&mut self) {
+        if !self.frames.is_qsv() {
+            self.to_cpu();
+            let layout = self.cuda_layout();
+            self.push(format!("format={layout}"));
+            self.push("hwupload=extra_hw_frames=64");
+            self.frames = Frames::Qsv { sw: layout };
+            self.uses_qsv = true;
+        }
+    }
+
+    /// Brings frames to VA-API surfaces (encoder input).
+    pub fn to_vaapi(&mut self) {
+        if !self.frames.is_vaapi() {
+            self.to_cpu();
+            let layout = self.cuda_layout();
+            self.push(format!("format={layout}"));
+            self.push("hwupload");
+            self.frames = Frames::Vaapi { sw: layout };
+            self.uses_vaapi = true;
+        }
+    }
+
+    /// A filter on Quick Sync frames (`scale_qsv`), `out` as for [`Self::cuda`].
+    pub fn qsv(&mut self, filter: impl AsRef<str>, out: Option<&'static str>) {
+        self.to_qsv();
+        self.push(filter);
+        if let Some(sw) = out {
+            self.frames = Frames::Qsv { sw };
+            self.ten_bit = sw.contains("10");
+        }
+    }
+
+    /// A filter on VA-API frames (`scale_vaapi`).
+    pub fn vaapi(&mut self, filter: impl AsRef<str>, out: Option<&'static str>) {
+        self.to_vaapi();
+        self.push(filter);
+        if let Some(sw) = out {
+            self.frames = Frames::Vaapi { sw };
+            self.ten_bit = sw.contains("10");
         }
     }
 
@@ -169,6 +230,24 @@ mod tests {
         assert_eq!(chain.frames(), Frames::Cuda { sw: "nv12" });
         chain.to_cpu();
         assert!(chain.to_filter_string().ends_with("hwdownload,format=nv12"));
+    }
+
+    #[test]
+    fn quick_sync_and_vaapi_transfers() {
+        let mut chain = VideoChain::new(Frames::Qsv { sw: "nv12" }, false, 0);
+        chain.qsv("scale_qsv=w=1280:h=720", None);
+        chain.cpu("subtitles=filename=a.srt");
+        chain.to_qsv();
+        assert_eq!(
+            chain.to_filter_string(),
+            "scale_qsv=w=1280:h=720,hwdownload,format=nv12,subtitles=filename=a.srt,format=nv12,hwupload=extra_hw_frames=64"
+        );
+        assert!(chain.uses_qsv && chain.frames().is_qsv());
+        let mut chain = VideoChain::new(Frames::Cpu, true, 0);
+        chain.cpu("scale=w=1920:h=1080");
+        chain.to_vaapi();
+        assert_eq!(chain.to_filter_string(), "scale=w=1920:h=1080,format=p010le,hwupload");
+        assert!(chain.uses_vaapi && !chain.uses_qsv);
     }
 
     #[test]

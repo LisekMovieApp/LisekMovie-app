@@ -468,6 +468,9 @@ def main():
             # Faza 12: the alpha picker's jump table.
             from search_smoke import check_letters
             check_letters(request,ok_json,token,library_id,other_token,other_id)
+            # Faza 13: watch statistics, the bots' summary, hardware diagnostics.
+            from stats_smoke import check_stats
+            check_stats(request,ok_json,sql,token,other_token,other_id,item_id,bool(args.ffmpeg and args.ffprobe))
             ok_json("/api/auth/logout","POST",{},token)
             if args.node:
                 event=notification_queue.get(timeout=15)
@@ -488,7 +491,7 @@ def main():
             server.wait(timeout=10)
             log.close()
             server = None
-            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls, fix match, downloads, cast and crew, details and chapters, series pages, global search, alpha picker")
+            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls, fix match, downloads, cast and crew, details and chapters, series pages, global search, alpha picker, watch statistics, hardware diagnostics")
     finally:
         if server:
             server.terminate()

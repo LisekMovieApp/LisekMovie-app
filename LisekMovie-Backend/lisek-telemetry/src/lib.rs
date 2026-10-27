@@ -7,6 +7,9 @@
 //! client. Persistence lives in `lisek-db`; this crate is pure so the
 //! rules are testable without a database.
 
+pub mod client;
+pub mod duration;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;

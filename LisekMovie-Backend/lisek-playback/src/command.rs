@@ -16,6 +16,7 @@ use lisek_core::playback_settings::PlaybackSettings;
 
 use crate::decision::{
     AudioAction, AudioCodecOut, BurnInSource, OutputCodec, PlaybackPlan, VideoAction, VideoEncode,
+    hardware_api, hardware_encoder,
 };
 use crate::filters::{Frames, VideoChain};
 use crate::subtitles::{self, SubtitleKind};
@@ -58,6 +59,19 @@ fn nvenc_preset(preset: &str) -> &'static str {
     }
 }
 
+/// Quick Sync presets are named like x264's, without the two fastest.
+fn qsv_preset(preset: &str) -> &'static str {
+    match preset {
+        "ultrafast" | "superfast" | "veryfast" => "veryfast",
+        "faster" => "faster",
+        "fast" => "fast",
+        "medium" => "medium",
+        "slow" => "slow",
+        "slower" => "slower",
+        _ => "veryslow",
+    }
+}
+
 /// The video filter graph (for `-filter_complex`, output label `[vout]`)
 /// and whether it needs Vulkan or OpenCL devices.
 pub fn video_graph(
@@ -69,10 +83,13 @@ pub fn video_graph(
     external_charset: Option<&str>,
 ) -> (String, VideoChain) {
     let ten_bit = encode.source_bit_depth > 8;
-    let frames = if encode.gpu_decode {
-        Frames::Cuda { sw: if ten_bit { "p010le" } else { "nv12" } }
-    } else {
-        Frames::Cpu
+    let sw = if ten_bit { "p010le" } else { "nv12" };
+    let api = hardware_api(settings);
+    let frames = match (encode.gpu_decode, api) {
+        (true, Some("qsv")) => Frames::Qsv { sw },
+        (true, Some("vaapi")) => Frames::Vaapi { sw },
+        (true, _) => Frames::Cuda { sw },
+        (false, _) => Frames::Cpu,
     };
     let mut chain = VideoChain::new(frames, ten_bit, settings.hardware_device_index);
     let (w, h) = (encode.width, encode.height);
@@ -93,12 +110,22 @@ pub fn video_graph(
     } else if encode.hdr_passthrough {
         if chain.frames().is_cuda() && tools.has_filter("scale_cuda") {
             chain.cuda(format!("scale_cuda=w={w}:h={h}:format=p010le"), Some("p010le"));
+        } else if chain.frames().is_qsv() && tools.has_filter("scale_qsv") {
+            chain.qsv(format!("scale_qsv=w={w}:h={h}:format=p010"), Some("p010le"));
+        } else if chain.frames().is_vaapi() && tools.has_filter("scale_vaapi") {
+            chain.vaapi(format!("scale_vaapi=w={w}:h={h}:format=p010"), Some("p010le"));
         } else {
             chain.cpu(format!("scale=w={w}:h={h}:flags=bicubic"));
             chain.cpu("format=yuv420p10le");
         }
     } else if chain.frames().is_cuda() && tools.has_filter("scale_cuda") {
         chain.cuda(format!("scale_cuda=w={w}:h={h}:interp_algo=bicubic:format=nv12"), Some("nv12"));
+        chain.set_eight_bit();
+    } else if chain.frames().is_qsv() && tools.has_filter("scale_qsv") {
+        chain.qsv(format!("scale_qsv=w={w}:h={h}:format=nv12"), Some("nv12"));
+        chain.set_eight_bit();
+    } else if chain.frames().is_vaapi() && tools.has_filter("scale_vaapi") {
+        chain.vaapi(format!("scale_vaapi=w={w}:h={h}:format=nv12"), Some("nv12"));
         chain.set_eight_bit();
     } else {
         chain.cpu(format!("scale=w={w}:h={h}:flags=bicubic"));
@@ -130,8 +157,14 @@ pub fn video_graph(
         }
     }
 
-    let finish = |chain: &mut VideoChain| {
-        if !encode.gpu_encode || !chain.frames().is_cuda() {
+    // The encoder's input: NVENC takes CUDA or system frames, Quick Sync
+    // and VA-API encoders only their own surfaces, software encoders only
+    // system memory.
+    let finish = |chain: &mut VideoChain| match (encode.gpu_encode, api) {
+        (true, Some("qsv")) => chain.to_qsv(),
+        (true, Some("vaapi")) => chain.to_vaapi(),
+        (true, _) if chain.frames().is_cuda() => {}
+        _ => {
             chain.to_cpu();
             chain.cpu(if encode.hdr_passthrough { "format=yuv420p10le" } else { "format=yuv420p" });
         }
@@ -147,6 +180,8 @@ pub fn video_graph(
             let pre = chain.to_filter_string();
             let mut post = VideoChain::new(Frames::Cpu, encode.hdr_passthrough, settings.hardware_device_index);
             finish(&mut post);
+            chain.uses_qsv |= post.uses_qsv;
+            chain.uses_vaapi |= post.uses_vaapi;
             format!(
                 "{video_in}{pre}[base];{sub_in}scale=w={w}:h={h}[sub];\
                  [base][sub]overlay=eof_action=pass,{}[vout]",
@@ -155,6 +190,31 @@ pub fn video_graph(
         }
     };
     (graph, chain)
+}
+
+/// `-init_hw_device` for Quick Sync / VA-API (Faza 14). Linux: the render
+/// node opens VA-API, Quick Sync is derived from it (as Intel's media
+/// driver expects). Windows: Quick Sync on a DirectX 11 adapter, or the
+/// first Intel one with `auto`.
+pub fn intel_device_args(api: &str, device: &str) -> Vec<OsString> {
+    let windows_style = !device.starts_with('/');
+    match (api, windows_style) {
+        ("qsv", true) if device.is_empty() || device == "auto" => os(&[
+            "-init_hw_device", "qsv=qs:hw_any,child_device_type=d3d11va", "-filter_hw_device", "qs",
+        ]),
+        ("qsv", true) => os(&[
+            "-init_hw_device", &format!("d3d11va=dx:{device}"), "-init_hw_device", "qsv=qs@dx",
+            "-filter_hw_device", "qs",
+        ]),
+        ("qsv", false) => os(&[
+            "-init_hw_device", &format!("vaapi=va:{device}"), "-init_hw_device", "qsv=qs@va",
+            "-filter_hw_device", "qs",
+        ]),
+        (_, _) => {
+            let node = if device.is_empty() || windows_style { "/dev/dri/renderD128" } else { device };
+            os(&["-init_hw_device", &format!("vaapi=va:{node}"), "-filter_hw_device", "va"])
+        }
+    }
 }
 
 /// Arguments for `ffmpeg` (without the binary).
@@ -170,7 +230,26 @@ pub fn hls_run_args(a: &RunArgs) -> Vec<OsString> {
     };
     let graph = encode.map(|e| video_graph(plan, e, settings, a.tools, a.input, a.external_charset));
 
-    if let Some((_, chain)) = &graph {
+    if let Some((_, chain)) = &graph
+        && let Some(api @ ("qsv" | "vaapi")) = hardware_api(settings)
+    {
+        let e = encode.expect("graph implies encode");
+        if e.gpu_decode || e.gpu_encode || chain.uses_qsv || chain.uses_vaapi {
+            args.extend(intel_device_args(api, &settings.hardware_device_path));
+        }
+        if e.gpu_decode {
+            if api == "qsv" {
+                args.extend(os(&[
+                    "-hwaccel", "qsv", "-hwaccel_device", "qs", "-hwaccel_output_format", "qsv",
+                    "-c:v", &format!("{}_qsv", crate::decision::qsv_decoder_codec(&e.source_codec)),
+                ]));
+            } else {
+                args.extend(os(&[
+                    "-hwaccel", "vaapi", "-hwaccel_device", "va", "-hwaccel_output_format", "vaapi",
+                ]));
+            }
+        }
+    } else if let Some((_, chain)) = &graph {
         let e = encode.expect("graph implies encode");
         let cuda = e.gpu_decode || chain.uses_cuda;
         if cuda {
@@ -282,16 +361,28 @@ fn video_encoder_args(e: &VideoEncode, settings: &PlaybackSettings, segment_seco
     let bitrate = format!("{}k", e.bitrate_kbps);
     let bufsize = format!("{}k", e.bitrate_kbps.saturating_mul(2));
     let device = settings.hardware_device_index.to_string();
-    let mut args = if e.gpu_encode {
-        let (encoder, profile) = match (e.codec, e.hdr_passthrough) {
-            (OutputCodec::H264, _) => ("h264_nvenc", "high"),
-            (OutputCodec::Hevc, true) => ("hevc_nvenc", "main10"),
-            (OutputCodec::Hevc, false) => ("hevc_nvenc", "main"),
-        };
+    let profile = match (e.codec, e.hdr_passthrough) {
+        (OutputCodec::H264, _) => "high",
+        (OutputCodec::Hevc, true) => "main10",
+        (OutputCodec::Hevc, false) => "main",
+    };
+    let mut args = if e.gpu_encode && hardware_api(settings) == Some("qsv") {
         os(&[
-            "-c:v", encoder, "-gpu", &device, "-preset", nvenc_preset(&settings.encoder_preset),
-            "-rc", "vbr", "-b:v", &bitrate, "-maxrate", &bitrate, "-bufsize", &bufsize,
-            "-profile:v", profile, "-g", &gop, "-forced-idr", "1", "-no-scenecut", "1",
+            "-c:v", &hardware_encoder("qsv", e.codec), "-preset", qsv_preset(&settings.encoder_preset),
+            "-b:v", &bitrate, "-maxrate", &bitrate, "-bufsize", &bufsize, "-profile:v", profile,
+            "-g", &gop, "-forced_idr", "1", "-look_ahead", "0",
+        ])
+    } else if e.gpu_encode && hardware_api(settings) == Some("vaapi") {
+        os(&[
+            "-c:v", &hardware_encoder("vaapi", e.codec), "-rc_mode", "VBR", "-b:v", &bitrate,
+            "-maxrate", &bitrate, "-bufsize", &bufsize, "-profile:v", profile, "-g", &gop,
+        ])
+    } else if e.gpu_encode {
+        os(&[
+            "-c:v", &hardware_encoder("nvenc", e.codec), "-gpu", &device, "-preset",
+            nvenc_preset(&settings.encoder_preset), "-rc", "vbr", "-b:v", &bitrate, "-maxrate",
+            &bitrate, "-bufsize", &bufsize, "-profile:v", profile, "-g", &gop, "-forced-idr", "1",
+            "-no-scenecut", "1",
         ])
     } else {
         let mut args = match e.codec {
@@ -402,6 +493,101 @@ mod tests {
         assert_eq!(value(&args, "-force_key_frames:v"), "expr:gte(t,n_forced*4)");
         assert_eq!(value(&args, "-color_trc"), "bt709");
         assert!(!args.contains(&"-ss".to_owned()));
+    }
+
+    fn intel_tools() -> FfmpegTools {
+        FfmpegTools::parse(
+            "ffmpeg version 7.1",
+            " ... scale_qsv V->V x\n ... scale_vaapi V->V x\n ... zscale V->V x\n ... tonemap V->V x\n",
+            " V....D h264_qsv x\n V....D hevc_qsv x\n V....D h264_vaapi x\n V....D libx264 x\n A....D aac x\n",
+            "Hardware acceleration methods:\nvaapi\nqsv\n",
+        )
+        .with_decoders(" V....D h264_qsv H.264 (Intel Quick Sync Video)\n V....D hevc_qsv x\n V....D h264 x\n")
+    }
+
+    #[test]
+    fn quick_sync_decodes_scales_and_encodes_on_the_intel_gpu() {
+        let mut f = Fixture::new(bluray_rip(), ClientFamily::Chrome);
+        f.request.force_transcode = true;
+        f.settings.hardware_acceleration = "qsv".into();
+        f.settings.hardware_device_path = "/dev/dri/renderD128".into();
+        f.tools = intel_tools();
+        let plan = f.decide().unwrap();
+        assert!(plan.uses_gpu());
+        let args = args_of(&f, 0.0, &[]);
+        let joined = args.join(" ");
+        assert!(
+            joined.starts_with(
+                "-hide_banner -loglevel warning -nostdin -y -copyts \
+                 -init_hw_device vaapi=va:/dev/dri/renderD128 -init_hw_device qsv=qs@va -filter_hw_device qs \
+                 -hwaccel qsv -hwaccel_device qs -hwaccel_output_format qsv -c:v h264_qsv -i "
+            ),
+            "{joined}"
+        );
+        assert_eq!(value(&args, "-filter_complex"), "[0:0]scale_qsv=w=1280:h=720:format=nv12[vout]");
+        let encoder = args.iter().rposition(|a| a == "-c:v").unwrap();
+        assert_eq!(args[encoder + 1], "h264_qsv");
+        assert_eq!(value(&args, "-forced_idr"), "1");
+        assert_eq!(value(&args, "-preset"), "veryfast");
+        assert!(!args.contains(&"-gpu".to_owned()));
+    }
+
+    #[test]
+    fn vaapi_burns_text_subtitles_on_the_cpu_between_gpu_steps() {
+        let mut f = Fixture::new(bluray_rip(), ClientFamily::Chrome);
+        f.request.subtitle = Some(TrackRef::Embedded(4));
+        f.request.burn_subtitle = true;
+        f.settings.hardware_acceleration = "vaapi".into();
+        f.settings.hardware_device_path = "/dev/dri/renderD129".into();
+        f.tools = intel_tools();
+        let args = args_of(&f, 0.0, &[]);
+        assert_eq!(value(&args, "-init_hw_device"), "vaapi=va:/dev/dri/renderD129");
+        assert_eq!(value(&args, "-filter_hw_device"), "va");
+        assert_eq!(value(&args, "-hwaccel"), "vaapi");
+        assert_eq!(
+            value(&args, "-filter_complex"),
+            "[0:0]scale_vaapi=w=1280:h=720:format=nv12,hwdownload,format=nv12,\
+             subtitles=filename=/media/Film\\\\: Część 1.mkv:si=1,format=nv12,hwupload[vout]"
+        );
+        let encoder = args.iter().rposition(|a| a == "-c:v").unwrap();
+        assert_eq!(args[encoder + 1], "h264_vaapi");
+        assert_eq!(value(&args, "-rc_mode"), "VBR");
+    }
+
+    #[test]
+    fn quick_sync_hdr_is_tone_mapped_on_the_cpu_and_encoded_on_the_gpu() {
+        let mut f = Fixture::new(hdr_rip(), ClientFamily::Chrome);
+        f.settings.tonemapping = true;
+        f.settings.tonemapping_backend = "libplacebo".into();
+        f.settings.hardware_acceleration = "qsv".into();
+        f.settings.hardware_device_path = "auto".into();
+        f.tools = intel_tools();
+        let args = args_of(&f, 0.0, &[]);
+        assert_eq!(value(&args, "-init_hw_device"), "qsv=qs:hw_any,child_device_type=d3d11va");
+        let graph = value(&args, "-filter_complex");
+        assert!(graph.contains("hwdownload,format=p010le"), "HEVC decoded by Quick Sync: {graph}");
+        assert!(graph.contains("zscale") || graph.contains("tonemap="), "{graph}");
+        assert!(graph.ends_with("format=nv12,hwupload=extra_hw_frames=64[vout]"), "{graph}");
+        assert!(!graph.contains("libplacebo"), "no Vulkan on an Intel session: {graph}");
+        let encoder = args.iter().rposition(|a| a == "-c:v").unwrap();
+        assert_eq!(args[encoder + 1], "h264_qsv");
+    }
+
+    #[test]
+    fn codec_limits_of_a_pool_device_send_work_to_the_cpu() {
+        let mut f = Fixture::new(bluray_rip(), ClientFamily::Chrome);
+        f.request.force_transcode = true;
+        f.settings.hardware_acceleration = "qsv".into();
+        f.settings.hardware_device_path = "/dev/dri/renderD128".into();
+        f.settings.hardware_decoding_codecs = vec![];
+        f.settings.hardware_encode_codecs = vec!["hevc".into()];
+        f.tools = intel_tools();
+        let plan = f.decide().unwrap();
+        assert!(!plan.uses_gpu(), "no H.264 encoding and no decoding on this device");
+        let args = args_of(&f, 0.0, &[]);
+        assert!(!args.contains(&"-init_hw_device".to_owned()));
+        let encoder = args.iter().rposition(|a| a == "-c:v").unwrap();
+        assert_eq!(args[encoder + 1], "libx264");
     }
 
     #[test]

@@ -1319,6 +1319,7 @@ dependencies = [
 name = "lisek-playback"
 version = "1.0.0-beta"
 dependencies = [
+ "chrono",
  "lisek-core",
  "serde",
  "serde_json",

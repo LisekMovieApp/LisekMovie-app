@@ -36,6 +36,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/hardware": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/hardware/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Runs the hardware survey with the saved playback settings (FFmpeg
+         *     path, balancing) and returns it. Takes a few seconds.
+         */
+        post: operations["diagnostics"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/hardware/pool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Saves the transcoding pool from the "Sprzęt i Transkodowanie" panel.
+         *     Running sessions keep their device; new ones use the new pool.
+         */
+        put: operations["set_pool"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/libraries": {
         parameters: {
             query?: never;
@@ -384,6 +440,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/stats/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["dashboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/stats/key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["key_status"];
+        put?: never;
+        /** Creates the bots' key, replacing (and so revoking) any previous one. */
+        post: operations["create_key"];
+        delete: operations["delete_key"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/stats/playback": {
         parameters: {
             query?: never;
@@ -392,6 +481,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["recent_sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/stats/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["sessions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1609,6 +1714,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/stats/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["summary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/status": {
         parameters: {
             query?: never;
@@ -1673,6 +1794,12 @@ export interface components {
             is_default: boolean;
             language?: string | null;
             title?: string | null;
+        };
+        BalancingInfo: {
+            /** @description Devices new transcodes are spread over, with their load. */
+            devices: components["schemas"]["DeviceLoad"][];
+            /** @description The `hardware_acceleration` setting: `none`, `nvenc`, `qsv`, `vaapi` or `pool`. */
+            mode: string;
         };
         Capabilities: {
             encoders: string[];
@@ -1789,6 +1916,13 @@ export interface components {
             name: string;
             poster_url: string;
         };
+        CpuInfo: {
+            logical_cores: number;
+            /** Format: int64 */
+            memory_total_mb?: number | null;
+            model?: string | null;
+            physical_cores?: number | null;
+        };
         CreateLibraryRequest: {
             library_type: string;
             name: string;
@@ -1834,6 +1968,26 @@ export interface components {
             started_at: string;
             title: string;
         };
+        Dashboard: {
+            content: components["schemas"]["Slice"][];
+            days: components["schemas"]["DayStats"][];
+            device_types: components["schemas"]["Slice"][];
+            /** @description Abandoned sessions per tenth of the title (index 0: 0–10 %). */
+            dropoff: number[];
+            /** Format: date-time */
+            from: string;
+            hours: components["schemas"]["HourStats"][];
+            platforms: components["schemas"]["Slice"][];
+            /** @description Newest first; more via `/api/admin/stats/sessions`. */
+            sessions: components["schemas"]["SessionRow"][];
+            timezone: string;
+            /** Format: date-time */
+            to: string;
+            top_movies: components["schemas"]["TitleRank"][];
+            top_series: components["schemas"]["TitleRank"][];
+            totals: components["schemas"]["Totals"];
+            users: components["schemas"]["UserRank"][];
+        };
         /**
          * @description Discrete connection fields, as collected by the First-Run Wizard form.
          *     Kept separate from a raw connection-string type so the wizard never has
@@ -1846,6 +2000,17 @@ export interface components {
             /** Format: int32 */
             port: number;
             username: string;
+        };
+        /** @description Viewing per calendar day in `timezone` (an IANA name PostgreSQL knows). */
+        DayStats: {
+            /** Format: date */
+            day: string;
+            /** Format: int64 */
+            plays: number;
+            /** Format: int64 */
+            users: number;
+            /** Format: double */
+            watched_seconds: number;
         };
         /** @description What actually reaches the client. */
         DeliveredStreams: {
@@ -1862,6 +2027,23 @@ export interface components {
             video_copied: boolean;
             /** Format: int32 */
             width: number;
+        };
+        DeviceLoad: {
+            api: string;
+            /**
+             * @description In the configured set (a device just removed from the pool may
+             *     still finish sessions).
+             */
+            configured: boolean;
+            /** @description `gpu::Target::id`, e.g. `nvenc:0`, `qsv:/dev/dri/renderD128`. */
+            id: string;
+            /** Format: int32 */
+            max_sessions: number;
+            name: string;
+            /** @description LisekMovie sessions on it now (starting ones included). */
+            transcodes: number;
+            /** Format: int32 */
+            weight: number;
         };
         DownloadTicketResponse: {
             /**
@@ -1885,6 +2067,21 @@ export interface components {
             is_admin: boolean;
             ui_language: string;
             username: string;
+        };
+        EncoderTest: {
+            /** @description `nvenc`, `vaapi`, `qsv`, `amf`, `videotoolbox`. */
+            api: string;
+            /** @description `h264`, `hevc`, `av1`. */
+            codec: string;
+            /** @description GPU index or render node the test ran on. */
+            device?: string | null;
+            /** @description FFmpeg encoder, e.g. `hevc_nvenc`. */
+            encoder: string;
+            /** @description Last line FFmpeg printed when the test failed. */
+            error?: string | null;
+            ok: boolean;
+            /** @description LisekMovie's transcoding uses this encoder. */
+            used_by_lisek: boolean;
         };
         Endpoint: {
             destination_type: string;
@@ -1959,6 +2156,14 @@ export interface components {
             library_id: string;
             title: string;
         };
+        FfmpegInfo: {
+            /** @description Hardware encoders compiled into this build. */
+            hardware_encoders: string[];
+            /** @description `ffmpeg -hwaccels`: hardware decoding methods in this build. */
+            hwaccels: string[];
+            path: string;
+            version?: string | null;
+        };
         /** @description One title of a person's filmography. */
         FilmographyItemResponse: {
             character?: string | null;
@@ -1987,6 +2192,124 @@ export interface components {
         GameConfig: {
             enabled: boolean;
         };
+        GpuDevice: {
+            /** @description LisekMovie transcodes on this GPU now. */
+            active_transcodes: number;
+            driver?: string | null;
+            /**
+             * Format: int32
+             * @description NVENC sessions of every process on this card.
+             */
+            encoder_sessions?: number | null;
+            /**
+             * Format: int32
+             * @description `nvidia-smi` index (NVIDIA only): the number transcodes use.
+             */
+            index?: number | null;
+            /** @description `discrete`, `integrated` or `unknown`. */
+            kind: string;
+            /** Format: int64 */
+            memory_total_mb?: number | null;
+            /** Format: int64 */
+            memory_used_mb?: number | null;
+            name: string;
+            /** @description Linux render node, e.g. `/dev/dri/renderD128`. */
+            render_node?: string | null;
+            /** @description Where this entry came from: `nvidia-smi`, `drm`, `wmi`. */
+            source: string;
+            /** Format: int32 */
+            utilization_percent?: number | null;
+            /** @description `nvidia`, `intel`, `amd` or `other`. */
+            vendor: string;
+        };
+        /** @description One transcoding device of the pool (Faza 14). */
+        HardwareDevice: {
+            /**
+             * @description `nvenc` (NVIDIA), `qsv` (Intel Quick Sync) or `vaapi` (Intel/AMD on Linux).
+             * @default nvenc
+             */
+            api?: string;
+            /**
+             * @description Source codecs this device decodes (empty: decoding on the CPU).
+             * @default []
+             */
+            decode_codecs?: string[];
+            /**
+             * @description `nvenc`: the `nvidia-smi` index (`0`). `qsv`/`vaapi` on Linux: the
+             *     render node (`/dev/dri/renderD128`); `qsv` on Windows: the DirectX
+             *     adapter number or `auto`.
+             * @default 0
+             */
+            device?: string;
+            /** @default false */
+            enabled?: boolean;
+            /**
+             * @description Output codecs it encodes (`h264`, `hevc`; empty: CPU encoding).
+             * @default [
+             *       "h264",
+             *       "hevc"
+             *     ]
+             */
+            encode_codecs?: string[];
+            /**
+             * Format: int32
+             * @description Most sessions at once on this device; 0 = no limit. A full pool
+             *     transcodes on the CPU.
+             * @default 0
+             */
+            max_sessions?: number;
+            /**
+             * @description Shown in the admin panel (from the diagnostics).
+             * @default
+             */
+            name?: string;
+            /**
+             * Format: int32
+             * @description Share of sessions, 1–16: a device with 2 gets twice the sessions
+             *     of one with 1 before both are equally loaded.
+             * @default 1
+             */
+            weight?: number;
+        };
+        HardwareReport: {
+            arch: string;
+            balancing: components["schemas"]["BalancingInfo"];
+            /** @description Running in a container (Docker, Podman). */
+            container: boolean;
+            cpu: components["schemas"]["CpuInfo"];
+            /** Format: int64 */
+            duration_ms: number;
+            encoders: components["schemas"]["EncoderTest"][];
+            ffmpeg: components["schemas"]["FfmpegInfo"];
+            /** Format: date-time */
+            generated_at: string;
+            gpus: components["schemas"]["GpuDevice"][];
+            /** @description `linux`, `windows`, `macos` ... */
+            os: string;
+            os_version?: string | null;
+            /**
+             * @description Devices the transcoding pool could use (Faza 14), from this survey:
+             *     NVIDIA cards (NVENC), Intel GPUs (Quick Sync, else VA-API), AMD GPUs
+             *     on Linux (VA-API); codecs from the tests and `vainfo`. Suggestions:
+             *     `enabled` is off, the admin panel merges them with the saved pool.
+             */
+            pool_candidates: components["schemas"]["HardwareDevice"][];
+            vaapi: components["schemas"]["VaapiDevice"][];
+            vulkan_devices: string[];
+            /**
+             * @description Things worth the administrator's attention, as codes:
+             *     `no_hardware_encoder`, `nvenc_failed`, `acceleration_off`,
+             *     `nvidia_smi_missing`, `other_encoders_unused`, `ffmpeg_missing`.
+             */
+            warnings: string[];
+        };
+        HardwareStatus: {
+            /** @description Live: devices transcodes are spread over and their load. */
+            balancing: components["schemas"]["BalancingInfo"];
+            /** @description The saved pool (Faza 14), also when no diagnostics ran yet. */
+            pool: components["schemas"]["HardwareDevice"][];
+            report?: null | components["schemas"]["HardwareReport"];
+        };
         HealthResponse: {
             service: string;
             status: string;
@@ -2004,6 +2327,15 @@ export interface components {
             recently_added: components["schemas"]["MediaItemResponse"][];
             recommended: components["schemas"]["MediaItemResponse"][];
             top10: components["schemas"]["MediaItemResponse"][];
+        };
+        /** @description Viewing per hour of the day (0–23) in `timezone`: when people watch. */
+        HourStats: {
+            /** Format: int32 */
+            hour: number;
+            /** Format: int64 */
+            sessions: number;
+            /** Format: double */
+            watched_seconds: number;
         };
         IdentifyRequest: {
             /** @description `tmdb` or `tvdb`. */
@@ -2290,6 +2622,12 @@ export interface components {
             name: string;
             url: string;
         };
+        NewStatsKey: {
+            /** Format: date-time */
+            created_at: string;
+            /** @description Shown once; only its hash is stored. Send it as `X-Lisek-Stats-Key`. */
+            key: string;
+        };
         /** @description The episode a player offers when one ends ("Następny odcinek"). */
         NextEpisodeResponse: {
             backdrop_url: string;
@@ -2308,6 +2646,8 @@ export interface components {
             /** @description Series title (episodes carry no title of their own yet). */
             title: string;
         };
+        /** @enum {string} */
+        Period: "daily" | "weekly";
         PersonResponse: {
             /**
              * Format: int32
@@ -2420,6 +2760,13 @@ export interface components {
             /** @default  */
             ffmpeg_path?: string;
             /**
+             * @description Share GPU transcodes between several NVIDIA GPUs (Faza 13): each new
+             *     session goes to the card with the fewest sessions (then the most
+             *     free memory). Off: every session uses `hardware_device_index`.
+             * @default true
+             */
+            gpu_load_balancing?: boolean;
+            /**
              * Format: int32
              * @default 23
              */
@@ -2445,8 +2792,37 @@ export interface components {
              * @default 0
              */
             hardware_device_index?: number;
+            /**
+             * @description Device for `qsv` / `vaapi` (Faza 14): a Linux render node
+             *     (`/dev/dri/renderD128`), on Windows a DirectX adapter number (`0`)
+             *     or `auto` (Quick Sync only). Empty: `/dev/dri/renderD128` / `auto`.
+             * @default
+             */
+            hardware_device_path?: string;
+            /**
+             * @description GPUs to share between (`nvidia-smi` indices). Empty: every GPU
+             *     `nvidia-smi` reports, or `hardware_device_index` without it.
+             * @default []
+             */
+            hardware_devices?: number[];
+            /**
+             * @description Output codecs the hardware encoder may produce (`h264`, `hevc`);
+             *     others are encoded on the CPU.
+             * @default [
+             *       "h264",
+             *       "hevc"
+             *     ]
+             */
+            hardware_encode_codecs?: string[];
             /** @default true */
             hardware_encoding?: boolean;
+            /**
+             * @description Transcoding devices of `hardware_acceleration = "pool"` (Faza 14):
+             *     NVIDIA, Intel and AMD GPUs side by side, each with its share of
+             *     sessions and the codecs it decodes and encodes.
+             * @default []
+             */
+            hardware_pool?: components["schemas"]["HardwareDevice"][];
             /**
              * @description Encode HEVC instead of H.264 for clients that decode HEVC (NVENC
              *     only). Same quality at a lower bitrate.
@@ -2566,6 +2942,15 @@ export interface components {
              * @default 2500
              */
             video_bitrate_kbps?: number;
+        };
+        PoolRequest: {
+            /** @description The whole pool as the admin panel shows it (enabled and disabled). */
+            devices: components["schemas"]["HardwareDevice"][];
+            /**
+             * @description Transcode with the pool (`hardware_acceleration = "pool"`). Off:
+             *     back to the CPU when the pool was in use; other modes stay.
+             */
+            use_pool: boolean;
         };
         /** @description What the server answers a report with. */
         ProgressAck: {
@@ -2828,8 +3213,59 @@ export interface components {
             /** Format: double */
             watched_seconds: number;
         };
+        /** @description One session in the dashboard's list. */
+        SessionRow: {
+            browser?: string | null;
+            device_type: string;
+            /**
+             * Format: double
+             * @description 0 when the player never reported a length.
+             */
+            duration_seconds: number;
+            /** Format: date-time */
+            ended_at?: string | null;
+            /** Format: int32 */
+            episode?: number | null;
+            episode_title?: string | null;
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The film, or the episode (`/media/{id}`).
+             */
+            item_id: string;
+            /** @description `completed`, `watching` or `abandoned`. */
+            outcome: string;
+            platform: string;
+            /**
+             * Format: double
+             * @description Where the viewer was last (stopped, for an abandoned session).
+             */
+            position_seconds: number;
+            /** Format: int32 */
+            season?: number | null;
+            /** Format: date-time */
+            started_at: string;
+            /** @description Film title or series title. */
+            title: string;
+            /** Format: uuid */
+            user_id: string;
+            username: string;
+            /** Format: double */
+            watched_seconds: number;
+        };
         SetProviderKeyRequest: {
             api_key: string;
+        };
+        /** @description One slice of a breakdown (platform, device type, content type). */
+        Slice: {
+            key: string;
+            /** Format: int64 */
+            plays: number;
+            /** Format: int64 */
+            users: number;
+            /** Format: double */
+            watched_seconds: number;
         };
         /**
          * @description The client's choices when starting playback. Every field is optional;
@@ -2907,6 +3343,30 @@ export interface components {
             time_offset_seconds: number;
             title: string;
         };
+        StatsKeyStatus: {
+            configured: boolean;
+            /** Format: date-time */
+            created_at?: string | null;
+        };
+        StatsSummary: {
+            by_content: components["schemas"]["SummaryContent"][];
+            /** Format: date-time */
+            from: string;
+            /** Format: date-time */
+            generated_at: string;
+            /** @description `dd.mm.yyyy hh:mm` of `to` in `timezone`. */
+            generated_label: string;
+            /** @description "14.09 - 20.09" for a week, "20.09" for a day, in `timezone`. */
+            label: string;
+            period: components["schemas"]["Period"];
+            timezone: string;
+            /** Format: date-time */
+            to: string;
+            top_movies: components["schemas"]["SummaryTitle"][];
+            top_series: components["schemas"]["SummaryTitle"][];
+            totals: components["schemas"]["SummaryTotals"];
+            users: components["schemas"]["SummaryUser"][];
+        };
         StatusResponse: {
             database_connected: boolean;
             setup_required: boolean;
@@ -2947,11 +3407,116 @@ export interface components {
             /** @description WebVTT for a `<track>` element (direct play only). */
             url?: string | null;
         };
+        SummaryContent: {
+            /** @description `movie` or `series`. */
+            content: string;
+            /** Format: int64 */
+            plays: number;
+            watched: string;
+            /** Format: double */
+            watched_seconds: number;
+        };
+        SummaryTitle: {
+            /**
+             * Format: uuid
+             * @description `/media/{id}` (a series' representative episode).
+             */
+            id: string;
+            /** Format: int64 */
+            plays: number;
+            rank: number;
+            title: string;
+            /**
+             * Format: int64
+             * @description Different accounts that watched it.
+             */
+            unique_users: number;
+            /** @description e.g. "1h 38m". */
+            watched: string;
+            /** Format: double */
+            watched_seconds: number;
+            /** Format: int32 */
+            year?: number | null;
+        };
+        SummaryTotals: {
+            /** Format: int64 */
+            active_users: number;
+            /** Format: int64 */
+            plays: number;
+            /** @description e.g. "8m 48s". */
+            watched: string;
+            /** Format: double */
+            watched_seconds: number;
+        };
+        SummaryUser: {
+            /** Format: int64 */
+            plays: number;
+            rank: number;
+            username: string;
+            watched: string;
+            /** Format: double */
+            watched_seconds: number;
+        };
         TemporaryPassword: {
             temporary_password: string;
         };
         TestConnectionResponse: {
             ok: boolean;
+        };
+        /** @description A film or a series in a ranking. */
+        TitleRank: {
+            /**
+             * Format: int64
+             * @description Sessions that reached the end.
+             */
+            completed: number;
+            /**
+             * Format: uuid
+             * @description The film, or the series' representative item: `/media/{id}`.
+             */
+            id: string;
+            /** Format: int64 */
+            plays: number;
+            /**
+             * Format: uuid
+             * @description The series itself (series rankings only): filter value.
+             */
+            series_id?: string | null;
+            title: string;
+            /**
+             * Format: int64
+             * @description Different accounts that watched it.
+             */
+            users: number;
+            /** Format: double */
+            watched_seconds: number;
+            /** Format: int32 */
+            year?: number | null;
+        };
+        Totals: {
+            /** Format: int64 */
+            abandoned: number;
+            /** Format: int64 */
+            completed: number;
+            /** Format: int64 */
+            plays: number;
+            /**
+             * Format: int64
+             * @description Sessions (plays and shorter ones).
+             */
+            sessions: number;
+            /**
+             * Format: int64
+             * @description Different films and episodes.
+             */
+            titles: number;
+            /**
+             * Format: int64
+             * @description Different accounts that watched anything.
+             */
+            users: number;
+            /** Format: double */
+            watched_seconds: number;
         };
         /** @enum {string} */
         TranscodeReason: "forced_by_client" | "container_not_supported" | "video_codec_not_supported" | "video_bit_depth_not_supported" | "video_profile_not_supported" | "hdr_not_supported" | "interlaced_not_supported" | "resolution_above_requested" | "bitrate_above_limit" | "audio_codec_not_supported" | "audio_channels_not_supported" | "audio_track_not_first" | "downmix_requested" | "subtitle_burn_in" | "subtitle_needs_hls" | "no_keyframe_index" | "remux_disabled";
@@ -3079,6 +3644,19 @@ export interface components {
             ui_language: string;
             username: string;
         };
+        UserRank: {
+            /** Format: date-time */
+            last_watched_at: string;
+            /** Format: int64 */
+            plays: number;
+            /** Format: int64 */
+            titles: number;
+            /** Format: uuid */
+            user_id: string;
+            username: string;
+            /** Format: double */
+            watched_seconds: number;
+        };
         /**
          * @description An account's access restrictions (parental controls) as the admin
          *     editor shows them.
@@ -3086,6 +3664,13 @@ export interface components {
         UserRestrictionsResponse: components["schemas"]["Restrictions"] & {
             /** @description `false` for an administrator: administrators always see everything. */
             enforced: boolean;
+        };
+        /** @description VA-API capabilities of one render node (`vainfo`). */
+        VaapiDevice: {
+            decode: string[];
+            driver?: string | null;
+            encode: string[];
+            render_node: string;
         };
         /** @description The picture, as one line ("4K HEVC HDR"). */
         VideoSummary: {
@@ -3158,6 +3743,110 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HardwareStatus"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    diagnostics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HardwareReport"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_pool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PoolRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HardwareStatus"];
+                };
+            };
+            /** @description invalid_pool */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4360,6 +5049,155 @@ export interface operations {
             };
         };
     };
+    dashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Start of the range (RFC 3339). Default: 30 days before `to`. */
+                from: string | null;
+                /** @description End of the range, exclusive (RFC 3339). Default: now. */
+                to: string | null;
+                user_id: string | null;
+                /** @description windows, macos, linux, android, ios, smart_tv, other, unknown. */
+                platform: string | null;
+                /** @description desktop, mobile, tablet, tv, unknown. */
+                device_type: string | null;
+                /** @description `movie` or `series`. */
+                content: string | null;
+                /** @description A film, episode or series id. */
+                item: string | null;
+                /** @description IANA time zone for days and hours (default UTC). */
+                tz: string | null;
+                /** @description Rows per ranking, 1–50 (default 10). */
+                limit: number | null;
+                /** @description Session list paging (sessions endpoint). */
+                offset: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Dashboard"];
+                };
+            };
+            /** @description invalid_range / invalid_platform / invalid_device_type / invalid_content / invalid_timezone */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    key_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatsKeyStatus"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    create_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewStatsKey"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     recent_sessions: {
         parameters: {
             query?: {
@@ -4379,6 +5217,63 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SessionQuality"][];
                 };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Start of the range (RFC 3339). Default: 30 days before `to`. */
+                from: string | null;
+                /** @description End of the range, exclusive (RFC 3339). Default: now. */
+                to: string | null;
+                user_id: string | null;
+                /** @description windows, macos, linux, android, ios, smart_tv, other, unknown. */
+                platform: string | null;
+                /** @description desktop, mobile, tablet, tv, unknown. */
+                device_type: string | null;
+                /** @description `movie` or `series`. */
+                content: string | null;
+                /** @description A film, episode or series id. */
+                item: string | null;
+                /** @description IANA time zone for days and hours (default UTC). */
+                tz: string | null;
+                /** @description Rows per ranking, 1–50 (default 10). */
+                limit: number | null;
+                /** @description Session list paging (sessions endpoint). */
+                offset: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionRow"][];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             401: {
                 headers: {
@@ -7327,6 +8222,55 @@ export interface operations {
                 content?: never;
             };
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    summary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description `daily` (default) or `weekly`. */
+                period: string | null;
+                /**
+                 * @description End of the period (RFC 3339), default now. A bot run at midnight
+                 *     gets exactly the previous day or week.
+                 */
+                until: string | null;
+                /** @description Entries per ranking, 1–25 (default 5). */
+                limit: number | null;
+                /** @description IANA time zone for the dates in labels (default Europe/Warsaw). */
+                tz: string | null;
+                /** @description `json` (default) or `discord` (a webhook payload with embeds). */
+                format: string | null;
+                /** @description Language of the Discord texts: `pl` (default) or `en`. */
+                lang: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON summary, or with format=discord a Discord webhook payload */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatsSummary"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No admin session and no valid X-Lisek-Stats-Key */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

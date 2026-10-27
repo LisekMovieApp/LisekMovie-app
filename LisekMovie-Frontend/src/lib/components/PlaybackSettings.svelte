@@ -12,7 +12,8 @@
         video_bitrate_kbps: number; audio_bitrate_kbps: number; audio_vbr: boolean; downmix_audio_boost: number;
         max_muxing_queue_size: number; deinterlace_method: string; deinterlace_double_rate: boolean;
         tonemapping: boolean; tonemapping_algorithm: string; tonemapping_desat: number; tonemapping_peak: number; tonemapping_param: number | null;
-        tonemapping_backend: string; hardware_device_index: number; hevc_encoding: boolean; allow_remux: boolean;
+        tonemapping_backend: string; hardware_device_index: number; gpu_load_balancing: boolean; hardware_devices: number[]; hevc_encoding: boolean; allow_remux: boolean;
+        hardware_device_path: string; hardware_encode_codecs: string[]; hardware_pool: unknown[];
         hls_segment_seconds: number; throttling: boolean; throttle_lead_seconds: number; segment_retention_seconds: number;
         max_concurrent_transcodes: number; downmix_algorithm: string; subtitle_fallback_charset: string;
     }
@@ -20,8 +21,10 @@
         ffmpeg_path: string; ffprobe_path: string; version: string; nvenc_available: boolean; software_tonemapping: boolean;
         jellyfin_build: boolean; vulkan_available: boolean; tonemapping_backends: string[];
     }
+    /** What the server accepts for `hardware_device_path`. */
+    const DEVICE_PATTERN = '(auto|[0-9]{1,3}|/dev/dri/renderD[0-9]{1,3})?';
     let config = $state<Config>();
-    let networks = $state(''), proxies = $state('');
+    let networks = $state(''), proxies = $state(''), devices = $state('');
     let remoteLimit = $state<number | undefined>(), toneParam = $state<number | undefined>();
     let caps = $state<Caps>();
     let busy = $state(false), checking = $state(false), failed = $state(false), saved = $state(false), checkFailed = $state(false);
@@ -30,18 +33,24 @@
         token = getSessionCookieClientSide() ?? '';
         try {
             config = await api<Config>(token, '/api/admin/playback/settings');
-            networks = config.local_networks.join('\n'); proxies = config.trusted_proxies.join('\n');
+            networks = config.local_networks.join('\n'); proxies = config.trusted_proxies.join('\n'); devices = (config.hardware_devices ?? []).join(', ');
             remoteLimit = config.streaming_bitrate_limit_mbps ?? undefined; toneParam = config.tonemapping_param ?? undefined;
         } catch { failed = true; }
     });
     function payload() {
         return { ...config, streaming_bitrate_limit_mbps: remoteLimit ?? null, tonemapping_param: toneParam ?? null,
             local_networks: networks.split(/[,\n]/).map(s => s.trim()).filter(Boolean),
-            trusted_proxies: proxies.split(/[,\n]/).map(s => s.trim()).filter(Boolean) };
+            trusted_proxies: proxies.split(/[,\n]/).map(s => s.trim()).filter(Boolean),
+            hardware_devices: devices.split(/[,\s]+/).map(s => s.trim()).filter(s => /^\d+$/.test(s)).map(Number) };
     }
     async function save(event: SubmitEvent) {
         event.preventDefault(); busy = true; saved = false; failed = false;
-        try { await api(token, '/api/admin/playback/settings', 'PUT', payload()); saved = true; }
+        try {
+            // The pool is edited in the panel above: keep what is saved now.
+            const current = await api<Config>(token, '/api/admin/playback/settings');
+            await api(token, '/api/admin/playback/settings', 'PUT', { ...payload(), hardware_pool: current.hardware_pool });
+            saved = true;
+        }
         catch { failed = true; } finally { busy = false; }
     }
     async function check() {
@@ -80,17 +89,29 @@
             <button type="button" class="secondary" disabled={checking} onclick={check}>{checking ? t('playback_settings.checking') : t('playback_settings.check_ffmpeg_and_nvidia_gpu')}</button>
             {#if caps}<div role="status" class="break-all rounded bg-white/5 p-3 text-sm">{caps.version}<br />{t('playback_settings.ffmpeg_label')} {caps.ffmpeg_path}<br />{t('playback_settings.ffprobe_label')} {caps.ffprobe_path}<br />{t('playback_settings.nvenc_label')} {caps.nvenc_available ? t('playback_settings.encoding_test_passed') : t('playback_settings.unavailable')}<br />{t('playback_settings.hdr_sdr_label')} {caps.tonemapping_backends.length ? caps.tonemapping_backends.join(', ') : t('playback_settings.filters_unavailable')}<br />{t('playback_settings.vulkan_label')} {caps.vulkan_available ? t('playback_settings.available') : t('playback_settings.unavailable')}{#if caps.jellyfin_build}<br />{t('playback_settings.jellyfin_build')}{/if}</div>{/if}
             {#if checkFailed}<p role="alert">{t('playback_settings.ffmpeg_check_failed')}</p>{/if}
-            <label>{t('playback_settings.hardware_acceleration')}<select bind:value={config.hardware_acceleration}><option value="none">{t('playback_settings.none_cpu')}</option><option value="nvenc">{t('playback_settings.nvidia_nvenc_nvdec')}</option></select></label>
-            {#if config.hardware_acceleration === 'nvenc'}
+            <label>{t('playback_settings.hardware_acceleration')}<select bind:value={config.hardware_acceleration}><option value="none">{t('playback_settings.none_cpu')}</option><option value="nvenc">{t('playback_settings.nvidia_nvenc_nvdec')}</option><option value="qsv">{t('playback_settings.intel_qsv')}</option><option value="vaapi">{t('playback_settings.vaapi')}</option><option value="pool">{t('playback_settings.pool')}</option></select></label>
+            {#if config.hardware_acceleration === 'pool'}<p>{t('playback_settings.pool_hint')}</p>{/if}
+            {#if config.hardware_acceleration === 'qsv' || config.hardware_acceleration === 'vaapi'}
+                <label>{t('playback_settings.device_path')}<input bind:value={config.hardware_device_path} placeholder={config.hardware_acceleration === 'qsv' ? t('playback_settings.device_path_qsv_placeholder') : '/dev/dri/renderD128'} pattern={DEVICE_PATTERN} /></label>
+                <p>{t('playback_settings.device_path_hint')}</p>
+            {/if}
+            {#if config.hardware_acceleration === 'nvenc' || config.hardware_acceleration === 'qsv' || config.hardware_acceleration === 'vaapi'}
                 <label class="check"><input type="checkbox" bind:checked={config.hardware_encoding} />{t('playback_settings.hardware_encoding')}</label>
+                <p>{t('playback_settings.hardware_encode_for')}</p>
+                <div class="flex flex-wrap gap-4">{#each ['h264','hevc'] as codec (codec)}<label class="check"><input type="checkbox" value={codec} bind:group={config.hardware_encode_codecs} />{codec.toUpperCase()}</label>{/each}</div>
                 <p>{t('playback_settings.hardware_decoding_for')}</p>
                 <div class="flex flex-wrap gap-4">{#each ['h264','hevc','mpeg2video','mpeg4','vc1','vp8','vp9','av1'] as codec (codec)}<label class="check"><input type="checkbox" value={codec} bind:group={config.hardware_decoding_codecs} />{codec.toUpperCase()}</label>{/each}</div>
                 <label class="check"><input type="checkbox" bind:checked={config.decode_hevc_10bit} />{t('playback_settings.hevc_10bit')}</label>
                 <label class="check"><input type="checkbox" bind:checked={config.decode_vp9_10bit} />{t('playback_settings.vp9_10bit')}</label>
+                <label class="check"><input type="checkbox" bind:checked={config.hevc_encoding} />{t('playback_settings.hevc_encoding')}</label>
+            {/if}
+            {#if config.hardware_acceleration === 'nvenc'}
                 <label class="check"><input type="checkbox" bind:checked={config.enhanced_nvdec} />{t('playback_settings.enhanced_nvdec_disable_to_use_cuvid')}</label>
                 <label>{t('playback_settings.gpu_index')}<input type="number" min="0" max="15" required bind:value={config.hardware_device_index} /></label>
                 <p>{t('playback_settings.gpu_index_hint')}</p>
-                <label class="check"><input type="checkbox" bind:checked={config.hevc_encoding} />{t('playback_settings.hevc_encoding')}</label>
+                <label class="check"><input type="checkbox" bind:checked={config.gpu_load_balancing} />{t('playback_settings.gpu_load_balancing')}</label>
+                <p>{t('playback_settings.gpu_load_balancing_hint')}</p>
+                {#if config.gpu_load_balancing}<label>{t('playback_settings.gpu_devices')}<input bind:value={devices} placeholder={t('playback_settings.gpu_devices_placeholder')} inputmode="numeric" pattern="[0-9,\s]*" /></label>{/if}
             {/if}
             <label>{t('playback_settings.maximum_output_height')}<select bind:value={config.max_output_height}>{#each [360,480,720,1080,1440,2160,4320] as height (height)}<option value={height}>{t('playback_settings.height_option', { height })}</option>{/each}</select></label>
             <label>{t('playback_settings.maximum_video_bitrate_kbps')}<input type="number" min="100" max="200000" required bind:value={config.video_bitrate_kbps} /></label>

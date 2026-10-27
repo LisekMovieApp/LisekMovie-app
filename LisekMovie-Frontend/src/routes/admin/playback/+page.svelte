@@ -1,5 +1,6 @@
 <script lang="ts">
     import PlaybackSettings from '$lib/components/PlaybackSettings.svelte';
+    import HardwarePanel from '$lib/components/HardwarePanel.svelte';
     import { onMount } from 'svelte';
     import { t } from '$lib/i18n';
     import { getSessionCookieClientSide } from '$lib/auth';
@@ -8,6 +9,7 @@
     let bitrate = $state<number | undefined>();
     let loaded = $state(false), failed = $state(false), saved = $state(false);
     let token = '';
+    let settingsVersion = $state(0);
     onMount(async () => {
         token = getSessionCookieClientSide() ?? '';
         try {
@@ -22,8 +24,9 @@
         catch { failed = true; }
     }
 </script>
-<main class="mx-auto max-w-2xl px-4 py-8 text-white">
-    <PlaybackSettings />
+<main class="mx-auto max-w-4xl px-4 py-8 text-white">
+    <HardwarePanel onsaved={() => settingsVersion++} />
+    {#key settingsVersion}<PlaybackSettings />{/key}
     <h2 class="mb-3 text-2xl">{t('player.safety')}</h2>
     <p class="mb-6 text-sm text-neutral-400">{t('player.safety_hint')}</p>
     {#if loaded}

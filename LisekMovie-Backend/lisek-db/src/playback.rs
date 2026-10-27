@@ -67,9 +67,23 @@ pub async fn set_flags(pool: &PgPool, user_id: Uuid, item_id: Uuid, watched: Opt
     Ok(())
 }
 
-pub async fn start(pool: &PgPool, user_id: Uuid, item_id: Uuid, auth_hash: &str, ticket_hash: &str) -> Result<Uuid, DbError> {
-    let (id,): (Uuid,) = sqlx::query_as("INSERT INTO playback_sessions (user_id,item_id,auth_token_hash,ticket_hash,client_name,device_name,device_id) SELECT $1,$2,$3,$4,client,device,device_id FROM sessions WHERE token_hash=$3 AND user_id=$1 AND expires_at>now() RETURNING id")
-        .bind(user_id).bind(item_id).bind(auth_hash).bind(ticket_hash).fetch_one(pool).await?;
+/// Where a playback session comes from (Faza 13), classified from the
+/// `User-Agent` by `lisek-telemetry::client`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SessionClient<'a> {
+    pub user_agent: Option<&'a str>,
+    /// `lisek_telemetry::client::Platform::as_str`.
+    pub platform: &'a str,
+    /// `lisek_telemetry::client::DeviceType::as_str`.
+    pub device_type: &'a str,
+    pub browser: Option<&'a str>,
+}
+
+pub async fn start(pool: &PgPool, user_id: Uuid, item_id: Uuid, auth_hash: &str, ticket_hash: &str, client: &SessionClient<'_>) -> Result<Uuid, DbError> {
+    let (id,): (Uuid,) = sqlx::query_as("INSERT INTO playback_sessions (user_id,item_id,auth_token_hash,ticket_hash,client_name,device_name,device_id,user_agent,platform,device_type,browser,duration_seconds) SELECT $1,$2,$3,$4,client,device,device_id,$5,COALESCE(NULLIF($6,''),'unknown'),COALESCE(NULLIF($7,''),'unknown'),$8,COALESCE((SELECT duration_seconds FROM media_items WHERE id=$2),0) FROM sessions WHERE token_hash=$3 AND user_id=$1 AND expires_at>now() RETURNING id")
+        .bind(user_id).bind(item_id).bind(auth_hash).bind(ticket_hash)
+        .bind(client.user_agent).bind(client.platform).bind(client.device_type).bind(client.browser)
+        .fetch_one(pool).await?;
     Ok(id)
 }
 
@@ -119,10 +133,12 @@ pub async fn record_progress(pool: &PgPool, user_id: Uuid, id: Uuid, update: &Pr
             watched_seconds = watched_seconds + CASE WHEN paused THEN 0 ELSE LEAST($3, GREATEST(0.0, EXTRACT(EPOCH FROM now() - last_heartbeat_at))) END, \
             last_heartbeat_at = now(), paused = NOT $4, ended_at = CASE WHEN $5 THEN now() ELSE NULL END, \
             position_seconds = $6, stall_count = stall_count + $7, stall_seconds = stall_seconds + $8, \
-            dropped_frames = COALESCE($9, dropped_frames), bandwidth_kbps = COALESCE($10, bandwidth_kbps) \
+            dropped_frames = COALESCE($9, dropped_frames), bandwidth_kbps = COALESCE($10, bandwidth_kbps), \
+            duration_seconds = CASE WHEN $11 > 0 THEN $11 ELSE duration_seconds END, completed = completed OR $12 \
          WHERE id = $1 AND user_id = $2 AND ended_at IS NULL AND expires_at > now() RETURNING item_id")
         .bind(id).bind(user_id).bind(update.max_counted_gap).bind(update.playing).bind(update.ends_session)
         .bind(update.position).bind(update.stalls).bind(update.stall_seconds).bind(update.dropped_frames).bind(update.bandwidth_kbps)
+        .bind(update.duration).bind(watched_now)
         .fetch_optional(&mut *tx).await?;
     let Some((item_id,)) = row else { return Ok(None); };
     let (watched,): (bool,) = sqlx::query_as("INSERT INTO user_media_state (user_id,item_id,position_seconds,duration_seconds,watched) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(user_id,item_id) DO UPDATE SET position_seconds=$3,duration_seconds=$4,watched=user_media_state.watched OR $5,updated_at=now() RETURNING watched")

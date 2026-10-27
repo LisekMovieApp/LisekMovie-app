@@ -5,8 +5,10 @@
 #
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 #
-# Check in Admin → Playback → capabilities: "NVENC available" and the tone
-# mapping backends.
+# Check in Admin → Hardware & Transcoding → "Run hardware diagnostics": every
+# GPU, its NVENC test and the load balancing devices. With several GPUs,
+# transcodes are spread over all of them (nvidia-smi, from "utility" below,
+# tells LisekMovie which cards exist and how much VRAM is free).
 
 services:
   lisek-server:

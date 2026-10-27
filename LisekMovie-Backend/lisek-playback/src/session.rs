@@ -93,6 +93,11 @@ pub struct SessionSpec {
     /// Subtitle renditions listed in the master playlist.
     pub renditions: Vec<Rendition>,
     pub frame_rate: Option<f64>,
+    /// The device this session transcodes on (`gpu::Target::id`), if the
+    /// plan uses one (Faza 14 load balancing counts sessions by it).
+    pub hw_target: Option<String>,
+    /// Keeps the device counted while the session starts.
+    pub reservation: Option<crate::gpu::Reservation>,
 }
 
 struct RunHandle {
@@ -138,8 +143,22 @@ pub fn encoding_sessions() -> usize {
     registry().values().filter(|s| s.spec.plan.encodes_video()).count()
 }
 
-/// Starts a session and its first run at the resume position.
-pub async fn create(spec: SessionSpec) -> Result<Arc<Session>, SessionError> {
+/// Sessions per transcoding device right now (`gpu::Target::id`).
+pub fn target_sessions() -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for session in registry().values() {
+        if let Some(id) = &session.spec.hw_target {
+            *counts.entry(id.clone()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+/// Starts a session and its first run at the resume position. Its device
+/// was chosen before planning (`gpu::reserve`); the reservation ends once
+/// the session is registered and counts by itself.
+pub async fn create(mut spec: SessionSpec) -> Result<Arc<Session>, SessionError> {
+    let reservation = spec.reservation.take();
     if spec.plan.encodes_video() {
         let encoding = registry().values().filter(|s| s.spec.plan.encodes_video()).count();
         if encoding >= spec.settings.max_concurrent_transcodes as usize {
@@ -174,6 +193,7 @@ pub async fn create(spec: SessionSpec) -> Result<Arc<Session>, SessionError> {
         session.start_run(&mut state, first)?;
     }
     registry().insert(session.spec.id.clone(), session.clone());
+    drop(reservation);
     Ok(session)
 }
 

@@ -142,6 +142,8 @@ async fn start(
             .collect(),
         externals,
         frame_rate: Some(23.976),
+        hw_target: None,
+        reservation: None,
     })
     .await
     .unwrap();

@@ -146,6 +146,8 @@ pub struct VideoEncode {
     pub source_width: u32,
     pub source_height: u32,
     pub source_bit_depth: u32,
+    /// ffprobe's codec name of the source (`h264`, `hevc` ...).
+    pub source_codec: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -214,6 +216,12 @@ pub struct PlaybackPlan {
 impl PlaybackPlan {
     pub fn encodes_video(&self) -> bool {
         matches!(self.video, VideoAction::Encode(_))
+    }
+
+    /// Decodes or encodes video on the GPU (Faza 13: such sessions are
+    /// spread over the GPUs, see `gpu`).
+    pub fn uses_gpu(&self) -> bool {
+        matches!(&self.video, VideoAction::Encode(e) if e.gpu_encode || e.gpu_decode)
     }
 }
 
@@ -286,11 +294,65 @@ pub fn fit_dimensions(source_width: u32, source_height: u32, max_height: u32) ->
 }
 
 fn select_backend(settings: &PlaybackSettings, tools: &FfmpegTools) -> Option<TonemapBackend> {
+    if matches!(hardware_api(settings), Some("qsv" | "vaapi")) {
+        // The GPU tone mappers here are CUDA, Vulkan and OpenCL devices
+        // numbered like NVIDIA cards; on an Intel/AMD session the CPU
+        // tone maps and the hardware encoder takes the result.
+        return tonemap::select("software", tools, false);
+    }
     tonemap::select(
         &settings.tonemapping_backend,
         tools,
         settings.hardware_acceleration == "nvenc",
     )
+}
+
+/// The hardware API a session's settings use: `nvenc`, `qsv` or `vaapi`
+/// (a pool is resolved to one of them per session before deciding).
+pub fn hardware_api(settings: &PlaybackSettings) -> Option<&'static str> {
+    match settings.hardware_acceleration.as_str() {
+        "nvenc" => Some("nvenc"),
+        "qsv" => Some("qsv"),
+        "vaapi" => Some("vaapi"),
+        _ => None,
+    }
+}
+
+/// `h264_nvenc`, `hevc_qsv` ...
+pub fn hardware_encoder(api: &str, codec: OutputCodec) -> String {
+    let codec = match codec {
+        OutputCodec::H264 => "h264",
+        OutputCodec::Hevc => "hevc",
+    };
+    format!("{codec}_{api}")
+}
+
+/// Whether the hardware decoder of `api` takes this source: codec enabled
+/// in the settings, supported layout, and the decoder in this FFmpeg build.
+fn hardware_decodes(api: &str, settings: &PlaybackSettings, tools: &FfmpegTools, codec: &str, depth: u32, format: &str) -> bool {
+    let common = settings.hardware_decoding_codecs.iter().any(|c| c == codec)
+        && depth <= 10
+        && !format.contains("422")
+        && !format.contains("444")
+        && !(depth == 10 && codec == "hevc" && !settings.decode_hevc_10bit)
+        && !(depth == 10 && codec == "vp9" && !settings.decode_vp9_10bit);
+    common
+        && match api {
+            "nvenc" => tools.hwaccels.contains("cuda"),
+            // Quick Sync decodes with its own decoders (`h264_qsv`), which
+            // know fewer codecs than the hwaccel list suggests.
+            "qsv" => tools.hwaccels.contains("qsv") && tools.has_decoder(&format!("{}_qsv", qsv_decoder_codec(codec))),
+            "vaapi" => tools.hwaccels.contains("vaapi") && !matches!(codec, "mpeg4" | "vp8"),
+            _ => false,
+        }
+}
+
+/// FFmpeg's Quick Sync decoder name stem for an ffprobe codec name.
+pub fn qsv_decoder_codec(codec: &str) -> &str {
+    match codec {
+        "mpeg2video" => "mpeg2",
+        other => other,
+    }
 }
 
 /// Decides how `input.probe` plays on `input.client`.
@@ -557,32 +619,28 @@ fn video_encode(
     burn_in: Option<BurnIn>,
 ) -> Result<VideoEncode, &'static str> {
     let DecisionInput { client, settings, tools, request, .. } = *input;
-    let nvenc = settings.hardware_acceleration == "nvenc" && settings.hardware_encoding;
-    let codec = if settings.hevc_encoding
-        && nvenc
-        && client.video("hevc")
-        && tools.has_encoder("hevc_nvenc")
-    {
+    let api = hardware_api(settings);
+    let encodes = |codec: OutputCodec| {
+        let name = match codec {
+            OutputCodec::H264 => "h264",
+            OutputCodec::Hevc => "hevc",
+        };
+        api.is_some_and(|api| {
+            settings.hardware_encoding
+                && settings.hardware_encode_codecs.iter().any(|c| c == name)
+                && tools.has_encoder(&hardware_encoder(api, codec))
+        })
+    };
+    let codec = if settings.hevc_encoding && client.video("hevc") && encodes(OutputCodec::Hevc) {
         OutputCodec::Hevc
     } else {
         OutputCodec::H264
     };
-    let gpu_encode = nvenc
-        && tools.has_encoder(match codec {
-            OutputCodec::H264 => "h264_nvenc",
-            OutputCodec::Hevc => "hevc_nvenc",
-        });
+    let gpu_encode = encodes(codec);
     let source_codec = video.codec.clone().unwrap_or_default();
     let depth = video.effective_bit_depth();
     let format = video.pixel_format.as_deref().unwrap_or_default();
-    let gpu_decode = settings.hardware_acceleration == "nvenc"
-        && tools.hwaccels.contains("cuda")
-        && settings.hardware_decoding_codecs.contains(&source_codec)
-        && depth <= 10
-        && !format.contains("422")
-        && !format.contains("444")
-        && !(depth == 10 && source_codec == "hevc" && !settings.decode_hevc_10bit)
-        && !(depth == 10 && source_codec == "vp9" && !settings.decode_vp9_10bit);
+    let gpu_decode = api.is_some_and(|api| hardware_decodes(api, settings, tools, &source_codec, depth, format));
 
     let mut max_height = settings.max_output_height;
     if let Some(requested) = request.max_height {
@@ -649,6 +707,7 @@ fn video_encode(
         source_width,
         source_height,
         source_bit_depth: depth,
+        source_codec,
     })
 }
 

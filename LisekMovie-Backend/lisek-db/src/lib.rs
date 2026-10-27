@@ -32,6 +32,7 @@ pub mod playback;
 pub mod scan_jobs;
 pub mod search;
 pub mod seasons;
+pub mod stats;
 pub mod streams;
 pub mod trickplay;
 pub mod users;

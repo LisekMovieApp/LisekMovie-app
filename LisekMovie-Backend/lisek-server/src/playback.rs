@@ -395,6 +395,7 @@ pub async fn start(auth: AuthUser, State(state): State<SharedState>, Path(item_i
     } else {
         serde_json::from_slice(&body).map_err(|_| bad_request("invalid_playback_request"))?
     };
+    let client_info = lisek_telemetry::client::classify(headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()));
     let subtitle = match request.subtitle.as_deref() {
         None | Some("") => None,
         Some(id) => Some(TrackRef::parse(id).ok_or(bad_request("subtitle_track_not_found"))?),
@@ -405,7 +406,14 @@ pub async fn start(auth: AuthUser, State(state): State<SharedState>, Path(item_i
     }
     let source = db::source(&pool, item_id).await?.ok_or(PlaybackError(StatusCode::NOT_FOUND, "media_not_found"))?;
     let path = checked_file(&source).await?;
-    let settings = db::settings(&pool).await?;
+    let base_settings = db::settings(&pool).await?;
+    // Faza 14: the device (NVIDIA / Intel / AMD, from the pool) is chosen
+    // before planning, so the plan uses that device's API and codecs. A
+    // full pool plans for the CPU.
+    let (settings, reservation) = match lisek_playback::gpu::reserve(&base_settings).await {
+        Some((target, reservation)) => (lisek_playback::gpu::apply(&base_settings, &target), Some((target.id, reservation))),
+        None => (lisek_playback::gpu::without_hardware(&base_settings), None),
+    };
     let address = lisek_core::playback_settings::client_address(peer.ip(), headers.get("x-forwarded-for").and_then(|h| h.to_str().ok()), &settings.trusted_proxies);
     let remote_limit = settings.remote_limit_kbps(address);
     let probe = match media_probe(&pool, item_id, &path, &settings).await {
@@ -416,7 +424,7 @@ pub async fn start(auth: AuthUser, State(state): State<SharedState>, Path(item_i
             if request.force_transcode || options.transcode || remote_limit.is_some() {
                 return Err(PlaybackError(StatusCode::SERVICE_UNAVAILABLE, "transcode_unavailable"));
             }
-            return direct_play_without_probe(&pool, &auth, item_id, source.title, &settings).await;
+            return direct_play_without_probe(&pool, &auth, item_id, source.title, &settings, &client_info).await;
         }
     };
     let externals = {
@@ -463,7 +471,7 @@ pub async fn start(auth: AuthUser, State(state): State<SharedState>, Path(item_i
 
     let saved = db::media_state(&pool, auth.user.id, item_id).await?;
     let ticket = lisek_auth::generate_session_token();
-    let session_id = db::start(&pool, auth.user.id, item_id, &auth.token_hash, &lisek_auth::hash_session_token(&ticket)).await?;
+    let session_id = db::start(&pool, auth.user.id, item_id, &auth.token_hash, &lisek_auth::hash_session_token(&ticket), &session_client(&client_info)).await?;
     let duration = probe.duration_seconds;
     let position = match request.start_position_seconds {
         Some(p) if p.is_finite() && p >= 0.0 => p.min(duration.map_or(p, |d| (d - 1.0).max(0.0))),
@@ -542,7 +550,16 @@ pub async fn start(auth: AuthUser, State(state): State<SharedState>, Path(item_i
         externals,
         renditions,
         frame_rate,
+        hw_target: None,
+        reservation: None,
     };
+    let mut spec = spec;
+    if spec.plan.uses_gpu()
+        && let Some((id, reservation)) = reservation
+    {
+        spec.hw_target = Some(id);
+        spec.reservation = Some(reservation);
+    }
     if let Err(err) = session::create(spec).await {
         db::end_session(&pool, session_id).await?;
         tracing::warn!(code = err.code(), "cannot start HLS session");
@@ -576,6 +593,16 @@ pub async fn start(auth: AuthUser, State(state): State<SharedState>, Path(item_i
     Ok(Json(response))
 }
 
+/// The session row's view of the client (Faza 13 statistics).
+fn session_client(info: &lisek_telemetry::client::ClientInfo) -> db::SessionClient<'_> {
+    db::SessionClient {
+        user_agent: info.user_agent.as_deref(),
+        platform: info.platform.as_str(),
+        device_type: info.device_type.as_str(),
+        browser: info.browser,
+    }
+}
+
 /// Direct play of a file nothing is known about (ffprobe missing or the
 /// file unreadable to it): the client gets the file as it is.
 async fn direct_play_without_probe(
@@ -584,10 +611,11 @@ async fn direct_play_without_probe(
     item_id: Uuid,
     title: String,
     settings: &PlaybackSettings,
+    client: &lisek_telemetry::client::ClientInfo,
 ) -> Result<Json<StartResponse>, PlaybackError> {
     let saved = db::media_state(pool, auth.user.id, item_id).await?;
     let ticket = lisek_auth::generate_session_token();
-    let session_id = db::start(pool, auth.user.id, item_id, &auth.token_hash, &lisek_auth::hash_session_token(&ticket)).await?;
+    let session_id = db::start(pool, auth.user.id, item_id, &auth.token_hash, &lisek_auth::hash_session_token(&ticket), &session_client(client)).await?;
     let position = if saved.watched { 0.0 } else { settings.resume_state(saved.position_seconds, saved.duration_seconds).0 };
     Ok(Json(StartResponse {
         session_id,

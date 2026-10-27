@@ -20,6 +20,7 @@ mod env_file;
 mod media;
 mod playback;
 mod games;
+mod hardware;
 mod notifications;
 mod people;
 mod browser_notifications;
@@ -33,6 +34,7 @@ mod search;
 mod series;
 mod setup;
 mod state;
+mod stats;
 mod telemetry;
 mod trickplay;
 

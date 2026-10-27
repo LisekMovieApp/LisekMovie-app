@@ -1,0 +1,18 @@
+# Intel (Quick Sync, VA-API) or AMD (VA-API) GPU for lisek-server on a
+# Linux host. The jellyfin-ffmpeg in the image carries Intel's media
+# driver and oneVPL runtime, so only the device has to be passed in.
+#
+#   RENDER_GID=$(getent group render | cut -d: -f3) \
+#   docker compose -f docker-compose.yml -f docker-compose.intel.yml up -d --build
+#
+# Combine with docker-compose.gpu.yml for an NVIDIA card next to the Intel
+# GPU. Then, in Admin → Hardware & Transcoding: run the diagnostics, switch
+# the devices on in the transcoding pool and choose their codecs.
+
+services:
+  lisek-server:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      # The host's `render` group (owner of /dev/dri/renderD*), e.g. 105 or 993.
+      - "${RENDER_GID:-render}"

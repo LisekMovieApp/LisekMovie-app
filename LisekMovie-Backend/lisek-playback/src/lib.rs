@@ -9,6 +9,8 @@ pub mod decision;
 pub mod downmix;
 pub mod filters;
 pub mod fmp4;
+pub mod gpu;
+pub mod hardware;
 pub mod hls;
 pub mod keyframes;
 pub mod profile;

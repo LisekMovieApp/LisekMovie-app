@@ -12,4 +12,5 @@ tokio = { version = "1.53.1", features = ["full"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tracing = "0.1.44"
+chrono = { version = "0.4.45", features = ["serde"] }
 utoipa = { version = "5.5", features = ["uuid", "chrono"] }

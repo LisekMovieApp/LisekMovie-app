@@ -27,8 +27,8 @@ use crate::auth::{AdminUser, SessionUser};
 use crate::openapi::ApiDoc;
 use crate::state::SharedState;
 use crate::{
-    admin, auth, browser_notifications, collections, details, download, games, identify, media,
-    notifications, people, playback, scan_jobs, search, series, setup, telemetry, trickplay, users,
+    admin, auth, browser_notifications, collections, details, download, games, hardware, identify, media,
+    notifications, people, playback, scan_jobs, search, series, setup, stats, telemetry, trickplay, users,
 };
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -65,6 +65,9 @@ fn public() -> OpenApiRouter<SharedState> {
         // Authenticates with its first WebSocket frame: browsers cannot set
         // headers on a WebSocket handshake.
         .routes(routes!(browser_notifications::socket))
+        // An admin session or the bots' read-only `X-Lisek-Stats-Key`
+        // (checked by the handler's `StatsReader`).
+        .routes(routes!(stats::summary))
 }
 
 fn user() -> OpenApiRouter<SharedState> {
@@ -149,6 +152,12 @@ fn admin() -> OpenApiRouter<SharedState> {
         .routes(routes!(games::configure))
         .routes(routes!(playback::stats))
         .routes(routes!(telemetry::recent_sessions))
+        .routes(routes!(stats::dashboard))
+        .routes(routes!(stats::sessions))
+        .routes(routes!(stats::key_status, stats::create_key, stats::delete_key))
+        .routes(routes!(hardware::diagnostics))
+        .routes(routes!(hardware::status))
+        .routes(routes!(hardware::set_pool))
         .routes(routes!(trickplay::status))
         .routes(routes!(trickplay::regenerate))
         .routes(routes!(playback::settings, playback::set_settings))
