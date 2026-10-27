@@ -2,6 +2,7 @@
 	import './layout.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import Navbar from '$lib/components/Navbar.svelte';
+	import Toaster from '$lib/components/Toaster.svelte';
 	import { page } from '$app/state';
 	import { setLocale } from '$lib/i18n';
 	import { initSpatialNavigation } from '$lib/spatial/spatial';
@@ -61,3 +62,4 @@
 	<Navbar username={data.user.username} isAdmin={data.user.is_admin} />
 {/if}
 {@render children()}
+<Toaster />

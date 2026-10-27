@@ -906,8 +906,8 @@ async fn read_media_folder_image(
     filename: &str,
 ) -> Option<Vec<u8>> {
     let pool = state.pool()?;
-    let file_path = match lisek_db::get_media_item_file_path(&pool, item_id).await {
-        Ok(Some(file_path)) => file_path,
+    let (file_path, reset_at) = match lisek_db::get_media_item_artwork_source(&pool, item_id).await {
+        Ok(Some(source)) => source,
         Ok(None) => {
             tracing::debug!(%item_id, "no media_items row (or no file_path) for this id");
             return None;
@@ -932,29 +932,49 @@ async fn read_media_folder_image(
     folders.push(parent.to_path_buf());
     for folder in folders {
         let media_path = folder.join(filename);
-        match tokio::fs::read(&media_path).await {
-            Ok(bytes) => return Some(bytes),
-            Err(err) => tracing::debug!(
-                %item_id,
-                media_path = %media_path.display(),
-                %err,
-                "no media-folder image at this path"
-            ),
+        if let Some(bytes) = read_fresh_media_file(&media_path, reset_at).await {
+            return Some(bytes);
         }
     }
     None
 }
 
+/// A media-folder image, unless it is older than the item's last Fix match
+/// (`reset_at`, Unix milliseconds): such a file shows the previous, wrong match
+/// (or Jellyfin's artwork) and the server could not replace it — a
+/// read-only folder, or a library that keeps artwork in the cache. Then the
+/// cache copy of the new match is served instead.
+pub(crate) async fn read_fresh_media_file(path: &FsPath, reset_at: Option<i64>) -> Option<Vec<u8>> {
+    if let Some(reset_at) = reset_at {
+        let modified = tokio::fs::metadata(path).await.ok()?.modified().ok()?;
+        let modified = modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+        if modified < reset_at {
+            tracing::debug!(path = %path.display(), "media-folder image predates the last fix match; ignored");
+            return None;
+        }
+    }
+    match tokio::fs::read(path).await {
+        Ok(bytes) => Some(bytes),
+        Err(err) => {
+            tracing::debug!(media_path = %path.display(), %err, "no media-folder image at this path");
+            None
+        }
+    }
+}
+
 pub(crate) fn image_response(bytes: Vec<u8>, content_type: &'static str) -> Response {
+    let etag = crate::http_cache::etag(&bytes);
     (
         [
-            (header::CONTENT_TYPE, content_type),
-            // Not content-addressed the way the old cache-only path was
-            // (a media-folder file can be replaced by the admin at any
-            // time outside a scan), but still only ever changes on a
-            // fresh scan+enrichment cycle in the normal case — an hour of
-            // browser caching remains a reasonable trade.
-            (header::CACHE_CONTROL, "private, max-age=3600"),
+            (header::CONTENT_TYPE, content_type.to_string()),
+            // The same URL serves new artwork after a Fix match or a
+            // refresh, so browsers revalidate every time (a 304 without the
+            // body when nothing changed, see `http_cache`) instead of
+            // keeping the old picture for an hour.
+            (header::CACHE_CONTROL, crate::http_cache::REVALIDATE.to_string()),
+            (header::ETAG, etag),
         ],
         bytes,
     )

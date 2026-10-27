@@ -126,6 +126,9 @@ pub async fn generate(
         (child.wait().await, text)
     };
     let outcome = tokio::time::timeout(TIME_LIMIT, run).await;
+    if let Ok((_, errors)) = &outcome {
+        crate::tool_log::stderr(crate::tool_log::Tool::Ffmpeg, &input.display().to_string(), errors.as_bytes());
+    }
     let result = match outcome {
         Err(_) => Err(TrickplayError::Timeout),
         Ok((Err(e), _)) => Err(TrickplayError::Failed(e.to_string())),

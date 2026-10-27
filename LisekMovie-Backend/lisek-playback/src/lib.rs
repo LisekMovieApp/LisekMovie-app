@@ -17,6 +17,7 @@ pub mod profile;
 pub mod session;
 pub mod subtitles;
 pub mod tonemap;
+pub mod tool_log;
 pub mod transcode;
 pub mod trickplay;
 

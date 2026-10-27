@@ -772,7 +772,8 @@
 			"provider_item_not_found": "Dostawca nie ma już tej pozycji.",
 			"provider_failed": "Dostawca nie odpowiedział. Spróbuj za chwilę.",
 			"invalid_query": "Wpisz tytuł lub ID do wyszukania.",
-			"generic": "Nie udało się naprawić dopasowania."
+			"generic": "Nie udało się naprawić dopasowania.",
+			"identify_save_failed": "Nie udało się zapisać dopasowania. Nic nie zostało zmienione — szczegóły w Panelu → Logi."
 		},
 		"query_placeholder": "np. Matrix, tt0133093, tvdb:81189",
 		"id_help": "Możesz też wpisać ID: IMDb (tt0425622), TheTVDB lub TMDB (liczba z wybranym dostawcą albo tvdb:60620 / tmdb:603), AniList i aniDB (anilist:21, anidb:69) — albo wkleić link do strony tytułu.",
@@ -783,7 +784,18 @@
 			"link": "Link — zawarte w nim ID jest pobierane bezpośrednio.",
 			"number": "Liczba — sprawdzana jako ID u wybranego dostawcy i szukana jako tytuł."
 		},
-		"id_match": "Dopasowanie po ID"
+		"id_match": "Dopasowanie po ID",
+		"saved_with_warnings": "Zapisano, ale nie wszystko się udało: {problems}. Szczegóły w Panelu → Logi.",
+		"warnings": {
+			"poster_download_failed": "nie pobrano plakatu",
+			"poster_save_failed": "nie zapisano plakatu",
+			"backdrop_download_failed": "nie pobrano tła",
+			"backdrop_save_failed": "nie zapisano tła",
+			"logo_download_failed": "nie pobrano logo",
+			"logo_save_failed": "nie zapisano logo",
+			"artwork_not_saved": "nie zapisano żadnej grafiki",
+			"metadata_save_failed": "nie zapisano szczegółów"
+		}
 	},
 	"download": {
 		"button": "Pobierz",
@@ -1081,5 +1093,32 @@
 		"bot_copied": "Skopiowano",
 		"bot_example": "Przykład (np. cron o północy, wynik wysłany na webhook Discord):",
 		"bot_failed": "Nie udało się zmienić klucza."
+	},
+	"toast": {
+		"close": "Zamknij"
+	},
+	"logs": {
+		"tab": "Logi",
+		"title": "Logi serwera",
+		"subtitle": "Jeden plik dziennie (UTC), przechowywany {days} dni: serwer, baza danych, FFmpeg/FFprobe i błędy z przeglądarek.",
+		"day": "Dzień",
+		"today": "dziś",
+		"search": "Szukaj",
+		"search_placeholder": "Tekst, ID pozycji, błąd…",
+		"refresh": "Odśwież",
+		"loading": "Wczytuję…",
+		"download": "Pobierz plik",
+		"sources": "Źródła",
+		"levels": "Poziomy",
+		"all": "Wszystkie",
+		"live": "Na żywo",
+		"console": "Wpisy logu",
+		"no_files": "Brak plików logów.",
+		"no_entries": "Żaden wpis nie pasuje do filtrów.",
+		"cut": "Pokazuję najnowsze {shown} z {total} pasujących wpisów.",
+		"count": "{shown} wpisów · plik {size}",
+		"load_failed": "Nie udało się wczytać logów. Spróbuj ponownie.",
+		"download_failed": "Nie udało się pobrać pliku.",
+		"target": "moduł"
 	}
 }

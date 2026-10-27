@@ -26,6 +26,22 @@ pub async fn get_media_item_file_path(
     Ok(row.map(|(file_path,)| file_path))
 }
 
+/// Where an item's artwork may come from: its file path (the media folder
+/// is next to it) and, after a Fix match, the moment its old artwork was
+/// dropped (`metadata.artwork_reset_at`, Unix milliseconds). Media-folder
+/// images older than that belong to the previous match and are ignored.
+pub async fn get_media_item_artwork_source(
+    pool: &PgPool,
+    item_id: Uuid,
+) -> Result<Option<(String, Option<i64>)>, DbError> {
+    Ok(sqlx::query_as(
+        "SELECT file_path, (metadata->>'artwork_reset_at')::bigint FROM media_items WHERE id = $1",
+    )
+    .bind(item_id)
+    .fetch_optional(pool)
+    .await?)
+}
+
 /// One item's full editable shape — what the metadata editor loads and
 /// what it hands back for [`update_media_item`]. `original_title` reads
 /// straight from `metadata->>'original_title'` (see the Faza
@@ -340,7 +356,10 @@ pub async fn apply_identification(
             metadata = CASE
                 WHEN item_type = 'movie' AND $3::int IS NOT NULL
                     THEN (metadata - 'year') || jsonb_build_object('year', $3::int)
-                ELSE metadata END,
+                ELSE metadata END
+                -- The previous match's artwork in the media folder is stale
+                -- from now on, even where the server cannot delete it.
+                || jsonb_build_object('artwork_reset_at', floor(extract(epoch FROM now()) * 1000)::bigint),
             metadata_locked = true,
             forced_provider = $4,
             updated_at = now()

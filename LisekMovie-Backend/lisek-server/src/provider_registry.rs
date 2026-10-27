@@ -19,19 +19,46 @@ use lisek_plugin_api::MetadataProvider;
 /// list, the same way a real "no match" from a known provider already
 /// works.
 pub fn build_provider(provider_key: &str, api_key: &str) -> Option<Box<dyn MetadataProvider>> {
-    match provider_key {
-        "tmdb" => Some(Box::new(lisek_plugin_tmdb::TmdbProvider::new(api_key))),
-        "tvdb" => Some(Box::new(lisek_plugin_thetvdb::TvdbProvider::new(api_key))),
-        "imdb" => Some(Box::new(lisek_plugin_imdb::ImdbProvider::new())),
-        "omdb" => Some(Box::new(lisek_plugin_omdb::OmdbProvider::new(api_key))),
-        "anilist" => Some(Box::new(lisek_plugin_anilist::AnilistProvider::new())),
-        "anidb" => Some(Box::new(lisek_plugin_anidb::AnidbProvider::new(api_key))),
-        "anisearch" => Some(Box::new(lisek_plugin_anisearch::AnisearchProvider::new(api_key))),
-        "imvdb" => Some(Box::new(lisek_plugin_imvdb::ImvdbProvider::new(api_key))),
-        "vgmdb" => Some(Box::new(lisek_plugin_vgmdb::VgmdbProvider::new())),
-        "audiodb" => Some(Box::new(lisek_plugin_audiodb::AudiodbProvider::new(api_key))),
-        _ => None,
-    }
+    use lisek_plugin_anidb::{AnidbProvider, MIN_INTERVAL};
+    use lisek_plugin_anilist::AnilistProvider;
+    use lisek_plugin_imdb::ImdbProvider;
+    use lisek_plugin_imvdb::ImvdbProvider;
+    use lisek_plugin_omdb::OmdbProvider;
+    use lisek_plugin_thetvdb::TvdbProvider;
+    use lisek_plugin_tmdb::TmdbProvider;
+
+    let url = base_url_override(provider_key);
+    let provider: Box<dyn MetadataProvider> = match (provider_key, url) {
+        ("tmdb", None) => Box::new(TmdbProvider::new(api_key)),
+        ("tmdb", Some(url)) => Box::new(TmdbProvider::with_base_url(api_key, url)),
+        ("tvdb", None) => Box::new(TvdbProvider::new(api_key)),
+        ("tvdb", Some(url)) => Box::new(TvdbProvider::with_base_url(api_key, url)),
+        ("imdb", None) => Box::new(ImdbProvider::new()),
+        ("imdb", Some(url)) => Box::new(ImdbProvider::with_base_url(url)),
+        ("omdb", None) => Box::new(OmdbProvider::new(api_key)),
+        ("omdb", Some(url)) => Box::new(OmdbProvider::with_base_url(api_key, url)),
+        ("anilist", None) => Box::new(AnilistProvider::new()),
+        ("anilist", Some(url)) => Box::new(AnilistProvider::with_base_url(url)),
+        ("anidb", None) => Box::new(AnidbProvider::new(api_key)),
+        ("anidb", Some(url)) => Box::new(AnidbProvider::with_base_url(api_key, url, MIN_INTERVAL)),
+        ("anisearch", _) => Box::new(lisek_plugin_anisearch::AnisearchProvider::new(api_key)),
+        ("imvdb", None) => Box::new(ImvdbProvider::new(api_key)),
+        ("imvdb", Some(url)) => Box::new(ImvdbProvider::with_base_url(api_key, url)),
+        ("vgmdb", _) => Box::new(lisek_plugin_vgmdb::VgmdbProvider::new()),
+        ("audiodb", _) => Box::new(lisek_plugin_audiodb::AudiodbProvider::new(api_key)),
+        _ => return None,
+    };
+    Some(provider)
+}
+
+/// `LISEK_PROVIDER_URL_<KEY>` (e.g. `LISEK_PROVIDER_URL_IMDB`): another
+/// base URL for one provider's API — a self-hosted mirror or proxy, or the
+/// mock server of the integration suite.
+fn base_url_override(provider_key: &str) -> Option<String> {
+    std::env::var(format!("LISEK_PROVIDER_URL_{}", provider_key.to_ascii_uppercase()))
+        .ok()
+        .map(|url| url.trim().trim_end_matches('/').to_string())
+        .filter(|url| url.starts_with("http://") || url.starts_with("https://"))
 }
 
 /// Enabled providers that have a key, in the admin's priority order, with

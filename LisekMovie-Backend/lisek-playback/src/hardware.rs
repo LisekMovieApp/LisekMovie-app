@@ -188,6 +188,8 @@ async fn run_ffmpeg(settings: &PlaybackSettings, args: &[&str], limit: Duration)
         .await
         .ok()?
         .ok()?;
+    // Diagnostics expect failures (a missing GPU): DEBUG, not WARN.
+    crate::tool_log::debug(crate::tool_log::Tool::Ffmpeg, "hardware diagnostics", &output.stderr);
     Some(Output {
         success: output.status.success(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),

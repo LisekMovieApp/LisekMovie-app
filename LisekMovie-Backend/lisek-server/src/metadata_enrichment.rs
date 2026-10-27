@@ -574,11 +574,16 @@ pub async fn apply_match(
         Some(_) => lisek_db::seasons::episode_still_url(pool, item_id).await.ok().flatten(),
         None => None,
     };
-    if let Err(err) =
-        lisek_db::attach_provider_metadata(pool, item_id, provider_key, &fields).await
-    {
-        tracing::warn!(%item_id, provider_key, %err, "failed to save provider metadata");
-    }
+    let mut problems = Vec::new();
+    let metadata_saved =
+        match lisek_db::attach_provider_metadata(pool, item_id, provider_key, &fields).await {
+            Ok(()) => true,
+            Err(err) => {
+                tracing::error!(%item_id, provider_key, %err, "failed to save provider metadata");
+                problems.push("metadata_save_failed".to_string());
+                false
+            }
+        };
     // `episode_known` implies an episode (a placement).
     if episode_known {
         sync_episode_still(http, config_dir, item_id, previous_still, still_url.as_deref()).await;
@@ -614,6 +619,7 @@ pub async fn apply_match(
             Ok(bytes) => bytes,
             Err(err) => {
                 tracing::warn!(%item_id, %err, image = filename, "failed to download image");
+                problems.push(format!("{}_download_failed", image_kind(filename)));
                 continue;
             }
         };
@@ -625,7 +631,10 @@ pub async fn apply_match(
                     cache.written.insert(dest);
                 }
             }
-            Err(err) => tracing::warn!(%item_id, %err, image = filename, "failed to save image"),
+            Err(err) => {
+                tracing::warn!(%item_id, %err, image = filename, "failed to save image");
+                problems.push(format!("{}_save_failed", image_kind(filename)));
+            }
         }
     }
 
@@ -655,7 +664,14 @@ pub async fn apply_match(
     EnrichOutcome {
         matched: true,
         image_saved,
+        metadata_saved,
+        problems,
     }
+}
+
+/// `poster.jpg` -> `poster`.
+fn image_kind(filename: &str) -> &str {
+    filename.split('.').next().unwrap_or(filename)
 }
 
 /// Where a collection's own artwork is kept:
@@ -957,7 +973,7 @@ pub async fn prune_collections(pool: &PgPool, config_dir: &Path) {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EnrichOutcome {
     /// A provider (any of them, in priority order) returned a match for
     /// this item.
@@ -968,6 +984,12 @@ pub struct EnrichOutcome {
     /// or every image download/write failing; see the per-item
     /// `tracing::warn!` lines this function emits for which one happened.
     pub image_saved: bool,
+    /// `provider_data` was written (Fix match reports a failure here
+    /// instead of answering "done").
+    pub metadata_saved: bool,
+    /// What went wrong on the way, as stable codes for the admin
+    /// (`poster_download_failed`, `backdrop_save_failed`, ...).
+    pub problems: Vec<String>,
 }
 
 #[cfg(test)]

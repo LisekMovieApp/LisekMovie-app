@@ -212,6 +212,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The days with a log file (the last 30). */
+        get: operations["list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/logs/{date}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One day's entries, filtered. */
+        get: operations["day"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/logs/{date}/raw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The raw file, for download. */
+        get: operations["raw"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/media/fallback": {
         parameters: {
             query?: never;
@@ -1059,6 +1110,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/logs/client": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A browser reports an error ("[FRONTEND]" in the server log). Signed-in
+         *     or not (the login page can fail too); limited per address.
+         */
+        post: operations["client"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/access": {
         parameters: {
             query?: never;
@@ -1898,6 +1969,18 @@ export interface components {
         };
         /** @enum {string} */
         ClientFamily: "chrome" | "edge" | "firefox" | "safari" | "tv" | "unknown";
+        ClientLogRequest: {
+            /** @description `error`, `unhandledrejection`, `console`, `handle_error`... */
+            kind?: string | null;
+            /** @description `error` (default), `warn` or `info`. */
+            level?: string | null;
+            message: string;
+            /** @description Script and line (`app.js:12:5`). */
+            source?: string | null;
+            stack?: string | null;
+            /** @description The page the error happened on. */
+            url?: string | null;
+        };
         /** @description One collection with its films in release order. */
         CollectionResponse: {
             backdrop_url: string;
@@ -2351,6 +2434,11 @@ export interface components {
             /** @description Films or episodes updated (a series counts every episode). */
             items_updated: number;
             title: string;
+            /**
+             * @description Parts that did not work out (`poster_download_failed`,
+             *     `backdrop_save_failed`...): the match is saved, these are not.
+             */
+            warnings: string[];
             /** Format: int32 */
             year?: number | null;
         };
@@ -2453,6 +2541,42 @@ export interface components {
             ready: number;
             /** Format: int64 */
             total: number;
+        };
+        LogDayResponse: {
+            date: string;
+            /** @description Oldest first (a console scrolls down to the newest). */
+            entries: components["schemas"]["LogEntry"][];
+            /** @description Only the end of a very large file was read. */
+            partial: boolean;
+            /** Format: int64 */
+            size_bytes: number;
+            /** @description Matching entries in the part read; more than `entries` when cut. */
+            total: number;
+        };
+        /** @description One log line, parsed. */
+        LogEntry: {
+            /** @description The event's other fields (`item_id`, `err`, `url`...). */
+            fields: Record<string, never>;
+            /** @description `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`. */
+            level: string;
+            message: string;
+            /** @description `backend`, `frontend`, `ffmpeg`, `ffprobe`. */
+            source: string;
+            target: string;
+            /** @description RFC 3339, UTC. */
+            timestamp: string;
+        };
+        LogFile: {
+            /** @description `YYYY-MM-DD` (UTC). */
+            date: string;
+            /** Format: int64 */
+            size_bytes: number;
+        };
+        LogFilesResponse: {
+            /** @description Newest first. */
+            files: components["schemas"]["LogFile"][];
+            /** Format: int64 */
+            retention_days: number;
         };
         LoginRequest: {
             /**
@@ -4329,6 +4453,132 @@ export interface operations {
                 content?: never;
             };
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogFilesResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    day: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                date: string;
+                /** @description Comma-separated: `backend`, `frontend`, `ffmpeg`, `ffprobe`. All when absent. */
+                source: string | null;
+                /** @description Comma-separated: `error`, `warn`, `info`, `debug`, `trace`. All when absent. */
+                level: string | null;
+                /** @description The newest this many matching entries (default 2000, at most 20000). */
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogDayResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    raw: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                date: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON lines */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6616,6 +6866,39 @@ export interface operations {
                 content?: never;
             };
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    client: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientLogRequest"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

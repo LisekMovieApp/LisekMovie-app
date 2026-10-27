@@ -265,6 +265,7 @@ async fn run(
     let (status, errors) = tokio::time::timeout(time_limit(plan), run)
         .await
         .map_err(|_| TrickplayError::Timeout)?;
+    crate::tool_log::stderr(crate::tool_log::Tool::Ffmpeg, &input.display().to_string(), errors.as_bytes());
     let status = status.map_err(|e| TrickplayError::Failed(e.to_string()))?;
     if !status.success() {
         let tail: Vec<&str> = errors.lines().rev().take(4).collect();

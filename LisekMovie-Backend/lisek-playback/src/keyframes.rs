@@ -250,6 +250,7 @@ pub async fn scan_with_ffprobe(
         .await
         .map_err(|_| "keyframe_scan_timed_out")?
         .map_err(|_| "ffprobe_unavailable")?;
+    crate::tool_log::stderr(crate::tool_log::Tool::Ffprobe, &path.display().to_string(), &output.stderr);
     if !output.status.success() {
         return Err("keyframe_scan_failed".into());
     }

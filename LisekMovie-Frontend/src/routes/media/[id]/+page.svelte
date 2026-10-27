@@ -20,6 +20,7 @@
 	import MediaActions from '$lib/components/MediaActions.svelte';
 	import MediaItemEditorModal from '$lib/components/MediaItemEditorModal.svelte';
 	import FixMatchModal from '$lib/components/FixMatchModal.svelte';
+	import { showToast } from '$lib/toast/toast.svelte';
 	import CastRow from '$lib/components/CastRow.svelte';
 	import { fetchItemPeople, type Credit } from '$lib/media/people';
 	import Icon from '$lib/components/Icon.svelte';
@@ -105,6 +106,15 @@
 		fixing = false;
 		fixedTitle = result.title;
 		imageVersion = Date.now();
+		showToast('success', t('fix_match.done', { title: result.title }));
+		if (result.warnings.length > 0) {
+			showToast(
+				'warning',
+				t('fix_match.saved_with_warnings', {
+					problems: result.warnings.map((code) => t(`fix_match.warnings.${code}`)).join(', ')
+				})
+			);
+		}
 		triggerLoad(itemId);
 	}
 

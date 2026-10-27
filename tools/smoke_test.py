@@ -177,6 +177,12 @@ def main():
             threading.Thread(target=target.serve_forever,daemon=True).start()
             cleanup.callback(target.server_close)
             cleanup.callback(target.shutdown)
+            # Faza 17: the IMDb provider talks to a local mock (Fix Match end to end).
+            from fixmatch_smoke import start_mock_imdb
+            mock_imdb,mock_imdb_url=start_mock_imdb()
+            cleanup.callback(mock_imdb.server_close)
+            cleanup.callback(mock_imdb.shutdown)
+            env["LISEK_PROVIDER_URL_IMDB"]=mock_imdb_url
             with socket.socket() as sock:
                 sock.bind(("127.0.0.1", 0))
                 port = sock.getsockname()[1]
@@ -471,6 +477,12 @@ def main():
             # Faza 13: watch statistics, the bots' summary, hardware diagnostics.
             from stats_smoke import check_stats
             check_stats(request,ok_json,sql,token,other_token,other_id,item_id,bool(args.ffmpeg and args.ffprobe))
+            # Faza 17: Fix Match by IMDb id survives a reload (after the checks that use the series' name).
+            from fixmatch_smoke import check_fix_match_identify
+            check_fix_match_identify(request,ok_json,sql,token,root)
+            # Faza 17: log files, browser reports, ffprobe errors, the admin log viewer API.
+            from logs_smoke import check_logs
+            check_logs(request,ok_json,token,other_token,root,bool(args.ffprobe))
             ok_json("/api/auth/logout","POST",{},token)
             if args.node:
                 event=notification_queue.get(timeout=15)
@@ -491,7 +503,7 @@ def main():
             server.wait(timeout=10)
             log.close()
             server = None
-            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls, fix match, downloads, cast and crew, details and chapters, series pages, global search, alpha picker, watch statistics, hardware diagnostics")
+            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls, fix match, downloads, cast and crew, details and chapters, series pages, global search, alpha picker, watch statistics, hardware diagnostics, fix match by IMDb id after a reload, central logs")
     finally:
         if server:
             server.terminate()

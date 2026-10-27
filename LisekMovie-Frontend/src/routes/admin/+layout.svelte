@@ -56,7 +56,8 @@
         { href: '/admin/notifications', labelKey: 'notifications.title' },
 		{ href: '/admin/games', labelKey: 'nav.games' },
 		{ href: '/admin/libraries', labelKey: 'admin.tab_libraries' },
-		{ href: '/admin/media/fallback', labelKey: 'admin.tab_fallback' }
+		{ href: '/admin/media/fallback', labelKey: 'admin.tab_fallback' },
+		{ href: '/admin/logs', labelKey: 'logs.tab' }
 	] as const;
 </script>
 

@@ -492,11 +492,16 @@ impl Session {
             .open(spec.directory.join("ffmpeg.log"))
             .map_err(|_| SessionError::Io)?;
         let mut cmd = transcode::command("ffmpeg", &spec.settings);
-        cmd.args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(log);
+        cmd.args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         tracing::debug!(session = %spec.id, segment = start, ?args, "starting ffmpeg");
-        let child = cmd
+        let mut child = cmd
             .spawn()
             .map_err(|_| SessionError::Failed("ffmpeg_unavailable".into()))?;
+        // Stderr goes to the session's ffmpeg.log (its tail explains a
+        // failed run) and, line by line, to the server log ([FFMPEG]).
+        if let Some(stderr) = child.stderr.take() {
+            tokio::spawn(forward_stderr(stderr, log, spec.id.to_string()));
+        }
         let task = tokio::spawn(run(self.clone(), seq, start, child, subtitle_outputs));
         state.run = Some(RunHandle { seq, start, next: start, finished: false, failure: None, task });
         self.changed.notify_waiters();
@@ -612,6 +617,23 @@ async fn run(
             run.failure = failure;
         })
         .await;
+}
+
+/// Copies FFmpeg's stderr into the session log file and the server log.
+async fn forward_stderr(stderr: tokio::process::ChildStderr, file: std::fs::File, session: String) {
+    use std::io::Write;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let mut file = std::io::BufWriter::new(file);
+    let mut lines = BufReader::new(stderr).lines();
+    let mut logged = 0usize;
+    while let Ok(Some(line)) = lines.next_line().await {
+        let _ = writeln!(file, "{line}");
+        let _ = file.flush();
+        if logged < crate::tool_log::MAX_LINES {
+            crate::tool_log::line(crate::tool_log::Tool::Ffmpeg, &session, &line);
+            logged += 1;
+        }
+    }
 }
 
 async fn log_tail(path: &Path) -> String {
@@ -818,6 +840,11 @@ pub async fn convert_external(
     .await
     .map_err(|_| "subtitle_conversion_timed_out")?
     .map_err(|_| "ffmpeg_unavailable")?;
+    crate::tool_log::stderr(
+        crate::tool_log::Tool::Ffmpeg,
+        &external.path.display().to_string(),
+        &output.stderr,
+    );
     if !output.status.success() {
         return Err("subtitle_conversion_failed".into());
     }

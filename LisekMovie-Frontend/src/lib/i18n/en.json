@@ -772,7 +772,8 @@
 			"provider_item_not_found": "The provider no longer has this entry.",
 			"provider_failed": "The provider did not answer. Try again in a moment.",
 			"invalid_query": "Type a title or an ID to search for.",
-			"generic": "Could not fix the match."
+			"generic": "Could not fix the match.",
+			"identify_save_failed": "The match could not be saved. Nothing was changed — see Admin → Logs."
 		},
 		"query_placeholder": "e.g. The Matrix, tt0133093, tvdb:81189",
 		"id_help": "You can also type an ID: IMDb (tt0425622), TheTVDB or TMDB (a number with that provider picked, or tvdb:60620 / tmdb:603), AniList and aniDB (anilist:21, anidb:69) — or paste a link to the title's page.",
@@ -783,7 +784,18 @@
 			"link": "Link — the ID in it is looked up directly.",
 			"number": "Number — looked up as an ID at the chosen provider and searched as a title."
 		},
-		"id_match": "ID match"
+		"id_match": "ID match",
+		"saved_with_warnings": "Saved, but not everything worked: {problems}. Details in Admin → Logs.",
+		"warnings": {
+			"poster_download_failed": "the poster could not be downloaded",
+			"poster_save_failed": "the poster could not be saved",
+			"backdrop_download_failed": "the backdrop could not be downloaded",
+			"backdrop_save_failed": "the backdrop could not be saved",
+			"logo_download_failed": "the logo could not be downloaded",
+			"logo_save_failed": "the logo could not be saved",
+			"artwork_not_saved": "no artwork was saved",
+			"metadata_save_failed": "the details could not be saved"
+		}
 	},
 	"download": {
 		"button": "Download",
@@ -1081,5 +1093,32 @@
 		"bot_copied": "Copied",
 		"bot_example": "Example (e.g. cron at midnight, result posted to a Discord webhook):",
 		"bot_failed": "The key could not be changed."
+	},
+	"toast": {
+		"close": "Close"
+	},
+	"logs": {
+		"tab": "Logs",
+		"title": "Server logs",
+		"subtitle": "One file a day (UTC), kept for {days} days: the server, the database, FFmpeg/FFprobe and errors from browsers.",
+		"day": "Day",
+		"today": "today",
+		"search": "Find",
+		"search_placeholder": "Text, item id, error…",
+		"refresh": "Refresh",
+		"loading": "Loading…",
+		"download": "Download file",
+		"sources": "Sources",
+		"levels": "Levels",
+		"all": "All",
+		"live": "Follow live",
+		"console": "Log entries",
+		"no_files": "No log files yet.",
+		"no_entries": "No entries match the filters.",
+		"cut": "Showing the newest {shown} of {total} matching entries.",
+		"count": "{shown} entries · file {size}",
+		"load_failed": "Could not read the logs. Try again.",
+		"download_failed": "Could not download the file.",
+		"target": "target"
 	}
 }

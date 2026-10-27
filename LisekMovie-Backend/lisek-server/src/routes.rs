@@ -27,7 +27,7 @@ use crate::auth::{AdminUser, SessionUser};
 use crate::openapi::ApiDoc;
 use crate::state::SharedState;
 use crate::{
-    admin, auth, browser_notifications, collections, details, download, games, hardware, identify, media,
+    admin, auth, browser_notifications, collections, details, download, games, hardware, identify, logging, media,
     notifications, people, playback, scan_jobs, search, series, setup, stats, telemetry, trickplay, users,
 };
 
@@ -68,6 +68,8 @@ fn public() -> OpenApiRouter<SharedState> {
         // An admin session or the bots' read-only `X-Lisek-Stats-Key`
         // (checked by the handler's `StatsReader`).
         .routes(routes!(stats::summary))
+        // Browser errors, signed in or not (rate-limited per address).
+        .routes(routes!(logging::client))
 }
 
 fn user() -> OpenApiRouter<SharedState> {
@@ -163,6 +165,9 @@ fn admin() -> OpenApiRouter<SharedState> {
         .routes(routes!(playback::settings, playback::set_settings))
         .routes(routes!(playback::capabilities))
         .routes(routes!(playback::safety, playback::set_safety))
+        .routes(routes!(logging::list))
+        .routes(routes!(logging::day))
+        .routes(routes!(logging::raw))
 }
 
 /// Puts extractor `E` in front of every route of `group` as a route layer:
@@ -206,6 +211,8 @@ pub fn build(state: &SharedState) -> (Router<SharedState>, OpenApiDoc) {
             }
         }),
     );
+    // Images under stable URLs: a 304 when the browser has the same bytes.
+    let router = router.layer(middleware::from_fn(crate::http_cache::not_modified));
     (router, api)
 }
 

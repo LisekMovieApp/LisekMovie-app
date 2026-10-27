@@ -21,6 +21,8 @@ mod media;
 mod playback;
 mod games;
 mod hardware;
+mod logging;
+mod http_cache;
 mod notifications;
 mod people;
 mod browser_notifications;
@@ -59,19 +61,16 @@ async fn main() {
         return;
     }
 
-    // No RUST_LOG set → default to "info" so a plain `cargo run` actually
-    // shows startup logs, instead of silently sitting at the default
-    // "errors only" level.
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-
     // Ignored if `.env` doesn't exist yet — that's the normal state before
-    // the First-Run Wizard has ever completed.
+    // the First-Run Wizard has ever completed. Read before logging starts:
+    // it can set LISEK_CONFIG_DIR, where the log files go.
     dotenvy::dotenv().ok();
+
+    // Console (RUST_LOG, default "info") and daily JSON files in
+    // <config>/logs (LISEK_LOG_LEVEL), see `logging`. The guard flushes
+    // the file writer at exit.
+    let _log_guard = logging::init();
+    tokio::spawn(logging::run_retention());
 
     // Resolved and logged here, up front, rather than lazily on whichever
     // request happens to touch it first — an admin comparing this line

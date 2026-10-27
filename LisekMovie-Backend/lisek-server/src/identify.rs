@@ -229,6 +229,9 @@ pub struct IdentifyResponse {
     pub items_updated: usize,
     /// At least one new image was saved.
     pub image_saved: bool,
+    /// Parts that did not work out (`poster_download_failed`,
+    /// `backdrop_save_failed`...): the match is saved, these are not.
+    pub warnings: Vec<String>,
 }
 
 /// The provider's own title and year from a lookup (`fields.title`,
@@ -329,6 +332,8 @@ pub async fn identify(
     let http = reqwest::Client::new();
     let mut cache = EnrichCache::default();
     let mut image_saved = false;
+    let mut warnings: Vec<String> = Vec::new();
+    let mut unsaved = 0usize;
     for id in &items {
         // The old match's artwork goes: a new match without a logo must not
         // keep showing the wrong film's one.
@@ -369,8 +374,29 @@ pub async fn identify(
         )
         .await;
         image_saved |= outcome.image_saved;
+        if !outcome.metadata_saved {
+            unsaved += 1;
+        }
+        for problem in outcome.problems {
+            if !warnings.contains(&problem) {
+                warnings.push(problem);
+            }
+        }
     }
     metadata_enrichment::prune_collections(&pool, &config).await;
+
+    if unsaved > 0 {
+        tracing::error!(%item_id, provider = req.provider, unsaved, "fix match: provider data not saved");
+        return Err(error(StatusCode::INTERNAL_SERVER_ERROR, "identify_save_failed"));
+    }
+    if matched.poster_url.is_some() && !image_saved && !warnings.iter().any(|w| w.starts_with("poster")) {
+        warnings.push("artwork_not_saved".to_string());
+    }
+    if !warnings.is_empty() {
+        tracing::warn!(%item_id, provider = req.provider, ?warnings, "fix match applied with problems");
+    } else {
+        tracing::info!(%item_id, provider = req.provider, title, "fix match applied");
+    }
 
     Ok(Json(IdentifyResponse {
         item_id,
@@ -378,6 +404,7 @@ pub async fn identify(
         year,
         items_updated: items.len(),
         image_saved,
+        warnings,
     }))
 }
 

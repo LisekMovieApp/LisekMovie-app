@@ -14,8 +14,8 @@ use std::path::Path as FsPath;
 
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::{StatusCode, header};
-use axum::response::{IntoResponse, Response};
+use axum::http::StatusCode;
+use axum::response::Response;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -27,7 +27,7 @@ use lisek_playback::{chapters as thumbnails, transcode};
 
 use crate::auth::AuthUser;
 use crate::details::GENERATING;
-use crate::media::{image_response, serve_item_image};
+use crate::media::{image_response, read_fresh_media_file, serve_item_image};
 use crate::playback::{PlaybackError, checked_file, pool};
 use crate::state::{SharedState, config_dir};
 
@@ -237,8 +237,20 @@ pub async fn season_poster(
             &series_id.to_string(),
             season,
         ));
-        for path in candidates {
-            if let Ok(bytes) = tokio::fs::read(&path).await {
+        // A season poster in the series folder from before the last Fix
+        // match belongs to the previous match.
+        let reset_at = lisek_db::get_media_item_artwork_source(&pool, item_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|(_, reset_at)| reset_at);
+        for (i, path) in candidates.iter().enumerate() {
+            let bytes = if i + 1 < candidates.len() {
+                read_fresh_media_file(path, reset_at).await
+            } else {
+                tokio::fs::read(path).await.ok()
+            };
+            if let Some(bytes) = bytes {
                 return Ok(image_response(bytes, "image/jpeg"));
             }
         }
@@ -294,14 +306,7 @@ pub async fn episode_thumb(
 }
 
 fn cached(bytes: Vec<u8>) -> Response {
-    (
-        [
-            (header::CONTENT_TYPE, "image/jpeg"),
-            (header::CACHE_CONTROL, "private, max-age=3600"),
-        ],
-        bytes,
-    )
-        .into_response()
+    image_response(bytes, "image/jpeg")
 }
 
 /// One frame of the episode into `out` (FFmpeg, at most two at a time

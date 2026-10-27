@@ -54,6 +54,7 @@ LisekMovie indexes your movie and TV libraries, fetches metadata and artwork, an
 - [Architecture](#architecture)
 - [Manual Docker setup](#manual-docker-setup)
 - [Configuration](#configuration)
+- [Logs](#logs)
 - [Using LisekMovie](#using-lisekmovie)
 - [Development](#development)
 - [Publishing a release](#publishing-a-release)
@@ -289,8 +290,22 @@ All settings live in `.env` next to `docker-compose.yml`; [`.env.example`](.env.
 | `LISEK_TRICKPLAY` | `0` turns off seek-bar preview generation. |
 | `LISEK_TRUST_PROXY` | `1` behind another reverse proxy with TLS. |
 | `TZ` | Time zone of the containers. |
+| `LISEK_LOG_LEVEL` | Level of the log files (`info` by default; `debug` for more detail). |
+| `LISEK_PROVIDER_URL_<KEY>` | Another base URL for one metadata provider (`LISEK_PROVIDER_URL_IMDB=...`): a mirror, a proxy or a test server. |
 
 Everything else — transcoding, hardware acceleration, tone mapping, throttling, bitrate limits, resume thresholds — is set in the web app under **Admin → Playback**.
+
+## Logs
+
+The server writes one log file a day to `<config>/logs/lisekmovie.YYYY-MM-DD.log` (JSON lines, a new file at midnight UTC) and deletes files older than 30 days. In Docker that folder is inside the `lisekmovie-data` volume; a native install keeps it in `/var/lib/lisekmovie/config/logs`.
+
+Every entry is tagged with its source:
+
+- **Backend** — `lisek-server`, the scanner, metadata providers, the database;
+- **FFmpeg / FFprobe** — the tools' warnings and errors (`[FFMPEG]`, `[FFPROBE]`), e.g. a file that cannot be read or a GPU that fails to open;
+- **Frontend** — errors in viewers' browsers (`[FRONTEND]`), sent by the web app to `POST /api/logs/client`.
+
+**Admin → Logs** shows them as a console: pick a day, show or hide sources and levels (ERROR, WARN, INFO, DEBUG), search, follow today's file live and download the raw file.
 
 ## Using LisekMovie
 

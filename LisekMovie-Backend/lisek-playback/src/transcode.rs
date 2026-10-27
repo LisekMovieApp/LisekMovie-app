@@ -231,6 +231,9 @@ async fn ffmpeg_output(config: &PlaybackSettings, args: &[&str]) -> Option<Strin
     .await
     .ok()?
     .ok()?;
+    if !output.status.success() {
+        crate::tool_log::stderr(crate::tool_log::Tool::Ffmpeg, &args.join(" "), &output.stderr);
+    }
     output
         .status
         .success()
@@ -380,6 +383,7 @@ pub async fn probe_media(path: &Path, config: &PlaybackSettings) -> Result<Media
         .await
         .map_err(|_| "probe_timed_out")?
         .map_err(|_| "ffprobe_unavailable")?;
+    crate::tool_log::stderr(crate::tool_log::Tool::Ffprobe, &path.display().to_string(), &output.stderr);
     if !output.status.success() {
         return Err("probe_failed".into());
     }

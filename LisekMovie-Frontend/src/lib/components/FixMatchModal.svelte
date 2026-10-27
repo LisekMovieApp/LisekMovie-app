@@ -13,6 +13,7 @@
 	import { navScope } from '$lib/spatial/spatial';
 	import { ApiError } from '$lib/playback/api';
 	import { fetchProviders, usableProviders } from '$lib/admin/providers';
+	import { showToast } from '$lib/toast/toast.svelte';
 	import {
 		idHint,
 		identifyItem,
@@ -76,7 +77,8 @@
 		'provider_not_configured',
 		'provider_item_not_found',
 		'provider_failed',
-		'invalid_query'
+		'invalid_query',
+		'identify_save_failed'
 	]);
 
 	function errorFrom(err: unknown): string {
@@ -115,9 +117,12 @@
 		applying = true;
 		errorKey = null;
 		try {
+			// Only the server's answer counts: nothing changes on the page
+			// before it confirms the match was saved.
 			onIdentified(await identifyItem(token, itemId, picked.provider, picked.provider_id));
 		} catch (err) {
 			errorKey = errorFrom(err);
+			showToast('error', t(errorKey));
 		} finally {
 			applying = false;
 		}

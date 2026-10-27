@@ -35,7 +35,9 @@ lisek-plugin-audiodb = { workspace = true }
 tokio = { version = "1.53.1", features = ["full"] }
 axum = { version = "0.8.9", features = ["ws"] }
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+# Daily log files under <config>/logs (Faza 17), written off the request path.
+tracing-appender = "0.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 dotenvy = "0.15.7"

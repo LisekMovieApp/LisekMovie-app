@@ -629,6 +629,164 @@
         ]
       }
     },
+    "/api/admin/logs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The days with a log file (the last 30).",
+        "operationId": "list",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogFilesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/logs/{date}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "One day's entries, filtered.",
+        "operationId": "day",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "path",
+            "description": "Comma-separated: `backend`, `frontend`, `ffmpeg`, `ffprobe`. All when absent.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "level",
+            "in": "path",
+            "description": "Comma-separated: `error`, `warn`, `info`, `debug`, `trace`. All when absent.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "The newest this many matching entries (default 2000, at most 20000).",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogDayResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/logs/{date}/raw": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The raw file, for download.",
+        "operationId": "raw",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON lines"
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/admin/media/fallback": {
       "get": {
         "tags": [
@@ -3151,6 +3309,36 @@
         ]
       }
     },
+    "/api/logs/client": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "A browser reports an error (\"[FRONTEND]\" in the server log). Signed-in\nor not (the login page can fail too); limited per address.",
+        "operationId": "client",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientLogRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": ""
+          },
+          "429": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/me/access": {
       "get": {
         "tags": [
@@ -5408,6 +5596,51 @@
           "unknown"
         ]
       },
+      "ClientLogRequest": {
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`error`, `unhandledrejection`, `console`, `handle_error`..."
+          },
+          "level": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`error` (default), `warn` or `info`."
+          },
+          "message": {
+            "type": "string"
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Script and line (`app.js:12:5`)."
+          },
+          "stack": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The page the error happened on."
+          }
+        }
+      },
       "CollectionResponse": {
         "type": "object",
         "description": "One collection with its films in release order.",
@@ -6759,7 +6992,8 @@
           "item_id",
           "title",
           "items_updated",
-          "image_saved"
+          "image_saved",
+          "warnings"
         ],
         "properties": {
           "image_saved": {
@@ -6777,6 +7011,13 @@
           },
           "title": {
             "type": "string"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Parts that did not work out (`poster_download_failed`,\n`backdrop_save_failed`...): the match is saved, these are not."
           },
           "year": {
             "type": [
@@ -7077,6 +7318,117 @@
           "total": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "LogDayResponse": {
+        "type": "object",
+        "required": [
+          "date",
+          "entries",
+          "total",
+          "partial",
+          "size_bytes"
+        ],
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LogEntry"
+            },
+            "description": "Oldest first (a console scrolls down to the newest)."
+          },
+          "partial": {
+            "type": "boolean",
+            "description": "Only the end of a very large file was read."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "description": "Matching entries in the part read; more than `entries` when cut.",
+            "minimum": 0
+          }
+        }
+      },
+      "LogEntry": {
+        "type": "object",
+        "description": "One log line, parsed.",
+        "required": [
+          "timestamp",
+          "level",
+          "source",
+          "target",
+          "message",
+          "fields"
+        ],
+        "properties": {
+          "fields": {
+            "type": "object",
+            "description": "The event's other fields (`item_id`, `err`, `url`...)."
+          },
+          "level": {
+            "type": "string",
+            "description": "`ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`."
+          },
+          "message": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "description": "`backend`, `frontend`, `ffmpeg`, `ffprobe`."
+          },
+          "target": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "RFC 3339, UTC."
+          }
+        }
+      },
+      "LogFile": {
+        "type": "object",
+        "required": [
+          "date",
+          "size_bytes"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "`YYYY-MM-DD` (UTC)."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "LogFilesResponse": {
+        "type": "object",
+        "required": [
+          "files",
+          "retention_days"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LogFile"
+            },
+            "description": "Newest first."
+          },
+          "retention_days": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
