@@ -8,6 +8,7 @@
   the artwork and locks the item, so later scans keep the fix.
 -->
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { t } from '$lib/i18n';
 	import { getSessionCookieClientSide } from '$lib/auth';
 	import { navScope } from '$lib/spatial/spatial';
@@ -86,13 +87,22 @@
 		return `fix_match.errors.${code && KNOWN_ERRORS.has(code) ? code : 'generic'}`;
 	}
 
+	/** Results of the newest search only: an older answer arriving late
+	 * never replaces a newer one. */
+	let searchSeq = 0;
+
+	/** Searches when the admin asks (the form, and once when the modal
+	 * opens) — never from a reactive effect: Faza 18's bug was an `$effect`
+	 * that re-ran this after every search (it read `searching`), and each
+	 * run cleared the pick. The pick is its own state: a new search keeps
+	 * it while the same entry is still listed. */
 	async function search(event?: SubmitEvent) {
 		event?.preventDefault();
 		const token = getSessionCookieClientSide();
 		if (!token || !query.trim() || searching) return;
+		const seq = ++searchSeq;
 		searching = true;
 		errorKey = null;
-		picked = null;
 		try {
 			const found = await searchProviders(
 				token,
@@ -101,14 +111,27 @@
 				parseYear(yearText),
 				provider || null
 			);
+			if (seq !== searchSeq) return;
 			results = found.results;
 			failures = found.failures.map((f) => f.provider);
+			const current = picked;
+			const keep = current ? found.results.find((c) => key(c) === key(current)) : undefined;
+			const byId = found.results.filter((c) => c.matched_by === 'id');
+			// Keep the pick; else an id typed by the admin that resolved to
+			// exactly one entry is the obvious choice.
+			picked = keep ?? (byId.length === 1 ? byId[0] : null);
 		} catch (err) {
+			if (seq !== searchSeq) return;
 			errorKey = errorFrom(err);
 			results = null;
+			picked = null;
 		} finally {
-			searching = false;
+			if (seq === searchSeq) searching = false;
 		}
+	}
+
+	function pick(candidate: ProviderCandidate) {
+		if (!applying) picked = candidate;
 	}
 
 	async function apply() {
@@ -132,11 +155,9 @@
 		if (event.key === 'Escape' && !applying) onClose();
 	}
 
-	$effect(() => {
+	// Once, when the modal opens.
+	onMount(() => {
 		void search();
-	});
-
-	$effect(() => {
 		void loadProviders();
 	});
 
@@ -238,9 +259,9 @@
 								type="button"
 								role="option"
 								aria-selected={selected}
-								onclick={() => (picked = candidate)}
-								class="flex w-full gap-3 rounded-md border p-2 text-left transition-colors {selected
-									? 'border-gold bg-gold/10'
+								onclick={() => pick(candidate)}
+								class="relative flex w-full gap-3 rounded-md border p-2 text-left transition-colors {selected
+									? 'border-gold bg-gold/15 ring-2 ring-gold/70'
 									: 'border-white/10 hover:border-white/30'}"
 							>
 								<div class="h-24 w-16 shrink-0 overflow-hidden rounded bg-black">
@@ -276,6 +297,12 @@
 										<p class="mt-1 line-clamp-2 text-xs text-neutral-400">{candidate.overview}</p>
 									{/if}
 								</div>
+								{#if selected}
+									<span
+										class="flex size-7 shrink-0 items-center justify-center self-center rounded-full bg-gold text-sm font-bold text-black"
+										aria-hidden="true">✓</span
+									>
+								{/if}
 							</button>
 						</li>
 					{/each}

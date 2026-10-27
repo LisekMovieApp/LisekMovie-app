@@ -4,8 +4,8 @@
     "title": "LisekMovie",
     "description": "Main binary: Axum routing, middleware, startup.",
     "license": {
-      "name": "PolyForm-Noncommercial-1.0.0",
-      "identifier": "PolyForm-Noncommercial-1.0.0"
+      "name": "MIT",
+      "identifier": "MIT"
     },
     "version": "1.0.0-beta"
   },

@@ -18,7 +18,7 @@
   <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-16%2B-4169e1?logo=postgresql&logoColor=white" />
   <img alt="Docker" src="https://img.shields.io/badge/Docker-Compose-2496ed?logo=docker&logoColor=white" />
   <img alt="Platforms" src="https://img.shields.io/badge/platform-Linux%20·%20Windows-555" />
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-555" /></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-555" /></a>
 </p>
 
 <p align="center">
@@ -234,7 +234,7 @@ Metadata providers live in their own repositories next to this one, so they can 
 | Repository | Provider | Covers | API key | Status |
 |---|---|---|---|---|
 | [`LisekMovie-plugin-tmdb`](https://github.com/LisekMovieApp/LisekMovie-plugin-tmdb) | TMDB | movies, series, anime | required | full |
-| [`LisekMovie-plugin-thetvdb`](https://github.com/LisekMovieApp/LisekMovie-plugin-thetvdb) | TheTVDB | series, anime | required | basic |
+| [`LisekMovie-plugin-thetvdb`](https://github.com/LisekMovieApp/LisekMovie-plugin-thetvdb) | TheTVDB | movies, series, anime | required | basic |
 | [`LisekMovie-plugin-imdb`](https://github.com/LisekMovieApp/LisekMovie-plugin-imdb) | IMDb | movies, series | none | basic |
 | [`LisekMovie-plugin-omdb`](https://github.com/LisekMovieApp/LisekMovie-plugin-omdb) | OMDb | movies, series | required (free) | basic |
 | [`LisekMovie-plugin-anilist`](https://github.com/LisekMovieApp/LisekMovie-plugin-anilist) | AniList | anime | none | basic |
@@ -387,8 +387,6 @@ The workflow checks out the app and every provider plugin side by side, builds `
 
 ## License
 
-LisekMovie is licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)**, with an additional attribution requirement.
+LisekMovie — the app and every `LisekMovie-plugin-*` provider extension — is released under the **[MIT License](LICENSE)**: use, copy, modify, fork and distribute it, also commercially, as long as the copyright notice and the license text stay with every copy or substantial portion.
 
-In short: you're free to use, fork, modify and self-host LisekMovie — including rebranding your own instance — for any non-commercial purpose, such as running it for yourself, your family or a community. You may not sell access to it or otherwise use it commercially. Any fork or redistribution must keep a visible credit to the original project. See [LICENSE](LICENSE) for the full, binding terms.
-
-This is not legal advice — if licensing terms really matter for what you plan to build, have them reviewed by a lawyer.
+The software is provided "as is", without warranty of any kind; see [LICENSE](LICENSE) for the full terms.

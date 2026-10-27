@@ -118,7 +118,7 @@ pub const PROVIDERS: &[ProviderInfo] = &[
         key: "tvdb",
         display_name: "TheTVDB",
         api_key: ApiKeyNeed::Required,
-        covers: &[Series, Anime],
+        covers: &[Movies, Series, Anime],
         stage: ProviderStage::Basic,
         website: "https://thetvdb.com/api-information",
     },
