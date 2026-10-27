@@ -16,3 +16,6 @@ Dockerfile*       text eol=lf
 .dockerignore     text eol=lf
 docker-compose*.yml text eol=lf
 LisekMovie-Frontend/server.js text eol=lf
+
+# - Shell scripts run with bash on Linux: a CRLF checkout on Windows breaks them.
+*.sh text eol=lf

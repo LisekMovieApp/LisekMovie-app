@@ -1,3 +1,4 @@
+<!-- Logo: replace the image below with the final artwork (SVG or a 512 px PNG). -->
 <p align="center">
   <img src="LisekMovie-Frontend/src/lib/assets/logo_notext.svg" alt="LisekMovie logo" width="140" />
 </p>
@@ -5,14 +6,27 @@
 <h1 align="center">LisekMovie</h1>
 
 <p align="center">
-  A fast, self-hosted video-on-demand server for your own films and series.<br />
-  Rust + Axum backend · SvelteKit 5 web app · PostgreSQL · FFmpeg
+  <strong>Your films and series, streamed beautifully — from your own server.</strong><br />
+  A fast, self-hosted video-on-demand server: Rust backend · SvelteKit 5 web app · PostgreSQL · FFmpeg
 </p>
 
 <p align="center">
+  <a href="https://github.com/LisekMovieApp/LisekMovie-app/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/LisekMovieApp/LisekMovie-app?include_prereleases&sort=semver&label=release&color=bda24d" /></a>
   <img alt="Version" src="https://img.shields.io/badge/version-1.0.0--beta-bda24d" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.97%20·%20edition%202024-8a7638" />
-  <img alt="License" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-555" />
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-1.97%20·%20Axum-b7410e?logo=rust&logoColor=white" />
+  <img alt="Svelte" src="https://img.shields.io/badge/Svelte-5%20·%20SvelteKit-ff3e00?logo=svelte&logoColor=white" />
+  <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-16%2B-4169e1?logo=postgresql&logoColor=white" />
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-Compose-2496ed?logo=docker&logoColor=white" />
+  <img alt="Platforms" src="https://img.shields.io/badge/platform-Linux%20·%20Windows-555" />
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-555" /></a>
+</p>
+
+<p align="center">
+  <a href="#installation">Installation</a> ·
+  <a href="#updating">Updating</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#configuration">Configuration</a> ·
+  <a href="#development">Development</a>
 </p>
 
 ---
@@ -21,15 +35,91 @@ LisekMovie indexes your movie and TV libraries, fetches metadata and artwork, an
 
 > **Status: 1.0.0-beta.** Feature-complete for everyday use. The database schema is migrated automatically on start; expect fixes rather than breaking changes until 1.0.0.
 
+## Highlights
+
+- 🦀 **High-performance Rust backend** — Axum on tokio, PostgreSQL through compile-time-checked `sqlx` queries, a single binary with a small memory footprint and an OpenAPI-documented REST API.
+- 🎛️ **Smart transcoding** — a per-stream plan (direct play, HLS remux or transcode) with hardware acceleration on **Intel Quick Sync (QSV)**, **VA-API** (Intel/AMD) and **NVIDIA NVENC/NVDEC**, hardware HDR → SDR tone mapping, and **multi-GPU load balancing**: a weighted pool spreads sessions over several cards and architectures (e.g. two streams on an RTX, one on the iGPU) with per-device session limits and codec switches.
+- 📱 **Progressive Web App** — install it on iOS and Android from the browser; it opens full screen like a native app.
+- 📺 **Spatial navigation for TV** — every screen works with the arrow keys of a TV remote: focus scopes, carousels, the search overlay and the A–Z picker included.
+- 🎭 **Cast & crew database** — actors with their roles, directors and writers from TMDB, with photos, biographies and every title of *your* libraries they appear in.
+- ⏱️ **Dynamic ETA** — the player and the detail pages show when a title will finish ("Ends at 23:41"), and the time keeps moving while playback is paused.
+- 🔎 **And more** — global search, watch statistics with Discord-ready bot reports, parental controls, chapters as scenes, seek-bar previews, collections, webhooks — see [all features](#features).
+
 ## Contents
 
+- [Highlights](#highlights)
+- [Installation](#installation)
+- [Updating](#updating)
 - [Features](#features)
 - [Architecture](#architecture)
-- [Quick start with Docker](#quick-start-with-docker)
+- [Manual Docker setup](#manual-docker-setup)
 - [Configuration](#configuration)
 - [Using LisekMovie](#using-lisekmovie)
 - [Development](#development)
+- [Publishing a release](#publishing-a-release)
 - [License](#license)
+
+## Installation
+
+### Linux: the interactive installer
+
+Supported out of the box on **Debian**, **Ubuntu** and **Arch Linux** (x86_64 and aarch64). On other distributions the installer explains that support is planned and asks whether to continue at your own risk.
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/LisekMovieApp/LisekMovie-app/main/install-linux.sh
+sudo bash install-linux.sh
+```
+
+The installer asks for the language (English or Polski) and how to install:
+
+| # | Method | What it does | Best for |
+|---|---|---|---|
+| 1 | **Build from source** | Installs build tools, Rust (in `/opt/lisekmovie/toolchain`, not system-wide), Node.js 24 (when missing or older than 20) and FFmpeg; clones the app and the plugins; builds a release binary and the web app. | Contributors, unusual CPUs, trying the newest `main` |
+| 2 | **Docker Compose** *(recommended)* | Installs Docker and the Compose plugin if needed, prepares `.env` (media folder, port, a random database password, NVIDIA / Intel GPU overlays when a GPU is found) and runs `docker compose up -d --build`. | Most servers and NAS boxes |
+| 3 | **Release binaries** | Downloads the latest package from [GitHub Releases](https://github.com/LisekMovieApp/LisekMovie-app/releases), verifies its SHA-256 checksum, and installs Node.js and FFmpeg when missing. | Fast installs without compiling |
+
+Methods 1 and 3 also offer to set up a local PostgreSQL database (a dedicated role with a random password and the `pg_trgm` extension) and install two systemd services, `lisekmovie-server` and `lisekmovie-web`, running as the unprivileged `lisek` user (in the `video`/`render` groups for GPU access).
+
+When it finishes, open `http://<server>:8096` and create the administrator account.
+
+<details>
+<summary>Where everything goes</summary>
+
+| Path | Contents | Touched by updates? |
+|---|---|---|
+| `/opt/lisekmovie/app` | the program (`bin/lisek-server`, `web/`) | replaced; the previous version is kept in `app.prev` |
+| `/opt/lisekmovie/src` | git checkouts (source and Docker methods) | `git pull --ff-only` |
+| `/opt/lisekmovie/install.conf` | method and version, read by the updater | version line only |
+| `/var/lib/lisekmovie/.env` | server settings, database address, `LISEK_SECRET_KEY` | **never** |
+| `/var/lib/lisekmovie/config` | posters, artwork, trickplay thumbnails, cache | **never** |
+| `/etc/lisekmovie/web.env` | port and address of the web app | **never** |
+| `/opt/lisekmovie/src/LisekMovie-app/.env` | settings of the Docker method | **never** |
+| Docker volumes `lisekmovie-postgres-data`, `lisekmovie-data` | database, settings, artwork | **never** |
+
+</details>
+
+Unattended installs: `sudo LISEK_LANG=en LISEK_METHOD=docker LISEK_ASSUME_YES=1 bash install-linux.sh` (methods: `source`, `docker`, `release`). `bash install-linux.sh --help` lists every option. The full log of a run is in `/tmp/lisekmovie-install.log`.
+
+### Windows, macOS and everything else
+
+Use Docker (Docker Desktop with the WSL 2 backend on Windows) as described in [Manual Docker setup](#manual-docker-setup), or build from source following [Development](#development).
+
+## Updating
+
+```bash
+sudo bash /opt/lisekmovie/update-linux.sh          # update now
+sudo bash /opt/lisekmovie/update-linux.sh --check  # only check (exit code 10 = update available)
+```
+
+The updater detects how LisekMovie was installed and updates it the same way:
+
+- **Source** — `git pull --ff-only` on the app and both plugins, a fresh release build next to the running version, then a switch.
+- **Docker** — `git pull`, `docker compose pull`, `docker compose up -d --build`. It also works in a manual clone: run `sudo bash update-linux.sh` inside `LisekMovie-app`.
+- **Release** — downloads the newest release, verifies the checksum, then switches.
+
+**Your data is safe by design.** The updater never writes, replaces or deletes `.env` (it verifies its SHA-256 before and after), never drops or resets the database (the new version only applies its migrations), never runs `docker compose down -v`, and never removes the data folder with posters, thumbnails and trickplay sheets. Before switching versions it writes a compressed `pg_dump` to `/var/backups/lisekmovie` (the newest five are kept). For source and release installs, if the new version does not pass its health check, the previous one is put back automatically. Local changes to the git checkouts stop the update instead of being overwritten, and a PostgreSQL major-version change in the compose file is refused rather than started on an incompatible data folder.
+
+Options: `--yes` (no questions — for cron), `--force` (reinstall the same version), `--no-backup`, `--lang=en|pl`.
 
 ## Features
 
@@ -129,14 +219,18 @@ LisekMovie-Backend/          Rust workspace
   lisek-notifications/       webhooks and browser notifications
   lisek-games/               leaderboards
 LisekMovie-Frontend/         SvelteKit web app
-tools/                       end-to-end smoke test against a disposable database
+tools/                       end-to-end smoke tests, release packaging (package-release.sh)
+install-linux.sh             interactive Linux installer (source / Docker / release)
+update-linux.sh              updater for every install method
 docker-compose.yml           PostgreSQL + server + web app
 docker-compose.gpu.yml       NVIDIA GPU override
+docker-compose.intel.yml     Intel / AMD GPU override (/dev/dri)
+.github/workflows/           release builds for linux-x86_64 and linux-aarch64
 ```
 
 Metadata providers live in their own repositories next to this one — [`LisekMovie-plugin-tmdb`](https://github.com/LisekMovieApp/LisekMovie-plugin-tmdb) and [`LisekMovie-plugin-thetvdb`](https://github.com/LisekMovieApp/LisekMovie-plugin-thetvdb) — so they can be versioned independently of the server.
 
-## Quick start with Docker
+## Manual Docker setup
 
 Requirements: Docker with Compose v2. For GPU transcoding, an NVIDIA driver and the NVIDIA Container Toolkit (Docker Desktop on Windows: the WSL 2 backend is enough).
 
@@ -248,6 +342,17 @@ After changing a route, regenerate the OpenAPI document and the TypeScript types
 cd LisekMovie-Frontend
 npm run gen:api      # writes src/lib/api/openapi.json and schema.d.ts
 ```
+
+## Publishing a release
+
+Release packages are built by GitHub Actions ([`.github/workflows/release.yml`](.github/workflows/release.yml)) when a version tag is pushed:
+
+```bash
+git tag v1.0.0-beta
+git push origin v1.0.0-beta
+```
+
+The workflow checks out the app and both plugins side by side, builds `lisek-server` and the web app on Ubuntu 22.04 (glibc 2.35, so the binaries run on Debian 12, Ubuntu 22.04+ and Arch) for x86_64 and aarch64, packs them with [`tools/package-release.sh`](tools/package-release.sh) into `lisekmovie-<version>-linux-<arch>.tar.gz` plus a `.sha256` file, and attaches them to the GitHub release. Tags with a suffix (`-beta`, `-rc.1`) become pre-releases. The installer and the updater pick up the newest release, pre-releases included.
 
 ## License
 

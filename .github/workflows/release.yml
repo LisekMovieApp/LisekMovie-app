@@ -1,0 +1,117 @@
+# Release packages for install-linux.sh / update-linux.sh (method "release").
+#
+# Push a tag to publish one:
+#   git tag v1.0.0-beta && git push origin v1.0.0-beta
+# Tags with a suffix (v1.0.0-beta, v1.1.0-rc.1) are marked as pre-releases.
+#
+# The backend needs the provider plugins next to this repository (Cargo path
+# dependencies), so all three repositories are checked out side by side.
+# For private plugin repositories add a PLUGINS_TOKEN secret (read access).
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. v1.0.0-beta"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: linux-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ubuntu 22.04 runners: glibc 2.35, so the binary also runs on
+          # Debian 12, Ubuntu 22.04+ and current Arch.
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: LisekMovie-app
+          ref: ${{ env.TAG }}
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository_owner }}/LisekMovie-plugin-tmdb
+          path: LisekMovie-plugin-tmdb
+          token: ${{ secrets.PLUGINS_TOKEN || github.token }}
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository_owner }}/LisekMovie-plugin-thetvdb
+          path: LisekMovie-plugin-thetvdb
+          token: ${{ secrets.PLUGINS_TOKEN || github.token }}
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: LisekMovie-app/LisekMovie-Backend
+          key: release-${{ matrix.arch }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: LisekMovie-app/LisekMovie-Frontend/package-lock.json
+
+      - name: Build backend
+        working-directory: LisekMovie-app/LisekMovie-Backend
+        env:
+          SQLX_OFFLINE: "true"
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "4"
+          CARGO_PROFILE_RELEASE_STRIP: symbols
+        run: cargo build --release --locked -p lisek-server
+
+      - name: Build web app
+        working-directory: LisekMovie-app/LisekMovie-Frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Package
+        run: bash LisekMovie-app/tools/package-release.sh --version "$TAG" --arch ${{ matrix.arch }} --out dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lisekmovie-linux-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create or update the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l dist
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            flags=()
+            [[ "$TAG" == *-* ]] && flags+=(--prerelease)
+            gh release create "$TAG" dist/* --title "LisekMovie $TAG" --generate-notes "${flags[@]}"
+          fi
