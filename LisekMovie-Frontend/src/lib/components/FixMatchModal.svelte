@@ -1,7 +1,9 @@
 <!--
   "Napraw dopasowanie" (Fix match, Faza 7). When the file name fooled the
-  scanner, an administrator searches TMDB/TheTVDB by hand (title, year,
-  provider), picks the right entry and confirms. The server renames the
+  scanner, an administrator searches the metadata providers by hand (title,
+  year, provider) — or types an id straight away (Faza 16: `tt0425622`,
+  `tvdb:60620`, a provider page link, a number with one provider chosen) —
+  picks the right entry and confirms. The server renames the
   film — or every episode of the series — to the provider's title, swaps
   the artwork and locks the item, so later scans keep the fix.
 -->
@@ -10,7 +12,9 @@
 	import { getSessionCookieClientSide } from '$lib/auth';
 	import { navScope } from '$lib/spatial/spatial';
 	import { ApiError } from '$lib/playback/api';
+	import { fetchProviders, usableProviders } from '$lib/admin/providers';
 	import {
+		idHint,
 		identifyItem,
 		parseYear,
 		searchProviders,
@@ -43,11 +47,30 @@
 	let picked = $state<ProviderCandidate | null>(null);
 	let failedPosters = $state<Record<string, boolean>>({});
 
-	/** Provider brand names are not translated. */
-	const PROVIDERS = [
+	/** Provider brand names are not translated. Replaced by the server's
+	 * list of usable providers once it loads. */
+	let providerOptions = $state<{ key: string; name: string }[]>([
 		{ key: 'tmdb', name: 'TMDB' },
 		{ key: 'tvdb', name: 'TheTVDB' }
-	] as const;
+	]);
+
+	const hint = $derived(idHint(query));
+
+	async function loadProviders() {
+		const token = getSessionCookieClientSide();
+		if (!token) return;
+		try {
+			const usable = usableProviders(await fetchProviders(token));
+			if (usable.length > 0) {
+				providerOptions = usable.map((p) => ({ key: p.provider_key, name: p.display_name }));
+			}
+		} catch {
+			// The built-in pair stays.
+		}
+	}
+
+	const nameOf = (key: string) =>
+		providerOptions.find((p) => p.key === key)?.name ?? key.toUpperCase();
 
 	const KNOWN_ERRORS = new Set([
 		'provider_not_configured',
@@ -69,7 +92,13 @@
 		errorKey = null;
 		picked = null;
 		try {
-			const found = await searchProviders(token, kind, query, parseYear(yearText), provider || null);
+			const found = await searchProviders(
+				token,
+				kind,
+				query,
+				parseYear(yearText),
+				provider || null
+			);
 			results = found.results;
 			failures = found.failures.map((f) => f.provider);
 		} catch (err) {
@@ -102,6 +131,10 @@
 		void search();
 	});
 
+	$effect(() => {
+		void loadProviders();
+	});
+
 	const key = (c: ProviderCandidate) => `${c.provider}:${c.provider_id}`;
 </script>
 
@@ -131,7 +164,9 @@
 						bind:value={query}
 						required
 						maxlength="200"
-						class="rounded-md border border-neutral-700 bg-black px-3 py-2 text-neutral-100 focus:border-gold"
+						placeholder={t('fix_match.query_placeholder')}
+						aria-describedby="fix-match-id-help"
+						class="rounded-md border border-neutral-700 bg-black px-3 py-2 text-neutral-100 placeholder:text-neutral-600 focus:border-gold"
 					/>
 				</label>
 				<label class="flex w-24 flex-col gap-1 text-sm text-neutral-300">
@@ -150,7 +185,7 @@
 						class="rounded-md border border-neutral-700 bg-black px-3 py-2 text-neutral-100 focus:border-gold"
 					>
 						<option value="">{t('fix_match.all_providers')}</option>
-						{#each PROVIDERS as entry (entry.key)}
+						{#each providerOptions as entry (entry.key)}
 							<option value={entry.key}>{entry.name}</option>
 						{/each}
 					</select>
@@ -163,11 +198,22 @@
 					{searching ? t('fix_match.searching') : t('fix_match.search')}
 				</button>
 			</form>
+			<p id="fix-match-id-help" class="mt-2 text-xs text-neutral-500">
+				{#if hint === 'number' && !provider}
+					<span class="text-amber-300">{t('fix_match.id_number_pick_provider')}</span>
+				{:else if hint}
+					<span class="text-gold">{t(`fix_match.id_detected.${hint}`)}</span>
+				{:else}
+					{t('fix_match.id_help')}
+				{/if}
+			</p>
 		</div>
 
 		<div class="min-h-40 flex-1 overflow-y-auto p-5">
 			{#if errorKey}
-				<p role="alert" class="mb-3 rounded bg-red-950/40 p-3 text-sm text-red-200">{t(errorKey)}</p>
+				<p role="alert" class="mb-3 rounded bg-red-950/40 p-3 text-sm text-red-200">
+					{t(errorKey)}
+				</p>
 			{/if}
 			{#if failures.length > 0}
 				<p class="mb-3 text-xs text-amber-300">
@@ -207,10 +253,19 @@
 								<div class="min-w-0 flex-1">
 									<p class="font-medium">
 										{candidate.title}
-										{#if candidate.year}<span class="text-neutral-400">{` (${candidate.year})`}</span>{/if}
+										{#if candidate.year}<span class="text-neutral-400"
+												>{` (${candidate.year})`}</span
+											>{/if}
 									</p>
-									<p class="text-xs text-gold">
-										{`${candidate.provider.toUpperCase()} · ${candidate.provider_id}`}
+									<p class="flex flex-wrap items-center gap-2 text-xs text-gold">
+										{`${nameOf(candidate.provider)} · ${candidate.provider_id}`}
+										{#if candidate.matched_by === 'id'}
+											<span
+												class="rounded-full bg-gold/15 px-2 py-0.5 text-[0.65rem] font-semibold tracking-wide uppercase"
+											>
+												{t('fix_match.id_match')}
+											</span>
+										{/if}
 									</p>
 									{#if candidate.overview}
 										<p class="mt-1 line-clamp-2 text-xs text-neutral-400">{candidate.overview}</p>

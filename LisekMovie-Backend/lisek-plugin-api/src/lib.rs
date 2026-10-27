@@ -178,6 +178,163 @@ pub struct ProviderCandidate {
     pub poster_url: Option<String>,
 }
 
+impl ProviderCandidate {
+    /// The candidate a [`MetadataProvider::lookup`] result stands for:
+    /// `fields.title`, `fields.year` and `fields.overview` of the match, its
+    /// poster, and `provider_id` as given. `None` when the match has no
+    /// title (nothing an administrator could recognize).
+    pub fn from_match(provider_id: &str, matched: &ProviderMatch) -> Option<Self> {
+        let text = |key: &str| {
+            matched
+                .fields
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default()
+                .to_string()
+        };
+        let title = text("title");
+        if title.is_empty() {
+            return None;
+        }
+        Some(Self {
+            provider_id: provider_id.to_string(),
+            title,
+            year: matched
+                .fields
+                .get("year")
+                .and_then(serde_json::Value::as_i64)
+                .and_then(|y| i32::try_from(y).ok()),
+            overview: text("overview"),
+            poster_url: matched.poster_url.clone(),
+        })
+    }
+}
+
+/// An id typed into "Fix match" instead of a title.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DirectId {
+    /// An IMDb title id (`tt0425622`). Several providers can resolve it:
+    /// IMDb and OMDb directly, TMDB and TheTVDB through their
+    /// external-id lookups.
+    Imdb(String),
+    /// A plain number: the id a provider uses itself (TMDB `603`,
+    /// TheTVDB `60620`, AniList `21`, aniDB `69`...).
+    Numeric(String),
+}
+
+/// What [`parse_id_query`] recognized in a Fix match query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdQuery {
+    pub id: DirectId,
+    /// The provider the id belongs to, when the input says so (`tmdb:603`,
+    /// a themoviedb.org link). `None`: every provider may try it.
+    pub provider: Option<&'static str>,
+    /// A bare number without a prefix or link: it can just as well be a
+    /// title ("1917", "300"), so callers search the text too.
+    pub ambiguous: bool,
+}
+
+/// Prefixes (`tmdb:603`) and the provider key each one names. `imdb:`
+/// names the id type, not the IMDb provider: every provider that resolves
+/// IMDb ids is asked.
+const ID_PREFIXES: &[(&str, Option<&str>)] = &[
+    ("imdb", None),
+    ("omdb", Some("omdb")),
+    ("tmdb", Some("tmdb")),
+    ("tvdb", Some("tvdb")),
+    ("thetvdb", Some("tvdb")),
+    ("anidb", Some("anidb")),
+    ("anilist", Some("anilist")),
+    ("anisearch", Some("anisearch")),
+    ("imvdb", Some("imvdb")),
+    ("vgmdb", Some("vgmdb")),
+    ("audiodb", Some("audiodb")),
+];
+
+/// Links of provider pages: `(host fragment, path prefix, provider key)`.
+/// The number right after the prefix is the id.
+const ID_LINKS: &[(&str, &str, &str)] = &[
+    ("themoviedb.org", "/movie/", "tmdb"),
+    ("themoviedb.org", "/tv/", "tmdb"),
+    ("thetvdb.com", "/dereferrer/series/", "tvdb"),
+    ("anilist.co", "/anime/", "anilist"),
+    ("anidb.net", "/anime/", "anidb"),
+    ("anidb.net", "/a", "anidb"),
+    ("anisearch.com", "/anime/", "anisearch"),
+    ("anisearch.de", "/anime/", "anisearch"),
+    ("vgmdb.net", "/album/", "vgmdb"),
+];
+
+/// `tt` followed by 7 to 10 digits.
+fn imdb_id(value: &str) -> Option<String> {
+    let digits = value.strip_prefix("tt")?;
+    ((7..=10).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| value.to_string())
+}
+
+/// 1 to 10 digits.
+fn numeric_id(value: &str) -> Option<String> {
+    ((1..=10).contains(&value.len()) && value.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| value.to_string())
+}
+
+fn leading_digits(value: &str) -> &str {
+    let end = value.find(|c: char| !c.is_ascii_digit()).unwrap_or(value.len());
+    &value[..end]
+}
+
+/// Recognizes an id in a Fix match query: an IMDb id (`tt0425622`), a
+/// plain number (`60620`), a prefixed id (`tvdb:60620`, `anilist:21`) or a
+/// provider page link (`https://www.imdb.com/title/tt0425622/`,
+/// `https://www.themoviedb.org/movie/603-the-matrix`). `None`: a title.
+pub fn parse_id_query(input: &str) -> Option<IdQuery> {
+    let input = input.trim();
+    if input.is_empty() || input.contains(char::is_whitespace) {
+        return None;
+    }
+    let lower = input.to_ascii_lowercase();
+
+    if lower.contains("://") || lower.starts_with("www.") {
+        let rest = lower.split_once("://").map_or(lower.as_str(), |(_, r)| r);
+        let (host, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+        let path = path.split(['?', '#']).next().unwrap_or_default();
+        if host.ends_with("imdb.com") {
+            let id = path.strip_prefix("/title/")?.split('/').next()?;
+            return imdb_id(id).map(|id| IdQuery { id: DirectId::Imdb(id), provider: None, ambiguous: false });
+        }
+        if host.ends_with("thetvdb.com") {
+            // Old-style `?id=60620` links.
+            if let Some(id) = rest.split_once("id=").map(|(_, v)| leading_digits(v)).and_then(numeric_id) {
+                return Some(IdQuery { id: DirectId::Numeric(id), provider: Some("tvdb"), ambiguous: false });
+            }
+        }
+        return ID_LINKS.iter().find_map(|(link_host, prefix, provider)| {
+            if !host.ends_with(link_host) {
+                return None;
+            }
+            let id = numeric_id(leading_digits(path.strip_prefix(prefix)?))?;
+            Some(IdQuery { id: DirectId::Numeric(id), provider: Some(provider), ambiguous: false })
+        });
+    }
+
+    if let Some((prefix, value)) = lower.split_once(':') {
+        let (_, provider) = ID_PREFIXES.iter().find(|(p, _)| *p == prefix)?;
+        let id = match provider {
+            None => DirectId::Imdb(imdb_id(value)?),
+            Some(_) => imdb_id(value)
+                .map(DirectId::Imdb)
+                .or_else(|| numeric_id(value).map(DirectId::Numeric))?,
+        };
+        return Some(IdQuery { id, provider: *provider, ambiguous: false });
+    }
+
+    if let Some(id) = imdb_id(&lower) {
+        return Some(IdQuery { id: DirectId::Imdb(id), provider: None, ambiguous: false });
+    }
+    numeric_id(&lower).map(|id| IdQuery { id: DirectId::Numeric(id), provider: None, ambiguous: true })
+}
+
 #[derive(Debug, Error)]
 pub enum ProviderError {
     #[error("request to the provider failed: {0}")]
@@ -246,6 +403,28 @@ pub trait MetadataProvider: Send + Sync {
         _primary_language: &str,
     ) -> Result<Option<ProviderMatch>, ProviderError> {
         Ok(None)
+    }
+
+    /// The candidate for an id typed into Fix match ([`parse_id_query`]).
+    /// The default resolves the provider's own numeric ids through
+    /// [`Self::lookup`]; a provider that can map IMDb ids (TMDB's `/find`,
+    /// TheTVDB's remote ids, OMDb) overrides this. The candidate's
+    /// `provider_id` is always the provider's own id, as
+    /// [`Self::lookup`] takes it. `Ok(None)`: not this provider's id, or no
+    /// such title.
+    async fn lookup_by_id(
+        &self,
+        kind: MediaKind,
+        id: &DirectId,
+        primary_language: &str,
+    ) -> Result<Option<ProviderCandidate>, ProviderError> {
+        match id {
+            DirectId::Numeric(own) => Ok(self
+                .lookup(kind, own, primary_language)
+                .await?
+                .and_then(|matched| ProviderCandidate::from_match(own, &matched))),
+            DirectId::Imdb(_) => Ok(None),
+        }
     }
 
     /// Every episode of one season of a series this provider matched
@@ -389,6 +568,68 @@ pub fn query_candidates(title: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn id(input: &str) -> Option<(DirectId, Option<&'static str>, bool)> {
+        parse_id_query(input).map(|q| (q.id, q.provider, q.ambiguous))
+    }
+
+    #[test]
+    fn recognizes_imdb_ids_numbers_prefixes_and_links() {
+        let imdb = |v: &str| DirectId::Imdb(v.to_string());
+        let num = |v: &str| DirectId::Numeric(v.to_string());
+        assert_eq!(id("tt0425622"), Some((imdb("tt0425622"), None, false)));
+        assert_eq!(id(" TT0425622 "), Some((imdb("tt0425622"), None, false)));
+        assert_eq!(id("60620"), Some((num("60620"), None, true)));
+        assert_eq!(id("tvdb:60620"), Some((num("60620"), Some("tvdb"), false)));
+        assert_eq!(id("TheTVDB:60620"), Some((num("60620"), Some("tvdb"), false)));
+        assert_eq!(id("imdb:tt0133093"), Some((imdb("tt0133093"), None, false)));
+        assert_eq!(id("tmdb:tt0133093"), Some((imdb("tt0133093"), Some("tmdb"), false)));
+        assert_eq!(id("anilist:21"), Some((num("21"), Some("anilist"), false)));
+        assert_eq!(id("omdb:tt0133093"), Some((imdb("tt0133093"), Some("omdb"), false)));
+        assert_eq!(
+            id("https://www.imdb.com/title/tt0425622/?ref_=nv_sr_1"),
+            Some((imdb("tt0425622"), None, false))
+        );
+        assert_eq!(
+            id("https://www.themoviedb.org/movie/603-the-matrix"),
+            Some((num("603"), Some("tmdb"), false))
+        );
+        assert_eq!(id("https://www.themoviedb.org/tv/1396"), Some((num("1396"), Some("tmdb"), false)));
+        assert_eq!(
+            id("https://thetvdb.com/?tab=series&id=81189"),
+            Some((num("81189"), Some("tvdb"), false))
+        );
+        assert_eq!(id("https://anilist.co/anime/21/ONE-PIECE/"), Some((num("21"), Some("anilist"), false)));
+        assert_eq!(id("https://anidb.net/anime/69"), Some((num("69"), Some("anidb"), false)));
+        assert_eq!(id("https://anidb.net/a69"), Some((num("69"), Some("anidb"), false)));
+        assert_eq!(id("https://www.anisearch.com/anime/2227,one-piece"), Some((num("2227"), Some("anisearch"), false)));
+    }
+
+    #[test]
+    fn titles_are_not_ids() {
+        for title in ["Matrix", "Star Wars", "tt", "tt12", "tt0425622x", "300 Spartans", "", "unknown:5",
+            "tmdb:abc", "imdb:603", "https://example.com/movie/5", "https://www.imdb.com/name/nm0000206/",
+            "12345678901"]
+        {
+            assert_eq!(parse_id_query(title), None, "{title}");
+        }
+    }
+
+    #[test]
+    fn a_candidate_comes_from_the_lookup_fields() {
+        let matched = ProviderMatch {
+            fields: serde_json::json!({"title": " Lost ", "year": 2004, "overview": "Plane crash."}),
+            poster_url: Some("https://img/p.jpg".into()),
+            ..ProviderMatch::default()
+        };
+        let candidate = ProviderCandidate::from_match("4607", &matched).unwrap();
+        assert_eq!(candidate.title, "Lost");
+        assert_eq!(candidate.year, Some(2004));
+        assert_eq!(candidate.overview, "Plane crash.");
+        assert_eq!(candidate.provider_id, "4607");
+        assert_eq!(candidate.poster_url.as_deref(), Some("https://img/p.jpg"));
+        assert!(ProviderCandidate::from_match("1", &ProviderMatch::default()).is_none());
+    }
 
     #[test]
     fn crate_scaffold_compiles() {

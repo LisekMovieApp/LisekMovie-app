@@ -17,13 +17,21 @@ lisek-telemetry = { path = "../lisek-telemetry" }
 lisek-notifications = { path = "../lisek-notifications" }
 lisek-games = { path = "../lisek-games" }
 lisek-plugin-api = { path = "../lisek-plugin-api" }
-# Faza 7 provider extensions — separate repos/crates per the project's
-# directory layout, compiled in as ordinary Cargo path dependencies (see
-# lisek-plugin-api's doc comment for why: no safe dynamic .dll/.so loading
-# in Rust). Only provider_registry.rs ever names these two crates directly
-# — that's the "one line" a new extension adds.
-lisek-plugin-tmdb = { path = "../../../LisekMovie-plugin-tmdb" }
-lisek-plugin-thetvdb = { path = "../../../LisekMovie-plugin-thetvdb" }
+# Provider extensions — separate repos/crates next to LisekMovie-app,
+# compiled in as ordinary Cargo path dependencies (see lisek-plugin-api's
+# doc comment for why: no safe dynamic .dll/.so loading in Rust). Paths
+# live in the workspace's [workspace.dependencies]; only
+# provider_registry.rs ever names these crates directly.
+lisek-plugin-tmdb = { workspace = true }
+lisek-plugin-thetvdb = { workspace = true }
+lisek-plugin-imdb = { workspace = true }
+lisek-plugin-omdb = { workspace = true }
+lisek-plugin-anidb = { workspace = true }
+lisek-plugin-anilist = { workspace = true }
+lisek-plugin-anisearch = { workspace = true }
+lisek-plugin-imvdb = { workspace = true }
+lisek-plugin-vgmdb = { workspace = true }
+lisek-plugin-audiodb = { workspace = true }
 tokio = { version = "1.53.1", features = ["full"] }
 axum = { version = "0.8.9", features = ["ws"] }
 tracing = "0.1.44"

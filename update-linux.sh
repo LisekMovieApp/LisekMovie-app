@@ -46,7 +46,17 @@ BACKUP_DIR="${LISEK_BACKUP_DIR:-/var/backups/lisekmovie}"
 BACKUP_KEEP="${LISEK_BACKUP_KEEP:-5}"
 LOG_FILE="${LISEK_LOG:-/tmp/lisekmovie-update.log}"
 LOCK_FILE="${LISEK_LOCK:-/run/lock/lisekmovie-update.lock}"
-REPOS=(LisekMovie-app LisekMovie-plugin-tmdb LisekMovie-plugin-thetvdb)
+# The app and every metadata provider extension (cloned side by side: the
+# backend builds them as path dependencies). A plugin added in a newer
+# version is cloned by the update that brings it.
+REPOS=(
+    LisekMovie-app
+    LisekMovie-plugin-tmdb LisekMovie-plugin-thetvdb
+    LisekMovie-plugin-imdb LisekMovie-plugin-omdb
+    LisekMovie-plugin-anidb LisekMovie-plugin-anilist LisekMovie-plugin-anisearch
+    LisekMovie-plugin-imvdb
+    LisekMovie-plugin-vgmdb LisekMovie-plugin-audiodb
+)
 MIN_NODE_MAJOR=20
 ASSUME_YES="${LISEK_ASSUME_YES:-0}"
 CHECK_ONLY=0
@@ -109,6 +119,9 @@ declare -A EN=(
     [env_check]="%s unchanged (sha256 verified)."
     [env_changed]="%s was modified while the update ran (not by this script: the new server version may add generated settings when it starts). The content from before the update is saved in %s."
     [pull]="Updating %s"
+    [new_repo]="%s: new module, it will be cloned"
+    [cloning]="Cloning %s"
+    [reexec]="The update brings a newer updater: continuing with it."
     [build_backend]="Backend (cargo build --release): this takes a few minutes…"
     [build_frontend]="Web app (npm ci, npm run build)…"
     [build_done]="Built %s"
@@ -178,6 +191,9 @@ declare -A PL=(
     [env_check]="%s bez zmian (sha256 zweryfikowane)."
     [env_changed]="%s zmienił się w trakcie aktualizacji (nie przez ten skrypt: nowa wersja serwera może dopisać wygenerowane ustawienia przy starcie). Treść sprzed aktualizacji zapisana w %s."
     [pull]="Aktualizuję %s"
+    [new_repo]="%s: nowy moduł, zostanie sklonowany"
+    [cloning]="Klonuję %s"
+    [reexec]="Aktualizacja przynosi nowszą wersję tego skryptu: kontynuuję nią."
     [build_backend]="Backend (cargo build --release): to potrwa kilka minut…"
     [build_frontend]="Aplikacja webowa (npm ci, npm run build)…"
     [build_done]="Zbudowano %s"
@@ -220,7 +236,7 @@ t() {
     shift
     if [[ "$LANG_CODE" == "pl" ]]; then fmt=${PL[$key]:-${EN[$key]:-$key}}; else fmt=${EN[$key]:-$key}; fi
     # shellcheck disable=SC2059 # the translations are the format strings
-    printf "$fmt" "$@"
+    printf -- "$fmt" "$@"
 }
 
 # --- input ------------------------------------------------------------------------
@@ -267,11 +283,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Creates a temporary folder, removed on exit, in NEW_TMP (not printed: a
+# command substitution would run in a subshell and lose the cleanup entry).
+NEW_TMP=""
 new_tmp() {
-    local dir
-    dir=$(mktemp -d /tmp/lisekmovie-update.XXXXXX)
-    TMP_DIRS+=("$dir")
-    printf '%s' "$dir"
+    NEW_TMP=$(mktemp -d /tmp/lisekmovie-update.XXXXXX)
+    TMP_DIRS+=("$NEW_TMP")
 }
 
 # run CMD...: logs the command and its output; the last lines are shown on failure.
@@ -378,7 +395,8 @@ SAFE_COPY_DIR=""
 
 protect_files() {
     local file
-    SAFE_COPY_DIR=$(new_tmp)
+    new_tmp
+    SAFE_COPY_DIR=$NEW_TMP
     for file in "$@"; do
         [[ -f "$file" ]] || continue
         PROTECTED_FILES+=("$file")
@@ -514,14 +532,35 @@ repo_git() {
     fi
 }
 
-# Sets UPDATES (number of new commits over all repositories).
+# Where missing repositories are cloned from: install.conf's GIT_BASE, else
+# the folder of the app checkout's own remote.
+git_base() {
+    if [[ -n "$GIT_BASE" ]]; then
+        printf '%s' "${GIT_BASE%/}"
+        return
+    fi
+    local url
+    url=$(repo_git "$SRC_DIR/LisekMovie-app" remote get-url origin)
+    printf '%s' "${url%/*}"
+}
+
+# Sets UPDATES (number of new commits over all repositories, plus one per
+# repository still to be cloned) and MISSING_REPOS.
 UPDATES=0
+MISSING_REPOS=()
 check_git() {
     step "$(t step_check)"
     local repo dir behind
     UPDATES=0
+    MISSING_REPOS=()
     for repo in "${REPOS[@]}"; do
         dir="$SRC_DIR/$repo"
+        if [[ "$repo" != "LisekMovie-app" && ! -e "$dir" ]]; then
+            info "$(t new_repo "$repo")"
+            MISSING_REPOS+=("$repo")
+            UPDATES=$((UPDATES + 1))
+            continue
+        fi
         [[ -d "$dir/.git" ]] || fail "$(t no_install "$dir")"
         # Tracked files only: .env, media and build output are ignored by git.
         if [[ -n "$(repo_git "$dir" status --porcelain --untracked-files=no)" ]]; then
@@ -544,14 +583,43 @@ check_git() {
 
 pull_git() {
     step "$(t step_sources)"
-    local repo dir
+    local repo dir base branch
     for repo in "${REPOS[@]}"; do
         dir="$SRC_DIR/$repo"
+        [[ -d "$dir/.git" ]] || continue
         repo_git "$dir" symbolic-ref -q HEAD >/dev/null || continue
         info "$(t pull "$repo")"
         # Fast-forward only: never a merge, never a reset of local work.
         run repo_git "$dir" pull --ff-only
     done
+    [[ ${#MISSING_REPOS[@]} -gt 0 ]] || return 0
+    base=$(git_base)
+    # The branch the app checkout follows (main unless installed otherwise).
+    branch=$(repo_git "$SRC_DIR/LisekMovie-app" symbolic-ref -q --short HEAD || printf '%s' "${GIT_REF:-main}")
+    for repo in "${MISSING_REPOS[@]}"; do
+        info "$(t cloning "$repo")"
+        # Into the parent folder as the app checkout's owner (`git -C`).
+        run repo_git "$SRC_DIR/LisekMovie-app" clone --branch "$branch" "$base/$repo.git" "$SRC_DIR/$repo"
+    done
+}
+
+# After pulling the app: a newer update-linux.sh came with it (for example
+# one that knows new modules) — run that one for the rest of the update.
+# The running copy was saved when the script started (SELF_COPY).
+SELF_COPY=""
+reexec_if_newer() {
+    local fresh="$SRC_DIR/LisekMovie-app/update-linux.sh"
+    [[ -n "$SELF_COPY" && -f "$fresh" && -z "${LISEK_UPDATER_REEXEC:-}" ]] || return 0
+    cmp -s "$fresh" "$SELF_COPY" && return 0
+    info "$(t reexec)"
+    # exec skips the EXIT trap: clean up and release the lock first.
+    cleanup
+    exec 9>&-
+    # Same installation (the new copy lives elsewhere than install.conf),
+    # same log, same backup folder.
+    if [[ "$DETECTED" == "0" ]]; then export LISEK_PREFIX="$PREFIX"; fi
+    export LISEK_LOG="$LOG_FILE" LISEK_BACKUP_DIR="$BACKUP_DIR" LISEK_LANG="$LANG_CODE"
+    LISEK_UPDATER_REEXEC=1 exec bash "$fresh" "${ORIG_ARGS[@]}" --force --yes
 }
 
 source_version() {
@@ -709,6 +777,7 @@ update_source() {
     confirm_update "$INSTALLED_VERSION" "$(repo_git "$SRC_DIR/LisekMovie-app" rev-parse --short '@{upstream}' 2>/dev/null || printf '?')"
     protect_files "$DATA_DIR/.env" /etc/lisekmovie/web.env
     pull_git
+    reexec_if_newer
     build_from_source
     backup_native
     switch_version
@@ -734,6 +803,7 @@ update_docker() {
     confirm_update "$INSTALLED_VERSION" "$(repo_git "$SRC_DIR/LisekMovie-app" rev-parse --short '@{upstream}' 2>/dev/null || printf '?')"
     protect_files "$COMPOSE_DIR/.env"
     pull_git
+    reexec_if_newer
     step "$(t step_docker)"
     cd "$COMPOSE_DIR"
     # A new major PostgreSQL version cannot read the old data folder: stop here
@@ -799,7 +869,8 @@ query_release() {
 fetch_release() {
     step "$(t step_release)"
     local tmp archive
-    tmp=$(new_tmp)
+    new_tmp
+    tmp=$NEW_TMP
     archive="$tmp/${RELEASE_URL##*/}"
     info "$(t release_download "${RELEASE_URL##*/}")"
     run curl -fSL --retry 3 -o "$archive" "$RELEASE_URL"
@@ -847,8 +918,10 @@ finish() {
     printf '  %s%s%s\n\n' "$C_DIM" "$(t done_log "$LOG_FILE")" "$C_RESET"
 }
 
+ORIG_ARGS=()
 main() {
     local arg
+    ORIG_ARGS=("$@")
     for arg in "$@"; do
         case "$arg" in
             --check) CHECK_ONLY=1 ;;
@@ -867,11 +940,15 @@ main() {
     [[ "$DETECTED" == "0" ]] || info "$(t detected_docker "$COMPOSE_DIR")"
     info "$(t method "$METHOD" "${INSTALLED_VERSION:-?}" "$PREFIX")"
 
-    : >"$LOG_FILE"
+    # A re-run by reexec_if_newer keeps the log of the first part.
+    [[ -n "${LISEK_UPDATER_REEXEC:-}" ]] || : >"$LOG_FILE"
     chmod 0600 "$LOG_FILE"
     install -d "$(dirname "$LOCK_FILE")"
     exec 9>"$LOCK_FILE"
     flock -n 9 || fail "$(t locked)"
+    new_tmp
+    SELF_COPY="$NEW_TMP/update-linux.sh"
+    cp -- "${BASH_SOURCE[0]}" "$SELF_COPY"
 
     case "$METHOD" in
         source) update_source ;;

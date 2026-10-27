@@ -234,7 +234,39 @@
 		"editor_age_from_provider": "From the provider: {label}",
 		"editor_age_unrated": "From the provider: unrated",
 		"editor_age_rating_hint": "Minimum viewer age. Your own value is kept on rescans; use it for home videos and titles without a rating.",
-		"tab_hardware": "Hardware & Transcoding"
+		"tab_hardware": "Hardware & Transcoding",
+		"key_requirement": {
+			"required": "API key required",
+			"optional": "API key optional",
+			"none": "No API key needed"
+		},
+		"covers": {
+			"movies": "Movies",
+			"series": "Series",
+			"anime": "Anime",
+			"music_videos": "Music videos",
+			"music": "Music"
+		},
+		"stage": {
+			"full": "Complete",
+			"basic": "Basic",
+			"skeleton": "Coming soon"
+		},
+		"stage_skeleton_hint": "Registered, but returns no results yet.",
+		"plugins_order_hint": "Priority is the global order. A library can use its own order (for example AniList or aniDB first for anime) under Libraries → the library → items.",
+		"get_key": "Where to get it",
+		"provider_hint": {
+			"tmdb": "A free API key (v3) from your TMDB account settings.",
+			"tvdb": "A project API key from TheTVDB.",
+			"imdb": "Uses IMDb's public title suggestions: titles, years and posters, no plot. Pair it with OMDb or TMDB for details.",
+			"omdb": "A free key (1,000 requests a day) from omdbapi.com: plots, genres, ratings and certifications from IMDb data.",
+			"anilist": "Public GraphQL API, no key. Anime only; automatic matches need an exact title.",
+			"anidb": "aniDB needs a registered client: enter its name, or name:version (e.g. lisekmovie:1). Lookups by aniDB ID only for now; at most one request every 2 seconds.",
+			"anisearch": "aniSearch has no public API yet; the provider is registered and returns nothing.",
+			"imvdb": "A free key from imvdb.com/developers. Matches music videos named \"Artist - Song\".",
+			"vgmdb": "Soundtracks and game music, for the coming audio libraries.",
+			"audiodb": "Artists and albums, for the coming audio libraries. Without a key the public test key is used."
+		}
 	},
 	"errors": {
 		"database_connection_failed": "Couldn't connect to the database. Check the connection details and try again.",
@@ -720,14 +752,14 @@
 		"title": "Fix match",
 		"hint_movie": "Search the metadata providers for the right movie. The library keeps the new match and stops guessing.",
 		"hint_series": "Search the metadata providers for the right series. Every episode gets the new match.",
-		"query": "Title",
+		"query": "Title or ID",
 		"year": "Year",
 		"provider": "Provider",
 		"all_providers": "All providers",
 		"search": "Search",
 		"searching": "Searching…",
 		"results": "Results",
-		"no_results": "Nothing found. Try another title or drop the year.",
+		"no_results": "Nothing found. Try another title, drop the year or check the ID.",
 		"provider_failed_some": "Some providers did not answer: {providers}",
 		"confirm_movie": "Replace the metadata and artwork with \"{title}\"?",
 		"confirm_series": "Replace the metadata and artwork of the whole series with \"{title}\"?",
@@ -739,9 +771,19 @@
 			"provider_not_configured": "This provider is not configured. Add its API key in the server settings.",
 			"provider_item_not_found": "The provider no longer has this entry.",
 			"provider_failed": "The provider did not answer. Try again in a moment.",
-			"invalid_query": "Type a title to search for.",
+			"invalid_query": "Type a title or an ID to search for.",
 			"generic": "Could not fix the match."
-		}
+		},
+		"query_placeholder": "e.g. The Matrix, tt0133093, tvdb:81189",
+		"id_help": "You can also type an ID: IMDb (tt0425622), TheTVDB or TMDB (a number with that provider picked, or tvdb:60620 / tmdb:603), AniList and aniDB (anilist:21, anidb:69) — or paste a link to the title's page.",
+		"id_number_pick_provider": "A number alone is searched as a title. Pick a provider to also look it up as that provider's ID (e.g. 60620 at TheTVDB).",
+		"id_detected": {
+			"imdb": "IMDb ID — looked up at every provider that knows IMDb IDs.",
+			"prefixed": "Provider ID — looked up directly, no title search.",
+			"link": "Link — the ID in it is looked up directly.",
+			"number": "Number — looked up as an ID at the chosen provider and searched as a title."
+		},
+		"id_match": "ID match"
 	},
 	"download": {
 		"button": "Download",

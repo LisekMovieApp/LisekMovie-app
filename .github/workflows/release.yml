@@ -5,8 +5,9 @@
 # Tags with a suffix (v1.0.0-beta, v1.1.0-rc.1) are marked as pre-releases.
 #
 # The backend needs the provider plugins next to this repository (Cargo path
-# dependencies), so all three repositories are checked out side by side.
-# For private plugin repositories add a PLUGINS_TOKEN secret (read access).
+# dependencies): every LisekMovie-plugin-* named in the workspace Cargo.toml
+# is cloned side by side (default branch). For private plugin repositories
+# add a PLUGINS_TOKEN secret (read access).
 
 name: Release
 
@@ -45,16 +46,16 @@ jobs:
         with:
           path: LisekMovie-app
           ref: ${{ env.TAG }}
-      - uses: actions/checkout@v5
-        with:
-          repository: ${{ github.repository_owner }}/LisekMovie-plugin-tmdb
-          path: LisekMovie-plugin-tmdb
-          token: ${{ secrets.PLUGINS_TOKEN || github.token }}
-      - uses: actions/checkout@v5
-        with:
-          repository: ${{ github.repository_owner }}/LisekMovie-plugin-thetvdb
-          path: LisekMovie-plugin-thetvdb
-          token: ${{ secrets.PLUGINS_TOKEN || github.token }}
+      - name: Check out the provider plugins
+        env:
+          GH_TOKEN: ${{ secrets.PLUGINS_TOKEN || github.token }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          grep -o 'LisekMovie-plugin-[a-z][a-z]*' LisekMovie-app/LisekMovie-Backend/Cargo.toml | sort -u |
+            while read -r repo; do
+              gh repo clone "$OWNER/$repo" "$repo" -- --depth 1
+            done
+          ls -d LisekMovie-plugin-*
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2

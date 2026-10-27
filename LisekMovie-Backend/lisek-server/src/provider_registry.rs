@@ -22,6 +22,14 @@ pub fn build_provider(provider_key: &str, api_key: &str) -> Option<Box<dyn Metad
     match provider_key {
         "tmdb" => Some(Box::new(lisek_plugin_tmdb::TmdbProvider::new(api_key))),
         "tvdb" => Some(Box::new(lisek_plugin_thetvdb::TvdbProvider::new(api_key))),
+        "imdb" => Some(Box::new(lisek_plugin_imdb::ImdbProvider::new())),
+        "omdb" => Some(Box::new(lisek_plugin_omdb::OmdbProvider::new(api_key))),
+        "anilist" => Some(Box::new(lisek_plugin_anilist::AnilistProvider::new())),
+        "anidb" => Some(Box::new(lisek_plugin_anidb::AnidbProvider::new(api_key))),
+        "anisearch" => Some(Box::new(lisek_plugin_anisearch::AnisearchProvider::new(api_key))),
+        "imvdb" => Some(Box::new(lisek_plugin_imvdb::ImvdbProvider::new(api_key))),
+        "vgmdb" => Some(Box::new(lisek_plugin_vgmdb::VgmdbProvider::new())),
+        "audiodb" => Some(Box::new(lisek_plugin_audiodb::AudiodbProvider::new(api_key))),
         _ => None,
     }
 }
@@ -69,6 +77,14 @@ mod tests {
     fn builds_the_tvdb_provider() {
         let provider = build_provider("tvdb", "key").expect("tvdb should be registered");
         assert_eq!(provider.provider_key(), "tvdb");
+    }
+
+    #[test]
+    fn every_listed_provider_is_registered_under_its_own_key() {
+        for info in lisek_metadata::PROVIDERS {
+            let provider = build_provider(info.key, "").unwrap_or_else(|| panic!("{} is not registered", info.key));
+            assert_eq!(provider.provider_key(), info.key);
+        }
     }
 
     #[test]

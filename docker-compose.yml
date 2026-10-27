@@ -8,9 +8,10 @@
 #                                         with an NVIDIA GPU (NVENC, CUDA tone mapping)
 #
 # The server image is built from the folder ABOVE this repository: it also
-# needs the provider plugins next to it (LisekMovie-plugin-tmdb,
-# LisekMovie-plugin-thetvdb). Only those and the backend are sent to the
-# build (LisekMovie-Backend/Dockerfile.dockerignore).
+# needs the provider plugins next to it (every LisekMovie-plugin-* folder:
+# tmdb, thetvdb, imdb, omdb, anidb, anilist, anisearch, imvdb, vgmdb,
+# audiodb). Only those and the backend are sent to the build
+# (LisekMovie-Backend/Dockerfile.dockerignore).
 #
 # Settings come from `.env` next to this file (see .env.example): the
 # variables below with `${...}` and, for the server, everything in that

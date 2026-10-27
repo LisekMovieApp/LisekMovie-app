@@ -4,7 +4,9 @@ import {
 	updateProvider,
 	setProviderApiKey,
 	clearProviderApiKey,
-	AdminApiError
+	usableProviders,
+	AdminApiError,
+	type ProviderConfig
 } from './providers';
 
 function stubFetch(response: { ok: boolean; status?: number; json?: () => unknown }) {
@@ -29,7 +31,11 @@ describe('fetchProviders', () => {
 				display_name: 'TMDB',
 				enabled: true,
 				priority: 0,
-				is_configured: false
+				is_configured: false,
+				key_stored: false,
+				key_requirement: 'required',
+				covers: ['movies', 'series', 'anime'],
+				stage: 'full'
 			}
 		];
 		const fetchMock = stubFetch({ ok: true, json: () => Promise.resolve(providers) });
@@ -96,5 +102,28 @@ describe('clearProviderApiKey', () => {
 		const [url, options] = fetchMock.mock.calls[0];
 		expect(url).toBe('/api/admin/providers/tmdb/key');
 		expect(options.method).toBe('DELETE');
+	});
+});
+
+describe('usableProviders', () => {
+	const provider = (key: string, enabled: boolean, configured: boolean): ProviderConfig => ({
+		provider_key: key,
+		display_name: key,
+		enabled,
+		priority: 0,
+		is_configured: configured,
+		key_stored: false,
+		key_requirement: 'none',
+		covers: ['anime'],
+		stage: 'basic'
+	});
+
+	it('keeps enabled providers that can be asked', () => {
+		const list = [
+			provider('anilist', true, true),
+			provider('omdb', true, false),
+			provider('imdb', false, true)
+		];
+		expect(usableProviders(list).map((p) => p.provider_key)).toEqual(['anilist']);
 	});
 });

@@ -12,12 +12,28 @@ import { assertOk, AdminApiError } from './api';
 // `libraries.ts` can throw and catch the same one.
 export { AdminApiError };
 
+export type KeyRequirement = 'required' | 'optional' | 'none';
+export type ProviderCoverage = 'movies' | 'series' | 'anime' | 'music_videos' | 'music';
+export type ProviderStage = 'full' | 'basic' | 'skeleton';
+
 export interface ProviderConfig {
 	provider_key: string;
 	display_name: string;
 	enabled: boolean;
 	priority: number;
+	/** A key is stored, or the provider works without one. */
 	is_configured: boolean;
+	/** A key is stored (never the key itself). */
+	key_stored: boolean;
+	key_requirement: KeyRequirement;
+	covers: ProviderCoverage[];
+	stage: ProviderStage;
+	website?: string | null;
+}
+
+/** Providers that can be asked right now: enabled, with a key when one is needed. */
+export function usableProviders(providers: ProviderConfig[]): ProviderConfig[] {
+	return providers.filter((p) => p.enabled && p.is_configured);
 }
 
 export async function fetchProviders(token: string): Promise<ProviderConfig[]> {

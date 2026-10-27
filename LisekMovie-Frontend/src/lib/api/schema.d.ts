@@ -2982,6 +2982,11 @@ export interface components {
             position_seconds: number;
         };
         ProviderCandidateResponse: {
+            /**
+             * @description `id`: the provider resolved the id typed as the query; `search`: a
+             *     title search result.
+             */
+            matched_by: string;
             overview: string;
             poster_url?: string | null;
             provider: string;
@@ -2991,12 +2996,26 @@ export interface components {
             year?: number | null;
         };
         ProviderConfigResponse: {
+            /**
+             * @description What the provider has data for: `movies`, `series`, `anime`,
+             *     `music_videos`, `music`.
+             */
+            covers: string[];
             display_name: string;
             enabled: boolean;
+            /** @description A key is stored, or the provider works without one. */
             is_configured: boolean;
+            /** @description `required`, `optional` or `none`. */
+            key_requirement: string;
+            /** @description A key is stored (the key itself is never returned). */
+            key_stored: boolean;
             /** Format: int32 */
             priority: number;
             provider_key: string;
+            /** @description `full`, `basic` or `skeleton` (registered, no results yet). */
+            stage: string;
+            /** @description Where to get a key or read about the source. */
+            website?: string | null;
         };
         ProviderOrderPayload: {
             provider_order: string[];
@@ -3008,7 +3027,15 @@ export interface components {
         ProviderSearchResponse: {
             /** @description Providers whose search failed (network, rejected key). */
             failures: components["schemas"]["ProviderSearchFailure"][];
-            /** @description Candidates of every provider asked, each provider's best first. */
+            /**
+             * @description The query was read as an id (`imdb` or `numeric`), not only as a
+             *     title.
+             */
+            id_kind?: string | null;
+            /**
+             * @description Candidates of every provider asked: id matches first, then each
+             *     provider's search results, best first.
+             */
             results: components["schemas"]["ProviderCandidateResponse"][];
         };
         /**
@@ -8022,13 +8049,20 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Title to search for, as typed. */
+                /**
+                 * @description Title to search for, as typed — or an id: `tt0425622` (IMDb),
+                 *     `tvdb:60620`, `anilist:21`, a provider page link, or a plain number
+                 *     (the chosen provider's own id; also searched as a title).
+                 */
                 query: string;
                 /** @description Release (or first-air) year; narrows the search. */
                 year: number | null;
                 /** @description `movie` or `series`. */
                 kind: string;
-                /** @description Only this provider (`tmdb`, `tvdb`); every configured one when absent. */
+                /**
+                 * @description Only this provider (`tmdb`, `tvdb`, `imdb`, `anilist`...); every
+                 *     configured one when absent.
+                 */
                 provider: string | null;
             };
             cookie?: never;

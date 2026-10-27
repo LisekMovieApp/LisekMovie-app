@@ -113,8 +113,8 @@ sudo bash /opt/lisekmovie/update-linux.sh --check  # only check (exit code 10 = 
 
 The updater detects how LisekMovie was installed and updates it the same way:
 
-- **Source** — `git pull --ff-only` on the app and both plugins, a fresh release build next to the running version, then a switch.
-- **Docker** — `git pull`, `docker compose pull`, `docker compose up -d --build`. It also works in a manual clone: run `sudo bash update-linux.sh` inside `LisekMovie-app`.
+- **Source** — `git pull --ff-only` on the app and every provider plugin (a plugin added by a newer version is cloned), a fresh release build next to the running version, then a switch.
+- **Docker** — `git pull` (cloning new plugins), `docker compose pull`, `docker compose up -d --build`. It also works in a manual clone: run `sudo bash update-linux.sh` inside `LisekMovie-app`.
 - **Release** — downloads the newest release, verifies the checksum, then switches.
 
 **Your data is safe by design.** The updater never writes, replaces or deletes `.env` (it verifies its SHA-256 before and after), never drops or resets the database (the new version only applies its migrations), never runs `docker compose down -v`, and never removes the data folder with posters, thumbnails and trickplay sheets. Before switching versions it writes a compressed `pg_dump` to `/var/backups/lisekmovie` (the newest five are kept). For source and release installs, if the new version does not pass its health check, the previous one is put back automatically. Local changes to the git checkouts stop the update instead of being overwritten, and a PostgreSQL major-version change in the compose file is refused rather than started on an incompatible data folder.
@@ -140,8 +140,8 @@ Options: `--yes` (no questions — for cron), `--force` (reinstall the same vers
 ### Library and metadata
 
 - **Library scanner** with live progress, queued scan jobs and stored FFprobe results.
-- **Metadata plugins** — [TMDB](https://www.themoviedb.org/) and [TheTVDB](https://thetvdb.com/) providers behind one plugin API; provider API keys are stored encrypted (`LISEK_SECRET_KEY`).
-- **Fix Match** — search the providers by title and year and pin an item (or a whole series) to the right entry; old artwork is replaced and the item is locked against automatic re-matching.
+- **Metadata plugins** — [TMDB](https://www.themoviedb.org/), [TheTVDB](https://thetvdb.com/), [IMDb](https://www.imdb.com/), [OMDb](https://www.omdbapi.com/), [AniList](https://anilist.co/), [aniDB](https://anidb.net/) and [IMVDb](https://imvdb.com/) providers behind one plugin API (aniSearch, VGMdb and TheAudioDB registered for the coming anime and audio work); Admin → Plugins shows what each covers and whether it needs a key, and every library can order them its own way (anime sources first in an anime library). Provider API keys are stored encrypted (`LISEK_SECRET_KEY`).
+- **Fix Match** — search the providers by title and year, or type an id straight away (`tt0425622` for IMDb, `tvdb:60620`, `anilist:21`, a number with one provider picked, or a provider page link), and pin an item (or a whole series) to the right entry; old artwork is replaced and the item is locked against automatic re-matching.
 - **Rich details** — original title, tagline, TMDB rating, runtime, genres, tags (keywords), studios, directors, writers and IMDb/TheTVDB/TMDB links.
 - **Metadata editor** with per-field locking, optional `.nfo`-style saving of artwork next to the video, and a six-hourly background refresh.
 - **Cast & crew** — main actors (with the parts they play), directors and writers from TMDB, profile photos cached locally. A person's page shows the photo, biography, birth and death dates with the age, IMDb/TMDB links and every title of *your* libraries they appear in. Biographies are fetched the first time a page is opened, so scans stay fast.
@@ -228,19 +228,35 @@ docker-compose.intel.yml     Intel / AMD GPU override (/dev/dri)
 .github/workflows/           release builds for linux-x86_64 and linux-aarch64
 ```
 
-Metadata providers live in their own repositories next to this one — [`LisekMovie-plugin-tmdb`](https://github.com/LisekMovieApp/LisekMovie-plugin-tmdb) and [`LisekMovie-plugin-thetvdb`](https://github.com/LisekMovieApp/LisekMovie-plugin-thetvdb) — so they can be versioned independently of the server.
+Metadata providers live in their own repositories next to this one, so they can be versioned independently of the server. Each implements `lisek_plugin_api::MetadataProvider` and is compiled in as a path dependency (`[workspace.dependencies]` in `LisekMovie-Backend/Cargo.toml`):
+
+| Repository | Provider | Covers | API key | Status |
+|---|---|---|---|---|
+| [`LisekMovie-plugin-tmdb`](https://github.com/LisekMovieApp/LisekMovie-plugin-tmdb) | TMDB | movies, series, anime | required | full |
+| [`LisekMovie-plugin-thetvdb`](https://github.com/LisekMovieApp/LisekMovie-plugin-thetvdb) | TheTVDB | series, anime | required | basic |
+| [`LisekMovie-plugin-imdb`](https://github.com/LisekMovieApp/LisekMovie-plugin-imdb) | IMDb | movies, series | none | basic |
+| [`LisekMovie-plugin-omdb`](https://github.com/LisekMovieApp/LisekMovie-plugin-omdb) | OMDb | movies, series | required (free) | basic |
+| [`LisekMovie-plugin-anilist`](https://github.com/LisekMovieApp/LisekMovie-plugin-anilist) | AniList | anime | none | basic |
+| [`LisekMovie-plugin-anidb`](https://github.com/LisekMovieApp/LisekMovie-plugin-anidb) | aniDB | anime | registered client | basic (lookup by id) |
+| [`LisekMovie-plugin-anisearch`](https://github.com/LisekMovieApp/LisekMovie-plugin-anisearch) | aniSearch | anime | — | skeleton |
+| [`LisekMovie-plugin-imvdb`](https://github.com/LisekMovieApp/LisekMovie-plugin-imvdb) | IMVDb | music videos | required (free) | basic |
+| [`LisekMovie-plugin-vgmdb`](https://github.com/LisekMovieApp/LisekMovie-plugin-vgmdb) | VGMdb | music | — | skeleton (audio libraries) |
+| [`LisekMovie-plugin-audiodb`](https://github.com/LisekMovieApp/LisekMovie-plugin-audiodb) | TheAudioDB | music | optional | skeleton (audio libraries) |
+
+New providers start disabled; turn them on and order them in **Admin → Plugins**, or per library.
 
 ## Manual Docker setup
 
 Requirements: Docker with Compose v2. For GPU transcoding, an NVIDIA driver and the NVIDIA Container Toolkit (Docker Desktop on Windows: the WSL 2 backend is enough).
 
-The server image is built from the folder that **contains** this repository, because it also compiles the provider plugins. Clone all three side by side:
+The server image is built from the folder that **contains** this repository, because it also compiles the provider plugins. Clone the app and every plugin side by side:
 
 ```bash
 mkdir LisekMovie && cd LisekMovie
-git clone https://github.com/LisekMovieApp/LisekMovie-app.git
-git clone https://github.com/LisekMovieApp/LisekMovie-plugin-tmdb.git
-git clone https://github.com/LisekMovieApp/LisekMovie-plugin-thetvdb.git
+for repo in app plugin-tmdb plugin-thetvdb plugin-imdb plugin-omdb plugin-anidb plugin-anilist \
+            plugin-anisearch plugin-imvdb plugin-vgmdb plugin-audiodb; do
+  git clone "https://github.com/LisekMovieApp/LisekMovie-$repo.git"
+done
 cd LisekMovie-app
 
 cp .env.example .env     # set at least POSTGRES_PASSWORD and MEDIA_DIR
@@ -278,7 +294,7 @@ Everything else — transcoding, hardware acceleration, tone mapping, throttling
 
 ## Using LisekMovie
 
-- **Fix a wrong match** — on a film or series page an administrator chooses **Fix match**, searches by title (and optionally year and provider) and picks the right entry. A series is renamed with all its episodes; the artwork is fetched again.
+- **Fix a wrong match** — on a film or series page an administrator chooses **Fix match**, searches by title (and optionally year and provider) — or by id: an IMDb id (`tt0425622`) is resolved by IMDb, OMDb, TMDB and TheTVDB; `tvdb:60620`, `tmdb:603`, `anilist:21`, `anidb:69` or a link to the title's page go to that provider; a plain number is looked up at the provider picked in the form (and also searched as a title, since "1917" is a film) — and picks the right entry. A series is renamed with all its episodes; the artwork is fetched again.
 - **Download** — **Download** on a film page, or the download icon next to an episode, saves the original file. To keep an account to streaming only, untick *Allow downloading original files* under Admin → Users → the account → Access control.
 - **Parental controls** — the same Access control panel limits libraries and age ratings, with quick *child* and *teen* presets.
 - **Install on a phone** — iPhone/iPad (Safari): Share → *Add to Home Screen*. Android (Chrome): account menu → *Install app*.
@@ -352,7 +368,7 @@ git tag v1.0.0-beta
 git push origin v1.0.0-beta
 ```
 
-The workflow checks out the app and both plugins side by side, builds `lisek-server` and the web app on Ubuntu 22.04 (glibc 2.35, so the binaries run on Debian 12, Ubuntu 22.04+ and Arch) for x86_64 and aarch64, packs them with [`tools/package-release.sh`](tools/package-release.sh) into `lisekmovie-<version>-linux-<arch>.tar.gz` plus a `.sha256` file, and attaches them to the GitHub release. Tags with a suffix (`-beta`, `-rc.1`) become pre-releases. The installer and the updater pick up the newest release, pre-releases included.
+The workflow checks out the app and every provider plugin side by side, builds `lisek-server` and the web app on Ubuntu 22.04 (glibc 2.35, so the binaries run on Debian 12, Ubuntu 22.04+ and Arch) for x86_64 and aarch64, packs them with [`tools/package-release.sh`](tools/package-release.sh) into `lisekmovie-<version>-linux-<arch>.tar.gz` plus a `.sha256` file, and attaches them to the GitHub release. Tags with a suffix (`-beta`, `-rc.1`) become pre-releases. The installer and the updater pick up the newest release, pre-releases included.
 
 ## License
 

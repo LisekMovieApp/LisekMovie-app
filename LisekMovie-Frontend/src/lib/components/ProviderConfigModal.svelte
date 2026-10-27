@@ -105,9 +105,24 @@
 		aria-labelledby="provider-config-title"
 		class="w-full max-w-sm rounded-lg border border-white/10 bg-surface p-6"
 	>
-		<h2 id="provider-config-title" class="mb-4 text-lg font-semibold text-neutral-100">
+		<h2 id="provider-config-title" class="mb-2 text-lg font-semibold text-neutral-100">
 			{t('admin.config_modal_title', { provider: provider.display_name })}
 		</h2>
+		<p class="mb-1 text-sm text-neutral-400">{t(`admin.provider_hint.${provider.provider_key}`)}</p>
+		<p class="mb-4 text-xs text-neutral-500">
+			{t(`admin.key_requirement.${provider.key_requirement}`)}
+			{#if provider.website}
+				·
+				<!-- eslint-disable svelte/no-navigation-without-resolve -- external site -->
+				<a
+					href={provider.website}
+					target="_blank"
+					rel="noopener noreferrer"
+					class="text-gold underline-offset-2 hover:underline">{t('admin.get_key')}</a
+				>
+				<!-- eslint-enable svelte/no-navigation-without-resolve -->
+			{/if}
+		</p>
 
 		<form onsubmit={handleSave} class="flex flex-col gap-3">
 			<label class="flex flex-col gap-1 text-sm text-neutral-300">
@@ -126,7 +141,7 @@
 			{/if}
 
 			<div class="mt-2 flex items-center justify-between gap-2">
-				{#if provider.is_configured}
+				{#if provider.key_stored}
 					<button
 						type="button"
 						disabled={busy}

@@ -25,7 +25,19 @@ pub struct ProviderConfigResponse {
     pub display_name: String,
     pub enabled: bool,
     pub priority: i32,
+    /// A key is stored, or the provider works without one.
     pub is_configured: bool,
+    /// A key is stored (the key itself is never returned).
+    pub key_stored: bool,
+    /// `required`, `optional` or `none`.
+    pub key_requirement: String,
+    /// What the provider has data for: `movies`, `series`, `anime`,
+    /// `music_videos`, `music`.
+    pub covers: Vec<String>,
+    /// `full`, `basic` or `skeleton` (registered, no results yet).
+    pub stage: String,
+    /// Where to get a key or read about the source.
+    pub website: Option<String>,
 }
 
 impl From<lisek_metadata::ProviderConfig> for ProviderConfigResponse {
@@ -36,6 +48,11 @@ impl From<lisek_metadata::ProviderConfig> for ProviderConfigResponse {
             enabled: config.enabled,
             priority: config.priority,
             is_configured: config.is_configured,
+            key_stored: config.key_stored,
+            key_requirement: config.key_requirement.as_str().to_string(),
+            covers: config.covers.iter().map(|c| c.as_str().to_string()).collect(),
+            stage: config.stage.as_str().to_string(),
+            website: config.website,
         }
     }
 }

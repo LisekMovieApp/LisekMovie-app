@@ -4,9 +4,9 @@
 # media) never leaves the machine.
 *
 !LisekMovie-app/LisekMovie-Backend
-!LisekMovie-plugin-tmdb
-!LisekMovie-plugin-thetvdb
+!LisekMovie-plugin-*
 **/target
+LisekMovie-plugin-*/Cargo.lock
 **/.git
 **/.env
 **/.env.*

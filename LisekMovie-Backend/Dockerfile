@@ -25,8 +25,18 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
+# Metadata provider extensions, next to LisekMovie-app (path dependencies
+# of the workspace, see Cargo.toml [workspace.dependencies]).
 COPY LisekMovie-plugin-tmdb/ LisekMovie-plugin-tmdb/
 COPY LisekMovie-plugin-thetvdb/ LisekMovie-plugin-thetvdb/
+COPY LisekMovie-plugin-imdb/ LisekMovie-plugin-imdb/
+COPY LisekMovie-plugin-omdb/ LisekMovie-plugin-omdb/
+COPY LisekMovie-plugin-anidb/ LisekMovie-plugin-anidb/
+COPY LisekMovie-plugin-anilist/ LisekMovie-plugin-anilist/
+COPY LisekMovie-plugin-anisearch/ LisekMovie-plugin-anisearch/
+COPY LisekMovie-plugin-imvdb/ LisekMovie-plugin-imvdb/
+COPY LisekMovie-plugin-vgmdb/ LisekMovie-plugin-vgmdb/
+COPY LisekMovie-plugin-audiodb/ LisekMovie-plugin-audiodb/
 COPY LisekMovie-app/LisekMovie-Backend/ LisekMovie-app/LisekMovie-Backend/
 
 WORKDIR /src/LisekMovie-app/LisekMovie-Backend

@@ -2,7 +2,11 @@
 //! providers by hand and pins the right entry on a film or a whole series.
 //!
 //! - `GET /api/providers/search`: candidates straight from the provider
-//!   plugins (`MetadataProvider::search`).
+//!   plugins (`MetadataProvider::search`). A query that is an id — an IMDb
+//!   id (`tt0425622`), a prefixed id (`tvdb:60620`), a provider page link,
+//!   or a plain number with one provider chosen — goes to
+//!   `MetadataProvider::lookup_by_id` instead (`lisek_plugin_api::
+//!   parse_id_query`).
 //! - `POST /api/media/{id}/identify`: looks the picked id up
 //!   (`MetadataProvider::lookup`), renames the item(s) to the provider's
 //!   title, throws the old artwork away and saves the new match
@@ -16,7 +20,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use lisek_db::EnrichTarget;
 use lisek_metadata::image_cache::{backdrop_cache_path, logo_cache_path, poster_cache_path};
-use lisek_plugin_api::{MediaKind, ProviderMatch};
+use lisek_plugin_api::{IdQuery, MediaKind, ProviderMatch, parse_id_query};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -42,13 +46,16 @@ fn parse_kind(raw: &str) -> Option<MediaKind> {
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct ProviderSearchQuery {
-    /// Title to search for, as typed.
+    /// Title to search for, as typed — or an id: `tt0425622` (IMDb),
+    /// `tvdb:60620`, `anilist:21`, a provider page link, or a plain number
+    /// (the chosen provider's own id; also searched as a title).
     pub query: String,
     /// Release (or first-air) year; narrows the search.
     pub year: Option<i32>,
     /// `movie` or `series`.
     pub kind: String,
-    /// Only this provider (`tmdb`, `tvdb`); every configured one when absent.
+    /// Only this provider (`tmdb`, `tvdb`, `imdb`, `anilist`...); every
+    /// configured one when absent.
     pub provider: Option<String>,
 }
 
@@ -60,6 +67,9 @@ pub struct ProviderCandidateResponse {
     pub year: Option<i32>,
     pub overview: String,
     pub poster_url: Option<String>,
+    /// `id`: the provider resolved the id typed as the query; `search`: a
+    /// title search result.
+    pub matched_by: String,
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -70,10 +80,60 @@ pub struct ProviderSearchFailure {
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct ProviderSearchResponse {
-    /// Candidates of every provider asked, each provider's best first.
+    /// Candidates of every provider asked: id matches first, then each
+    /// provider's search results, best first.
     pub results: Vec<ProviderCandidateResponse>,
+    /// The query was read as an id (`imdb` or `numeric`), not only as a
+    /// title.
+    pub id_kind: Option<String>,
     /// Providers whose search failed (network, rejected key).
     pub failures: Vec<ProviderSearchFailure>,
+}
+
+fn id_kind(id: &lisek_plugin_api::DirectId) -> &'static str {
+    match id {
+        lisek_plugin_api::DirectId::Imdb(_) => "imdb",
+        lisek_plugin_api::DirectId::Numeric(_) => "numeric",
+    }
+}
+
+/// What one Fix match query asks of the providers.
+#[derive(Debug, PartialEq)]
+struct SearchPlan<'a> {
+    /// Look this id up (`lookup_by_id`).
+    id: Option<lisek_plugin_api::DirectId>,
+    /// Also (or only) search the query as a title.
+    search_text: bool,
+    /// Only this provider.
+    provider: Option<&'a str>,
+}
+
+impl<'a> SearchPlan<'a> {
+    /// - an IMDb id, a prefixed id or a link: lookup only, at the provider
+    ///   the prefix or link names (else every chosen one);
+    /// - a bare number: a title too ("1917", "300"), so the text is always
+    ///   searched; it is looked up as an id only when one provider is
+    ///   chosen — a number means something different at every provider;
+    /// - anything else: a title search.
+    fn new(id: Option<IdQuery>, chosen: Option<&'a str>) -> Self {
+        match id {
+            Some(IdQuery { ambiguous: true, id, .. }) => Self {
+                id: chosen.map(|_| id),
+                search_text: true,
+                provider: chosen,
+            },
+            Some(IdQuery { id, provider, .. }) => Self {
+                id: Some(id),
+                search_text: false,
+                provider: chosen.or(provider),
+            },
+            None => Self {
+                id: None,
+                search_text: true,
+                provider: chosen,
+            },
+        }
+    }
 }
 
 /// Search the configured metadata providers by hand ("Fix match").
@@ -90,9 +150,10 @@ pub async fn search(
     }
     let pool = pool(&state).await?;
     let providers = provider_registry::enabled_provider_keys(&pool, &state.secrets).await?;
+    let plan = SearchPlan::new(parse_id_query(title), query.provider.as_deref());
     let providers: Vec<_> = providers
         .into_iter()
-        .filter(|(key, _)| query.provider.as_deref().is_none_or(|wanted| wanted == key))
+        .filter(|(key, _)| plan.provider.is_none_or(|wanted| wanted == key))
         .collect();
     if providers.is_empty() {
         return Err(error(StatusCode::BAD_REQUEST, "provider_not_configured"));
@@ -100,36 +161,54 @@ pub async fn search(
 
     let mut response = ProviderSearchResponse {
         results: Vec::new(),
+        id_kind: plan.id.as_ref().map(|id| id_kind(id).to_string()),
         failures: Vec::new(),
     };
+    let language = auth.user.ui_language.clone();
+    let mut seen = std::collections::HashSet::new();
     for (key, api_key) in providers {
         let Some(provider) = provider_registry::build_provider(&key, &api_key) else {
             continue;
         };
-        tracing::debug!(provider = key, title, year = query.year, ?kind, "fix match: searching");
-        match provider
-            .search(kind, title, query.year, &auth.user.ui_language)
-            .await
-        {
-            Ok(found) => response.results.extend(found.into_iter().map(|c| {
-                ProviderCandidateResponse {
+        let mut push = |candidate: lisek_plugin_api::ProviderCandidate, matched_by: &str| {
+            if seen.insert((key.clone(), candidate.provider_id.clone())) {
+                response.results.push(ProviderCandidateResponse {
                     provider: key.clone(),
-                    provider_id: c.provider_id,
-                    title: c.title,
-                    year: c.year,
-                    overview: c.overview,
-                    poster_url: c.poster_url,
-                }
-            })),
-            Err(err) => {
-                tracing::warn!(provider = key, %err, "fix match: provider search failed");
-                response.failures.push(ProviderSearchFailure {
-                    provider: key,
-                    error: err.to_string(),
+                    provider_id: candidate.provider_id,
+                    title: candidate.title,
+                    year: candidate.year,
+                    overview: candidate.overview,
+                    poster_url: candidate.poster_url,
+                    matched_by: matched_by.to_string(),
                 });
             }
+        };
+        let mut failure = None;
+        if let Some(id) = &plan.id {
+            tracing::debug!(provider = key, ?id, ?kind, "fix match: looking up an id");
+            match provider.lookup_by_id(kind, id, &language).await {
+                Ok(Some(found)) => push(found, "id"),
+                Ok(None) => {}
+                Err(err) => failure = Some(err),
+            }
+        }
+        if plan.search_text && failure.is_none() {
+            tracing::debug!(provider = key, title, year = query.year, ?kind, "fix match: searching");
+            match provider.search(kind, title, query.year, &language).await {
+                Ok(found) => found.into_iter().for_each(|c| push(c, "search")),
+                Err(err) => failure = Some(err),
+            }
+        }
+        if let Some(err) = failure {
+            tracing::warn!(provider = key, %err, "fix match: provider search failed");
+            response.failures.push(ProviderSearchFailure {
+                provider: key,
+                error: err.to_string(),
+            });
         }
     }
+    // Id matches first, whichever provider found them.
+    response.results.sort_by_key(|c| c.matched_by != "id");
     Ok(Json(response))
 }
 
@@ -305,6 +384,30 @@ pub async fn identify(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ids_go_to_lookups_and_titles_to_searches() {
+        use lisek_plugin_api::DirectId;
+        let plan = |q: &str, chosen: Option<&'static str>| SearchPlan::new(parse_id_query(q), chosen);
+
+        let imdb = plan("tt0425622", None);
+        assert_eq!(imdb.id, Some(DirectId::Imdb("tt0425622".into())));
+        assert!(!imdb.search_text);
+        assert_eq!(imdb.provider, None);
+
+        let prefixed = plan("tvdb:60620", None);
+        assert_eq!((prefixed.id, prefixed.search_text, prefixed.provider), (Some(DirectId::Numeric("60620".into())), false, Some("tvdb")));
+        // The provider picked in the form wins over the prefix.
+        assert_eq!(plan("tvdb:60620", Some("tmdb")).provider, Some("tmdb"));
+
+        let number_alone = plan("1917", None);
+        assert_eq!((number_alone.id, number_alone.search_text), (None, true));
+        let number_at_tvdb = plan("60620", Some("tvdb"));
+        assert_eq!((number_at_tvdb.id, number_at_tvdb.search_text), (Some(DirectId::Numeric("60620".into())), true));
+
+        let title = plan("Star Wars", Some("tmdb"));
+        assert_eq!((title.id, title.search_text, title.provider), (None, true, Some("tmdb")));
+    }
 
     #[test]
     fn reads_the_providers_title_and_year() {

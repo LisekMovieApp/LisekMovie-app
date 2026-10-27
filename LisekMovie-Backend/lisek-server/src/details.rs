@@ -187,6 +187,21 @@ fn external_links(provider_data: &Value, is_series: bool) -> Vec<NamedLink> {
             url: format!("https://www.themoviedb.org/{kind}/{tmdb}"),
         });
     }
+    // Anime and music video sources (Faza 16).
+    for (key, name, base) in [
+        ("anilist_id", "AniList", "https://anilist.co/anime/"),
+        ("anidb_id", "aniDB", "https://anidb.net/anime/"),
+        ("mal_id", "MyAnimeList", "https://myanimelist.net/anime/"),
+        ("anisearch_id", "aniSearch", "https://www.anisearch.com/anime/"),
+        ("imvdb_id", "IMVDb", "https://imvdb.com/video/"),
+    ] {
+        if let Some(id) = numeric_id(provider_data, key) {
+            links.push(NamedLink {
+                name: name.into(),
+                url: format!("{base}{id}"),
+            });
+        }
+    }
     links
 }
 
@@ -616,6 +631,18 @@ mod tests {
         );
         let bad = serde_json::json!({"imdb_id": "nm1", "tmdb_id": 0, "tvdb_id": "x"});
         assert!(external_links(&bad, false).is_empty());
+        let anime = serde_json::json!({"anilist_id": 21, "anidb_id": "69", "mal_id": 21});
+        assert_eq!(
+            external_links(&anime, true)
+                .iter()
+                .map(|l| l.url.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "https://anilist.co/anime/21",
+                "https://anidb.net/anime/69",
+                "https://myanimelist.net/anime/21",
+            ]
+        );
     }
 
     #[test]

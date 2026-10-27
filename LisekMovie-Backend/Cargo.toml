@@ -21,3 +21,22 @@ version = "1.0.0-beta"
 edition = "2024"
 license = "PolyForm-Noncommercial-1.0.0"
 repository = "https://github.com/LisekMovieApp/LisekMovie-app"
+
+# Metadata provider extensions (`LisekMovie-plugin-*`): separate
+# repositories cloned next to LisekMovie-app, compiled in as path
+# dependencies (lisek-plugin-api explains why there is no runtime plugin
+# loading). lisek-server takes them from here (`{ workspace = true }`) and
+# `lisek-server/src/provider_registry.rs` is the one place that names them.
+# A new provider: a line here, a line in lisek-server/Cargo.toml, a match
+# arm and a `lisek_metadata::PROVIDERS` entry.
+[workspace.dependencies]
+lisek-plugin-tmdb = { path = "../../LisekMovie-plugin-tmdb" }
+lisek-plugin-thetvdb = { path = "../../LisekMovie-plugin-thetvdb" }
+lisek-plugin-imdb = { path = "../../LisekMovie-plugin-imdb" }
+lisek-plugin-omdb = { path = "../../LisekMovie-plugin-omdb" }
+lisek-plugin-anidb = { path = "../../LisekMovie-plugin-anidb" }
+lisek-plugin-anilist = { path = "../../LisekMovie-plugin-anilist" }
+lisek-plugin-anisearch = { path = "../../LisekMovie-plugin-anisearch" }
+lisek-plugin-imvdb = { path = "../../LisekMovie-plugin-imvdb" }
+lisek-plugin-vgmdb = { path = "../../LisekMovie-plugin-vgmdb" }
+lisek-plugin-audiodb = { path = "../../LisekMovie-plugin-audiodb" }

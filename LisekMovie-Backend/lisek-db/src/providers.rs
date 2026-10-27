@@ -3,7 +3,7 @@
 
 use uuid::Uuid;
 
-use lisek_metadata::{ProviderConfig, display_name_for};
+use lisek_metadata::{ProviderConfig, works_without_api_key};
 
 use crate::{DbError, PgPool};
 
@@ -51,13 +51,7 @@ fn stored_api_key(settings: &serde_json::Value) -> Option<StoredApiKey> {
 
 fn provider_config_from_row(row: ProviderConfigRow) -> ProviderConfig {
     let (provider_key, enabled, priority, settings) = row;
-    ProviderConfig {
-        display_name: display_name_for(&provider_key),
-        is_configured: settings_has_api_key(&settings),
-        provider_key,
-        enabled,
-        priority,
-    }
+    ProviderConfig::new(provider_key, enabled, priority, settings_has_api_key(&settings))
 }
 
 /// Every registered metadata provider (built-in or, later, an external
@@ -101,7 +95,11 @@ pub async fn list_enabled_provider_keys(
     Ok(rows
         .into_iter()
         .filter_map(|(provider_key, settings)| {
-            stored_api_key(&settings).map(|key| (provider_key, key))
+            // Providers that need no key (IMDb, AniList...) run with an
+            // empty one until the admin stores one.
+            stored_api_key(&settings)
+                .or_else(|| works_without_api_key(&provider_key).then(|| StoredApiKey::Plain(String::new())))
+                .map(|key| (provider_key, key))
         })
         .collect())
 }

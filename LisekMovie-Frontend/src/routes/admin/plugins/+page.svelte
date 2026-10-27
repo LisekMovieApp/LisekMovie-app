@@ -1,7 +1,8 @@
 <!--
-  Admin Panel — plugins tab: the metadata-provider registry (TMDB, TheTVDB)
-  with enable/disable, a priority number, and a gear button opening
-  `ProviderConfigModal` to set/clear an API key. Data loads client-side
+  Admin Panel — plugins tab: the metadata-provider registry (TMDB, TheTVDB,
+  IMDb, OMDb, AniList, aniDB, aniSearch, IMVDb, VGMdb, TheAudioDB) with
+  enable/disable, a priority number, what each provider covers and needs,
+  and a gear button opening `ProviderConfigModal` to set/clear an API key. Data loads client-side
   (via `onMount`) rather than through a `+page.ts` load function — this
   page's own `+layout.ts` guard already keeps non-admins out using data the
   root layout resolved server-side, but the provider list/mutations
@@ -73,6 +74,7 @@
 	<div class="mx-auto max-w-2xl">
 		<h1 class="text-2xl font-semibold text-neutral-100">{t('admin.plugins_title')}</h1>
 		<p class="mt-1 text-sm text-neutral-400">{t('admin.plugins_subtitle')}</p>
+		<p class="mt-2 text-xs text-neutral-500">{t('admin.plugins_order_hint')}</p>
 
 		{#if loading}
 			<p class="mt-8 text-sm text-neutral-400">{t('admin.loading')}</p>
@@ -83,17 +85,41 @@
 				{#each providers as provider (provider.provider_key)}
 					<li class="rounded-lg border border-white/10 bg-surface/60 p-4">
 						<div class="flex flex-wrap items-center justify-between gap-4">
-							<div class="flex items-center gap-3">
-								<span class="font-medium text-neutral-100">{provider.display_name}</span>
-								<span
-									class="rounded-full px-2 py-0.5 text-xs {provider.is_configured
-										? 'bg-gold/15 text-gold'
-										: 'bg-white/10 text-neutral-400'}"
-								>
-									{provider.is_configured
-										? t('admin.status_configured')
-										: t('admin.status_not_configured')}
-								</span>
+							<div class="flex min-w-0 flex-col gap-2">
+								<div class="flex flex-wrap items-center gap-2">
+									<span class="font-medium text-neutral-100">{provider.display_name}</span>
+									<span
+										class="rounded-full px-2 py-0.5 text-xs {provider.is_configured
+											? 'bg-gold/15 text-gold'
+											: 'bg-white/10 text-neutral-400'}"
+									>
+										{provider.is_configured
+											? t('admin.status_configured')
+											: t('admin.status_not_configured')}
+									</span>
+									{#if provider.stage !== 'full'}
+										<span
+											title={provider.stage === 'skeleton'
+												? t('admin.stage_skeleton_hint')
+												: undefined}
+											class="rounded-full border px-2 py-0.5 text-xs {provider.stage === 'skeleton'
+												? 'border-amber-400/40 text-amber-300'
+												: 'border-white/15 text-neutral-400'}"
+										>
+											{t(`admin.stage.${provider.stage}`)}
+										</span>
+									{/if}
+								</div>
+								<div class="flex flex-wrap items-center gap-1.5 text-xs text-neutral-400">
+									{#each provider.covers as cover (cover)}
+										<span class="rounded bg-white/5 px-1.5 py-0.5"
+											>{t(`admin.covers.${cover}`)}</span
+										>
+									{/each}
+									<span class="text-neutral-500"
+										>· {t(`admin.key_requirement.${provider.key_requirement}`)}</span
+									>
+								</div>
 							</div>
 
 							<div class="flex items-center gap-4">

@@ -43,7 +43,16 @@ SERVICE_USER="${LISEK_USER:-lisek}"
 HTTP_PORT="${LISEK_HTTP_PORT:-8096}"
 NODE_MAJOR=24
 MIN_NODE_MAJOR=20
-REPOS=(LisekMovie-app LisekMovie-plugin-tmdb LisekMovie-plugin-thetvdb)
+# The app and every metadata provider extension, cloned side by side (the
+# backend builds them as path dependencies).
+REPOS=(
+    LisekMovie-app
+    LisekMovie-plugin-tmdb LisekMovie-plugin-thetvdb
+    LisekMovie-plugin-imdb LisekMovie-plugin-omdb
+    LisekMovie-plugin-anidb LisekMovie-plugin-anilist LisekMovie-plugin-anisearch
+    LisekMovie-plugin-imvdb
+    LisekMovie-plugin-vgmdb LisekMovie-plugin-audiodb
+)
 ASSUME_YES="${LISEK_ASSUME_YES:-0}"
 LANG_CODE="${LISEK_LANG:-}"
 METHOD="${LISEK_METHOD:-}"
@@ -235,7 +244,7 @@ t() {
     local text
     if [[ "$LANG_CODE" == "pl" ]]; then text=${PL[$key]:-${EN[$key]:-$key}}; else text=${EN[$key]:-$key}; fi
     # shellcheck disable=SC2059
-    printf "$text" "$@"
+    printf -- "$text" "$@"
 }
 
 # --- input (works when the script itself comes from a pipe) ---------------------------

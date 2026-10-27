@@ -4676,7 +4676,7 @@
           {
             "name": "query",
             "in": "path",
-            "description": "Title to search for, as typed.",
+            "description": "Title to search for, as typed — or an id: `tt0425622` (IMDb),\n`tvdb:60620`, `anilist:21`, a provider page link, or a plain number\n(the chosen provider's own id; also searched as a title).",
             "required": true,
             "schema": {
               "type": "string"
@@ -4707,7 +4707,7 @@
           {
             "name": "provider",
             "in": "path",
-            "description": "Only this provider (`tmdb`, `tvdb`); every configured one when absent.",
+            "description": "Only this provider (`tmdb`, `tvdb`, `imdb`, `anilist`...); every\nconfigured one when absent.",
             "required": true,
             "schema": {
               "type": [
@@ -8059,9 +8059,14 @@
           "provider",
           "provider_id",
           "title",
-          "overview"
+          "overview",
+          "matched_by"
         ],
         "properties": {
+          "matched_by": {
+            "type": "string",
+            "description": "`id`: the provider resolved the id typed as the query; `search`: a\ntitle search result."
+          },
           "overview": {
             "type": "string"
           },
@@ -8096,9 +8101,20 @@
           "display_name",
           "enabled",
           "priority",
-          "is_configured"
+          "is_configured",
+          "key_stored",
+          "key_requirement",
+          "covers",
+          "stage"
         ],
         "properties": {
+          "covers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the provider has data for: `movies`, `series`, `anime`,\n`music_videos`, `music`."
+          },
           "display_name": {
             "type": "string"
           },
@@ -8106,7 +8122,16 @@
             "type": "boolean"
           },
           "is_configured": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "A key is stored, or the provider works without one."
+          },
+          "key_requirement": {
+            "type": "string",
+            "description": "`required`, `optional` or `none`."
+          },
+          "key_stored": {
+            "type": "boolean",
+            "description": "A key is stored (the key itself is never returned)."
           },
           "priority": {
             "type": "integer",
@@ -8114,6 +8139,17 @@
           },
           "provider_key": {
             "type": "string"
+          },
+          "stage": {
+            "type": "string",
+            "description": "`full`, `basic` or `skeleton` (registered, no results yet)."
+          },
+          "website": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where to get a key or read about the source."
           }
         }
       },
@@ -8160,12 +8196,19 @@
             },
             "description": "Providers whose search failed (network, rejected key)."
           },
+          "id_kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The query was read as an id (`imdb` or `numeric`), not only as a\ntitle."
+          },
           "results": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ProviderCandidateResponse"
             },
-            "description": "Candidates of every provider asked, each provider's best first."
+            "description": "Candidates of every provider asked: id matches first, then each\nprovider's search results, best first."
           }
         }
       },

@@ -234,7 +234,39 @@
 		"editor_age_from_provider": "Od dostawcy: {label}",
 		"editor_age_unrated": "Od dostawcy: brak kategorii",
 		"editor_age_rating_hint": "Minimalny wiek widza. Twoja wartość zostaje po ponownym skanowaniu; przydaje się dla nagrań domowych i tytułów bez klasyfikacji.",
-		"tab_hardware": "Sprzęt i Transkodowanie"
+		"tab_hardware": "Sprzęt i Transkodowanie",
+		"key_requirement": {
+			"required": "Wymaga klucza API",
+			"optional": "Klucz API opcjonalny",
+			"none": "Bez klucza API"
+		},
+		"covers": {
+			"movies": "Filmy",
+			"series": "Seriale",
+			"anime": "Anime",
+			"music_videos": "Teledyski",
+			"music": "Muzyka"
+		},
+		"stage": {
+			"full": "Pełny",
+			"basic": "Podstawowy",
+			"skeleton": "Wkrótce"
+		},
+		"stage_skeleton_hint": "Zarejestrowany, ale jeszcze nie zwraca wyników.",
+		"plugins_order_hint": "Priorytet to kolejność globalna. Biblioteka może mieć własną (np. AniList lub aniDB na początku dla anime) w Bibliotekach → biblioteka → pozycje.",
+		"get_key": "Skąd go wziąć",
+		"provider_hint": {
+			"tmdb": "Darmowy klucz API (v3) z ustawień konta TMDB.",
+			"tvdb": "Klucz API projektu z TheTVDB.",
+			"imdb": "Korzysta z publicznych podpowiedzi tytułów IMDb: tytuły, lata i plakaty, bez opisu. Połącz z OMDb lub TMDB, aby mieć szczegóły.",
+			"omdb": "Darmowy klucz (1000 zapytań dziennie) z omdbapi.com: opisy, gatunki, oceny i kategorie wiekowe z danych IMDb.",
+			"anilist": "Publiczne API GraphQL, bez klucza. Tylko anime; automatyczne dopasowanie wymaga dokładnego tytułu.",
+			"anidb": "aniDB wymaga zarejestrowanego klienta: wpisz jego nazwę albo nazwa:wersja (np. lisekmovie:1). Na razie tylko pobieranie po ID z aniDB; najwyżej jedno zapytanie co 2 sekundy.",
+			"anisearch": "aniSearch nie ma jeszcze publicznego API; dostawca jest zarejestrowany i nic nie zwraca.",
+			"imvdb": "Darmowy klucz z imvdb.com/developers. Dopasowuje teledyski nazwane „Wykonawca - Utwór”.",
+			"vgmdb": "Ścieżki dźwiękowe i muzyka z gier, pod nadchodzące biblioteki audio.",
+			"audiodb": "Wykonawcy i albumy, pod nadchodzące biblioteki audio. Bez klucza używany jest publiczny klucz testowy."
+		}
 	},
 	"errors": {
 		"database_connection_failed": "Nie udało się połączyć z bazą danych. Sprawdź dane połączenia i spróbuj ponownie.",
@@ -720,14 +752,14 @@
 		"title": "Napraw dopasowanie",
 		"hint_movie": "Wyszukaj właściwy film u dostawców metadanych. Biblioteka zapamięta nowe dopasowanie i przestanie zgadywać.",
 		"hint_series": "Wyszukaj właściwy serial u dostawców metadanych. Nowe dopasowanie dostaną wszystkie odcinki.",
-		"query": "Tytuł",
+		"query": "Tytuł lub ID",
 		"year": "Rok",
 		"provider": "Dostawca",
 		"all_providers": "Wszyscy dostawcy",
 		"search": "Szukaj",
 		"searching": "Szukam…",
 		"results": "Wyniki",
-		"no_results": "Nic nie znaleziono. Spróbuj innego tytułu albo usuń rok.",
+		"no_results": "Nic nie znaleziono. Spróbuj innego tytułu, usuń rok albo sprawdź ID.",
 		"provider_failed_some": "Niektórzy dostawcy nie odpowiedzieli: {providers}",
 		"confirm_movie": "Zastąpić metadane i grafiki pozycją „{title}”?",
 		"confirm_series": "Zastąpić metadane i grafiki całego serialu pozycją „{title}”?",
@@ -739,9 +771,19 @@
 			"provider_not_configured": "Ten dostawca nie jest skonfigurowany. Dodaj jego klucz API w ustawieniach serwera.",
 			"provider_item_not_found": "Dostawca nie ma już tej pozycji.",
 			"provider_failed": "Dostawca nie odpowiedział. Spróbuj za chwilę.",
-			"invalid_query": "Wpisz tytuł do wyszukania.",
+			"invalid_query": "Wpisz tytuł lub ID do wyszukania.",
 			"generic": "Nie udało się naprawić dopasowania."
-		}
+		},
+		"query_placeholder": "np. Matrix, tt0133093, tvdb:81189",
+		"id_help": "Możesz też wpisać ID: IMDb (tt0425622), TheTVDB lub TMDB (liczba z wybranym dostawcą albo tvdb:60620 / tmdb:603), AniList i aniDB (anilist:21, anidb:69) — albo wkleić link do strony tytułu.",
+		"id_number_pick_provider": "Sama liczba jest szukana jako tytuł. Wybierz dostawcę, aby sprawdzić ją też jako ID tego dostawcy (np. 60620 w TheTVDB).",
+		"id_detected": {
+			"imdb": "ID IMDb — sprawdzane u każdego dostawcy, który zna ID z IMDb.",
+			"prefixed": "ID dostawcy — pobierane bezpośrednio, bez szukania tytułu.",
+			"link": "Link — zawarte w nim ID jest pobierane bezpośrednio.",
+			"number": "Liczba — sprawdzana jako ID u wybranego dostawcy i szukana jako tytuł."
+		},
+		"id_match": "Dopasowanie po ID"
 	},
 	"download": {
 		"button": "Pobierz",
