@@ -596,7 +596,11 @@
 		"unsupported_hint": "Requires HTTPS or localhost and notification support.",
 		"connected_new_titles": "Connected · new titles",
 		"connecting_to_server": "Connecting to server…",
-		"enable_hint": "New titles while LisekMovie is open."
+		"enable_hint": "New titles while LisekMovie is open.",
+		"menu_enable": "Notifications: Turn on",
+		"menu_disable": "Notifications: Turn off",
+		"state_on": "On",
+		"state_off": "Off"
 	},
 	"accounts": {
 		"title": "Users",
@@ -646,7 +650,13 @@
 			"admin_required": "This action requires administrator access.",
 			"password_change_required": "Set your own password first.",
 			"operation_failed": "The operation failed. Check your connection and try again."
-		}
+		},
+		"search_placeholder": "Search users…",
+		"online_count": "{online} of {total} online",
+		"now_playing": "Watching: {title}",
+		"last_seen": "Last seen {time}",
+		"never_seen": "Never signed in",
+		"no_matches": "No user matches this name."
 	},
 	"password_change": {
 		"passwords_mismatch": "The passwords do not match.",
@@ -1120,5 +1130,44 @@
 		"load_failed": "Could not read the logs. Try again.",
 		"download_failed": "Could not download the file.",
 		"target": "target"
+	},
+	"profile": {
+		"title": "Profile settings",
+		"subtitle": "Your picture, password and interface language.",
+		"online": "Online",
+		"offline": "Offline",
+		"menu": {
+			"signed_in_as": "Signed in as:",
+			"role": "Role: {role}",
+			"settings": "Profile settings"
+		},
+		"avatar": {
+			"change": "Change avatar",
+			"remove": "Remove picture",
+			"hint": "JPG, PNG, WebP or GIF up to 10 MB. Cropped to a square and saved at 256×256.",
+			"saved": "Avatar updated.",
+			"removed": "Avatar removed."
+		},
+		"password": {
+			"title": "Change password",
+			"current": "Current password",
+			"new": "New password",
+			"confirm": "Confirm new password",
+			"save": "Save new password",
+			"saved": "Password changed. Other devices have been signed out."
+		},
+		"language": {
+			"title": "App language",
+			"label": "Interface language",
+			"server_default": "The server's default language is: {language}. Descriptions, posters and category names in the library will still be shown in the default language.",
+			"saved": "Language saved."
+		},
+		"errors": {
+			"avatar_invalid_image": "This file is not a supported picture (JPG, PNG, WebP or GIF).",
+			"avatar_too_large": "The picture is too large (max 10 MB).",
+			"avatar_empty": "The file is empty.",
+			"invalid_language": "This language is not available.",
+			"operation_failed": "Could not save the change. Try again."
+		}
 	}
 }

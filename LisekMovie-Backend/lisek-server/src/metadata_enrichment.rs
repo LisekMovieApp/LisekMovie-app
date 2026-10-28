@@ -424,8 +424,7 @@ impl EnrichCache {
 /// function's own doc comment for why this is safe to call unconditionally
 /// on every scan. `primary_language` is passed straight through to
 /// whichever provider matches, as its own image-language priority (if it
-/// has one) — currently the scanning admin's own UI language, pending a
-/// dedicated server-wide metadata-language setting (see the roadmap).
+/// has one) — the server's default language (`lisek_db::profiles`).
 ///
 /// A failed image download/write is logged and otherwise ignored — the
 /// text metadata it's paired with is still worth keeping even if the

@@ -160,6 +160,8 @@ Options: `--yes` (no questions — for cron), `--force` (reinstall the same vers
 
 - Administrator and user roles, generated first passwords with enforced change, session revocation, disabling accounts, login rate limiting.
 - **Parental controls** — per account: allowed libraries, a maximum age rating (from TMDB certifications or set by hand) and hiding unrated titles. Administrators are never restricted.
+- **Profiles** — the avatar menu in the top bar opens *Profile settings* (`/settings/profile`): upload a picture (JPG, PNG, WebP or GIF up to 10 MB, cropped to a 256×256 JPEG in `<config>/avatars`), change the password and pick the interface language. Library metadata (descriptions, posters, category names) always comes in the server's default language — the one the setup wizard was run in.
+- **Who is online** — Admin → Users lists every account with its avatar, a green or grey status dot (a request in the last 3 minutes — open tabs send a keep-alive every minute — or playback in progress), what it is watching and when it was last seen, with a name filter.
 - **Original-file downloads** — a "Download" button on every film and episode streams the original file with a readable name (`Title_S01E05.mkv`) and HTTP range support; it can be turned off per account.
 
 ### Interface
@@ -312,6 +314,7 @@ Every entry is tagged with its source:
 - **Fix a wrong match** — on a film or series page an administrator chooses **Fix match**, searches by title (and optionally year and provider) — or by id: an IMDb id (`tt0425622`) is resolved by IMDb, OMDb, TMDB and TheTVDB; `tvdb:60620`, `tmdb:603`, `anilist:21`, `anidb:69` or a link to the title's page go to that provider; a plain number is looked up at the provider picked in the form (and also searched as a title, since "1917" is a film) — and picks the right entry. A series is renamed with all its episodes; the artwork is fetched again.
 - **Download** — **Download** on a film page, or the download icon next to an episode, saves the original file. To keep an account to streaming only, untick *Allow downloading original files* under Admin → Users → the account → Access control.
 - **Parental controls** — the same Access control panel limits libraries and age ratings, with quick *child* and *teen* presets.
+- **Your profile** — click your avatar (top right) → *Profile settings* to change the picture, the password or the language. The same menu turns browser notifications on or off for this device.
 - **Install on a phone** — iPhone/iPad (Safari): Share → *Add to Home Screen*. Android (Chrome): account menu → *Install app*.
 - **API** — every feature is a REST endpoint; the OpenAPI document is served at `/api/openapi.json` and checked into `LisekMovie-Frontend/src/lib/api/openapi.json`.
 

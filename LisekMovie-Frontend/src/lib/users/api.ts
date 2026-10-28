@@ -1,6 +1,8 @@
 export interface Account {
     id: string; username: string; is_admin: boolean; disabled: boolean;
     must_change_password: boolean; ui_language: string;
+    /** Faza 19, admin user list only. */
+    avatar_url?: string | null; online?: boolean; last_seen_at?: string | null; now_playing?: string | null;
 }
 import { buildAuthHeader } from '$lib/auth';
 export async function accountRequest<T>(token: string, path: string, method = 'GET', body?: unknown): Promise<T> {

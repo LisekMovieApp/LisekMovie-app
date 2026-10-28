@@ -378,13 +378,11 @@ async fn enrich(
         return Ok(());
     }
 
-    // No server-wide metadata language exists yet; the requesting admin's
-    // UI language stands in for it, as it did when scans were synchronous.
-    let language = db::requester_language(&pool, progress.job.id)
+    // Metadata is fetched in the server's default language (Faza 19), not
+    // in the UI language of whoever queued the scan.
+    let language = lisek_db::profiles::default_language(&pool)
         .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "en".to_owned());
+        .unwrap_or_else(|_| "en".to_owned());
     let http = reqwest::Client::new();
     let config_dir = crate::state::config_dir();
     let mut cache = EnrichCache::default();

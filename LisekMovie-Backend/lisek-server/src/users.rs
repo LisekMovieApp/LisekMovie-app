@@ -33,10 +33,6 @@ pub struct CreatedUser { user:lisek_core::User, temporary_password:String }
 #[derive(Serialize,utoipa::ToSchema)]
 pub struct TemporaryPassword { temporary_password:String }
 
-#[utoipa::path(get,path="/api/admin/users",responses((status=200,body=Vec<lisek_core::User>),(status=403)),security(("lisek_auth"=[])))]
-pub async fn list(_admin: AdminUser,State(state):State<SharedState>)->Result<Json<Vec<lisek_core::User>>,UserError>{
-    Ok(Json(db::list(&pool(&state).await?).await?))
-}
 #[utoipa::path(post,path="/api/admin/users",request_body=CreateUser,responses((status=200,body=CreatedUser),(status=400),(status=403),(status=409)),security(("lisek_auth"=[])))]
 pub async fn create(AdminUser(auth): AdminUser,State(state):State<SharedState>,Json(req):Json<CreateUser>)->Result<impl IntoResponse,UserError>{
     let language=req.ui_language.unwrap_or(auth.user.ui_language.clone());

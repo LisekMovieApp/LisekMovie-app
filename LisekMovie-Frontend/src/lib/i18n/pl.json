@@ -596,7 +596,11 @@
 		"unsupported_hint": "Wymagane HTTPS lub localhost i obsługa powiadomień.",
 		"connected_new_titles": "Połączono · nowe tytuły",
 		"connecting_to_server": "Łączenie z serwerem…",
-		"enable_hint": "O nowych tytułach, gdy LisekMovie jest otwarty."
+		"enable_hint": "O nowych tytułach, gdy LisekMovie jest otwarty.",
+		"menu_enable": "Powiadomienia: Włącz",
+		"menu_disable": "Powiadomienia: Wyłącz",
+		"state_on": "Wł.",
+		"state_off": "Wył."
 	},
 	"accounts": {
 		"title": "Użytkownicy",
@@ -646,7 +650,13 @@
 			"admin_required": "Ta operacja wymaga uprawnień administratora.",
 			"password_change_required": "Najpierw ustaw własne hasło.",
 			"operation_failed": "Operacja nie powiodła się. Sprawdź połączenie i spróbuj ponownie."
-		}
+		},
+		"search_placeholder": "Szukaj użytkowników…",
+		"online_count": "{online} z {total} online",
+		"now_playing": "Ogląda: {title}",
+		"last_seen": "Ostatnio aktywny {time}",
+		"never_seen": "Nigdy się nie zalogował",
+		"no_matches": "Żaden użytkownik nie pasuje do tej nazwy."
 	},
 	"password_change": {
 		"passwords_mismatch": "Hasła nie są takie same.",
@@ -1120,5 +1130,44 @@
 		"load_failed": "Nie udało się wczytać logów. Spróbuj ponownie.",
 		"download_failed": "Nie udało się pobrać pliku.",
 		"target": "moduł"
+	},
+	"profile": {
+		"title": "Ustawienia profilu",
+		"subtitle": "Twój obraz, hasło i język interfejsu.",
+		"online": "Online",
+		"offline": "Offline",
+		"menu": {
+			"signed_in_as": "Zalogowany jako:",
+			"role": "Rola: {role}",
+			"settings": "Ustawienia profilu"
+		},
+		"avatar": {
+			"change": "Zmień avatar",
+			"remove": "Usuń obraz",
+			"hint": "JPG, PNG, WebP lub GIF do 10 MB. Przycinany do kwadratu i zapisywany w 256×256.",
+			"saved": "Avatar zaktualizowany.",
+			"removed": "Avatar usunięty."
+		},
+		"password": {
+			"title": "Zmiana hasła",
+			"current": "Aktualne hasło",
+			"new": "Nowe hasło",
+			"confirm": "Potwierdź nowe hasło",
+			"save": "Zapisz nowe hasło",
+			"saved": "Hasło zmienione. Inne urządzenia zostały wylogowane."
+		},
+		"language": {
+			"title": "Język aplikacji",
+			"label": "Język interfejsu",
+			"server_default": "Domyślny język serwera to: {language}. Opisy, plakaty oraz nazwy kategorii w bibliotece będą nadal wyświetlane w języku domyślnym.",
+			"saved": "Język zapisany."
+		},
+		"errors": {
+			"avatar_invalid_image": "Ten plik nie jest obsługiwanym obrazem (JPG, PNG, WebP lub GIF).",
+			"avatar_too_large": "Obraz jest za duży (maks. 10 MB).",
+			"avatar_empty": "Plik jest pusty.",
+			"invalid_language": "Ten język jest niedostępny.",
+			"operation_failed": "Nie udało się zapisać zmiany. Spróbuj ponownie."
+		}
 	}
 }

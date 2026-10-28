@@ -2025,7 +2025,8 @@
     },
     "/api/admin/users": {
       "get": {
-        "operationId": "list",
+        "summary": "Every account with avatar and online status.",
+        "operationId": "admin_list",
         "responses": {
           "200": {
             "description": "",
@@ -2034,7 +2035,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/User"
+                    "$ref": "#/components/schemas/AdminUserEntry"
                   }
                 }
               }
@@ -2509,7 +2510,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/User"
+                  "$ref": "#/components/schemas/Me"
                 }
               }
             }
@@ -5273,10 +5274,233 @@
           }
         ]
       }
+    },
+    "/api/users/me/avatar": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Uploads a new avatar: the raw image as the request body (JPEG, PNG,\nWebP or GIF, up to 10 MB). Stored as a 256×256 JPEG.",
+        "operationId": "upload_avatar",
+        "requestBody": {
+          "content": {
+            "image/*": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AvatarResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "avatar_empty / avatar_invalid_image"
+          },
+          "401": {
+            "description": ""
+          },
+          "413": {
+            "description": "avatar_too_large"
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Removes the account's avatar (the initial is shown again).",
+        "operationId": "delete_avatar",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AvatarResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/users/me/heartbeat": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Keep-alive from an open app tab. The request itself marks the session\nas seen (see `Presence`); nothing else happens.",
+        "operationId": "heartbeat",
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/users/me/language": {
+      "put": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Changes the account's own interface language.",
+        "operationId": "set_language",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetLanguage"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/users/{id}/avatar": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "An account's avatar (JPEG). Any signed-in account may load it; image\ntags may pass the session as `?token=`.",
+        "operationId": "get_avatar",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "image/jpeg": {}
+            }
+          },
+          "304": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
     }
   },
   "components": {
     "schemas": {
+      "AdminUserEntry": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/User"
+          },
+          {
+            "type": "object",
+            "required": [
+              "online"
+            ],
+            "properties": {
+              "avatar_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "last_seen_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "now_playing": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "What the account is playing right now."
+              },
+              "online": {
+                "type": "boolean",
+                "description": "A request within the last 3 minutes (an open app tab sends one\nevery minute) or playback in progress."
+              }
+            }
+          }
+        ],
+        "description": "One account in the admin user list."
+      },
       "AudioOption": {
         "type": "object",
         "required": [
@@ -5363,6 +5587,18 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "AvatarResponse": {
+        "type": "object",
+        "properties": {
+          "avatar_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null after the avatar was removed."
           }
         }
       },
@@ -7492,6 +7728,33 @@
           }
         }
       },
+      "Me": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/User"
+          },
+          {
+            "type": "object",
+            "required": [
+              "server_language"
+            ],
+            "properties": {
+              "avatar_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "`/api/users/{id}/avatar?v=…`, or null without an avatar."
+              },
+              "server_language": {
+                "type": "string",
+                "description": "The server's default language: metadata (descriptions, artwork,\ncategory names) is fetched in it, whatever the account's UI language."
+              }
+            }
+          }
+        ],
+        "description": "The signed-in account as `/api/auth/me` returns it."
+      },
       "MediaItemDetail": {
         "type": "object",
         "description": "One item's full editable shape — what the metadata editor loads and\nwhat it hands back for [`update_media_item`]. `original_title` reads\nstraight from `metadata->>'original_title'` (see the Faza\n5-completion migration's doc comment for why that's a JSONB key, not a\ncolumn) and `overview` from the same `provider_data` slot the home feed\nalready reads (a manual edit and a provider match both land there —\nsee [`update_media_item`]). `locked_fields` names, verbatim, whichever\nof `\"title\"`/`\"original_title\"`/`\"year\"`/`\"overview\"` the admin has\nindividually protected — the same identifiers the editor's own\ncheckboxes use, so the frontend never needs a translation table.",
@@ -9226,6 +9489,18 @@
           "watched_seconds": {
             "type": "number",
             "format": "double"
+          }
+        }
+      },
+      "SetLanguage": {
+        "type": "object",
+        "required": [
+          "ui_language"
+        ],
+        "properties": {
+          "ui_language": {
+            "type": "string",
+            "description": "`en` or `pl`."
           }
         }
       },

@@ -24,6 +24,10 @@ export interface AuthUser {
 	ui_language: string;
 	email: string | null;
 	created_at: string;
+	/** Faza 19: `/api/users/{id}/avatar?v=…`, or null without an avatar. */
+	avatar_url: string | null;
+	/** The server's default (metadata) language. */
+	server_language: string;
 }
 
 export const load: LayoutLoad = async ({ fetch, url, data }) => {

@@ -11,6 +11,16 @@
     import UserRestrictions from '$lib/components/UserRestrictions.svelte';
     import Icon from '$lib/components/Icon.svelte';
     import { SvelteSet } from 'svelte/reactivity';
+    import Avatar from '$lib/components/Avatar.svelte';
+    import { relativeTime } from '$lib/users/profile';
+    /** Faza 19: live filter by name (debounced) and presence refresh. */
+    const SEARCH_DEBOUNCE_MS = 200, PRESENCE_REFRESH_MS = 30_000;
+    let query = $state(''), debounced = $state(''), now = $state(Date.now());
+    $effect(() => {
+        const value = query;
+        const timer = setTimeout(() => debounced = value, SEARCH_DEBOUNCE_MS);
+        return () => clearTimeout(timer);
+    });
     let users = $state<Account[]>([]), selected = $state<Account | null>(null);
     let creating = $state(false), loaded = $state(false), busy = $state(false);
     let name = $state(''), admin = $state(false), disabled = $state(false), language = $state('');
@@ -21,9 +31,30 @@
      * libraries the restrictions editor offers. */
     const restricted = new SvelteSet<string>();
     let libraries = $state<Library[]>([]);
+    const filtered = $derived.by(() => {
+        const needle = debounced.trim().toLocaleLowerCase();
+        return needle ? users.filter(u => u.username.toLocaleLowerCase().includes(needle)) : users;
+    });
+    const onlineCount = $derived(users.filter(u => u.online).length);
+    function presence(user: Account): string {
+        if (user.online) return user.now_playing ? t('accounts.now_playing', { title: user.now_playing }) : t('profile.online');
+        return user.last_seen_at ? t('accounts.last_seen', { time: relativeTime(user.last_seen_at, getLocale(), now) }) : t('accounts.never_seen');
+    }
+    /** Avatars and online status change on their own; account fields are left as edited here. */
+    async function refreshPresence() {
+        try {
+            const fresh = new Map((await accountRequest<Account[]>(token, '/api/admin/users')).map(u => [u.id, u]));
+            users = users.map(u => { const f = fresh.get(u.id); return f ? { ...u, avatar_url: f.avatar_url, online: f.online, last_seen_at: f.last_seen_at, now_playing: f.now_playing } : u; });
+        } catch { /* The next refresh tries again. */ }
+        now = Date.now();
+    }
+    onMount(() => {
+        const timer = setInterval(() => { if (loaded && document.visibilityState === 'visible') void refreshPresence(); }, PRESENCE_REFRESH_MS);
+        return () => clearInterval(timer);
+    });
     onMount(async () => {
         token = getSessionCookieClientSide() ?? '';
-        try { users = await accountRequest<Account[]>(token, '/api/admin/users'); loaded = true; }
+        try { users = await accountRequest<Account[]>(token, '/api/admin/users'); loaded = true; now = Date.now(); }
         catch (e) { error = accountErrorKey(e); }
         listRestricted(token).then(r => r.forEach(x => restricted.add(x.user_id))).catch(() => {});
         fetchLibraries(token).then(l => libraries = l).catch(() => {});
@@ -47,11 +78,11 @@
             if (creating) {
                 const result = await accountRequest<{user: Account; temporary_password: string}>(token, '/api/admin/users', 'POST',
                     { username: name, is_admin: admin, ui_language: language, password: password || null });
-                users = [...users, result.user]; edit(result.user); receipt(result.temporary_password, result.user.username);
+                users = [...users, { ...result.user, avatar_url: null, online: false, last_seen_at: null, now_playing: null }]; edit(result.user); receipt(result.temporary_password, result.user.username);
             } else if (selected) {
                 const result = await accountRequest<Account>(token, `/api/admin/users/${selected.id}`, 'PUT',
                     { username: name, is_admin: admin, disabled, ui_language: language });
-                users = users.map(u => u.id === result.id ? result : u);
+                users = users.map(u => u.id === result.id ? { ...u, ...result } : u);
                 const sessionRevoked = result.id === page.data.user?.id && (result.disabled || result.is_admin !== selected.is_admin);
                 edit(result);
                 if (sessionRevoked) { await leave(); return; }
@@ -92,19 +123,36 @@
     {/if}
     {#if error}<p role="alert" class="mb-5 rounded bg-red-950/40 p-4 text-red-200">{t(error)}</p>{/if}
     {#if saved}<p role="status" class="mb-4 text-gold">{t('accounts.saved')}</p>{/if}
-    <div class="grid gap-6 md:grid-cols-[240px_1fr]">
+    <div class="grid gap-6 md:grid-cols-[300px_1fr]">
         <nav aria-label={t('accounts.user_list')} class="flex flex-col gap-2">
+            <div class="relative">
+                <Icon name="search" class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-neutral-500" />
+                <input type="search" class="search" bind:value={query} placeholder={t('accounts.search_placeholder')} aria-label={t('accounts.search_placeholder')} autocomplete="off" />
+            </div>
+            {#if loaded}<p class="flex items-center gap-1.5 px-1 text-xs text-neutral-400"><span class="size-2 rounded-full bg-emerald-500"></span>{t('accounts.online_count', { online: String(onlineCount), total: String(users.length) })}</p>{/if}
             {#if !loaded}<p>{t('accounts.loading')}</p>{/if}
-            {#each users as user (user.id)}
-                <button disabled={busy || signedOut} onclick={() => edit(user)} aria-current={selected?.id === user.id ? 'true' : undefined} class="text-left {selected?.id === user.id ? 'border-gold bg-white/5' : ''}">
-                    <span class="flex items-center gap-1.5 break-all font-medium">{user.username}{#if restricted.has(user.id) && !user.is_admin}<span class="text-gold" title={t('restrictions.restricted_badge')}><Icon name="lock" class="size-3.5" /></span>{/if}</span>
-                    <span class="text-xs text-neutral-400">{user.is_admin ? t('accounts.administrator') : t('accounts.user')} · {user.disabled ? t('accounts.disabled') : user.must_change_password ? t('accounts.password_change_required') : t('accounts.active')}</span>
+            {#each filtered as user (user.id)}
+                <button disabled={busy || signedOut} onclick={() => edit(user)} aria-current={selected?.id === user.id ? 'true' : undefined} class="user-row {selected?.id === user.id ? 'is-selected' : ''}">
+                    <Avatar username={user.username} url={user.avatar_url} online={user.online ?? false} class="size-11 text-base" />
+                    <span class="flex min-w-0 flex-1 flex-col">
+                        <span class="flex items-center gap-1.5 font-medium"><span class="truncate">{user.username}</span>{#if restricted.has(user.id) && !user.is_admin}<span class="text-gold" title={t('restrictions.restricted_badge')}><Icon name="lock" class="size-3.5" /></span>{/if}{#if user.is_admin}<span class="badge">{t('accounts.administrator')}</span>{/if}</span>
+                        <span class="truncate text-xs {user.online ? 'text-emerald-400' : 'text-neutral-400'}">{presence(user)}</span>
+                        <span class="truncate text-xs text-neutral-500">{user.disabled ? t('accounts.disabled') : user.must_change_password ? t('accounts.password_change_required') : t('accounts.active')}</span>
+                    </span>
                 </button>
+            {:else}
+                {#if loaded}<p class="rounded-lg border border-dashed border-white/10 p-4 text-sm text-neutral-400">{t('accounts.no_matches')}</p>{/if}
             {/each}
         </nav>
         {#if creating || selected}
             <div class="rounded-lg border border-white/10 bg-surface/50 p-6">
-                <h2 class="mb-5 text-xl">{creating ? t('accounts.add_user') : selected?.username}</h2>
+                {#if selected && !creating}
+                    {@const listed = users.find(u => u.id === selected?.id)}
+                    <div class="mb-5 flex items-center gap-4">
+                        <Avatar username={selected.username} url={listed?.avatar_url} online={listed?.online ?? false} class="size-16 text-2xl" />
+                        <div class="min-w-0"><h2 class="truncate text-xl">{selected.username}</h2><p class="text-sm {listed?.online ? 'text-emerald-400' : 'text-neutral-400'}">{listed ? presence(listed) : ''}</p></div>
+                    </div>
+                {:else}<h2 class="mb-5 text-xl">{t('accounts.add_user')}</h2>{/if}
                 <form onsubmit={save} class="flex flex-col gap-4">
                     <fieldset disabled={busy || signedOut} class="flex flex-col gap-4">
                         <label>{t('accounts.username')}<input required maxlength="128" autocomplete="off" bind:value={name} /></label>
@@ -139,5 +187,10 @@
     label { font-size:0.9rem; }
     input:not([type=checkbox]),select { display:block; width:100%; margin-top:0.4rem; border:1px solid #525252; border-radius:0.4rem; padding:0.65rem; background:#171717; color:white; }
     .check { display:flex; align-items:center; gap:0.65rem; }
+    .user-row { display:flex; align-items:center; gap:0.8rem; width:100%; text-align:left; border-color:rgb(255 255 255 / 0.08); border-radius:0.75rem; background:rgb(255 255 255 / 0.02); transition:background-color 120ms, border-color 120ms; }
+    .user-row:not(:disabled):hover { background:rgb(255 255 255 / 0.06); border-color:rgb(255 255 255 / 0.18); }
+    .user-row.is-selected { border-color:#d5ad42; background:rgb(213 173 66 / 0.08); }
+    .badge { flex-shrink:0; border-radius:9999px; background:rgb(213 173 66 / 0.15); padding:0.05rem 0.45rem; font-size:0.65rem; font-weight:600; color:#d5ad42; }
+    input.search { margin-top:0; padding-left:2.2rem; border-radius:0.6rem; }
     button:focus-visible,input:focus-visible,select:focus-visible { outline:2px solid #d5ad42; outline-offset:2px; }
 </style>

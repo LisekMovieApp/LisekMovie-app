@@ -4,6 +4,7 @@
     import { getSessionCookieClientSide } from '$lib/auth';
     import { page } from '$app/state';
     import icon from '$lib/assets/favicon.svg';
+    import Icon from './Icon.svelte';
     let { userId }: { userId: string } = $props();
     let enabled = $state(false), supported = $state(false), connected = $state(false), busy = $state(false);
     let message = $state('');
@@ -105,10 +106,15 @@
         };
     });
 </script>
-<div class="mb-2 border-b border-neutral-700 pb-2 text-sm">
-    <button type="button" class="w-full rounded border border-neutral-700 px-3 py-2 text-left hover:border-gold-dim disabled:opacity-50" disabled={!supported || busy} onclick={() => toggle()} aria-pressed={enabled}>
-        {enabled ? t('browser_notifications.disable_notifications') : t('browser_notifications.enable_notifications')}
+<!-- Faza 19: a row of the account menu. The state comes from this device
+     (the saved choice and the browser's permission), so the row offers the
+     opposite action: "Notifications: Turn off" while they are on. -->
+<div class="text-sm">
+    <button type="button" class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-neutral-200 transition-colors hover:bg-white/10 hover:text-white focus-visible:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50" disabled={!supported || busy} onclick={() => toggle()} aria-pressed={enabled}>
+        <Icon name={enabled ? 'bell' : 'bell_off'} class="size-4.5 shrink-0 {enabled ? 'text-gold' : 'text-neutral-400'}" />
+        <span class="flex-1">{enabled ? t('browser_notifications.menu_disable') : t('browser_notifications.menu_enable')}</span>
+        <span class="rounded-full px-2 py-0.5 text-[0.65rem] font-semibold tracking-wide uppercase {enabled ? 'bg-gold/15 text-gold' : 'bg-white/5 text-neutral-400'}">{enabled ? t('browser_notifications.state_on') : t('browser_notifications.state_off')}</span>
     </button>
-    <p class="mt-1 px-1 text-xs text-neutral-400">{!supported ? t('browser_notifications.unsupported_hint') : enabled ? connected ? t('browser_notifications.connected_new_titles') : t('browser_notifications.connecting_to_server') : t('browser_notifications.enable_hint')}</p>
-    {#if message}<p role="status" class="mt-1 text-xs text-gold">{t(message)}</p>{/if}
+    <p class="px-3 pb-1 pl-10.5 text-xs text-neutral-500">{!supported ? t('browser_notifications.unsupported_hint') : enabled ? connected ? t('browser_notifications.connected_new_titles') : t('browser_notifications.connecting_to_server') : t('browser_notifications.enable_hint')}</p>
+    {#if message}<p role="status" class="px-3 pl-10.5 text-xs text-gold">{t(message)}</p>{/if}
 </div>

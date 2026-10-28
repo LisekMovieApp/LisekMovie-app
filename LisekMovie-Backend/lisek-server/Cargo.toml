@@ -49,6 +49,8 @@ tokio-util = { version = "0.7", features = ["io"] }
 utoipa = { version = "5.5", features = ["uuid", "chrono"] }
 utoipa-axum = "0.2"
 arc-swap = "1"
+# Avatar uploads (Faza 19): decode JPEG/PNG/WebP/GIF, resize, encode JPEG.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

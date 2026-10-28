@@ -139,7 +139,7 @@ impl<'a> SearchPlan<'a> {
 /// Search the configured metadata providers by hand ("Fix match").
 #[utoipa::path(get,path="/api/providers/search",tag="admin",params(ProviderSearchQuery),responses((status=200,body=ProviderSearchResponse),(status=400),(status=401),(status=403),(status=503)),security(("lisek_auth"=[])))]
 pub async fn search(
-    AdminUser(auth): AdminUser,
+    _admin: AdminUser,
     State(state): State<SharedState>,
     Query(query): Query<ProviderSearchQuery>,
 ) -> Result<Json<ProviderSearchResponse>, PlaybackError> {
@@ -164,7 +164,7 @@ pub async fn search(
         id_kind: plan.id.as_ref().map(|id| id_kind(id).to_string()),
         failures: Vec::new(),
     };
-    let language = auth.user.ui_language.clone();
+    let language = lisek_db::profiles::default_language(&pool).await.unwrap_or_else(|_| "en".to_owned());
     let mut seen = std::collections::HashSet::new();
     for (key, api_key) in providers {
         let Some(provider) = provider_registry::build_provider(&key, &api_key) else {
@@ -283,9 +283,11 @@ pub async fn identify(
         .ok_or(error(StatusCode::BAD_REQUEST, "provider_not_configured"))?;
     let provider = provider_registry::build_provider(&req.provider, &api_key)
         .ok_or(error(StatusCode::BAD_REQUEST, "provider_not_configured"))?;
+    // Metadata is always fetched in the server's default language.
+    let language = lisek_db::profiles::default_language(&pool).await.unwrap_or_else(|_| "en".to_owned());
 
     let matched = match provider
-        .lookup(kind, provider_id, &auth.user.ui_language)
+        .lookup(kind, provider_id, &language)
         .await
     {
         Ok(Some(matched)) => matched,
@@ -369,7 +371,7 @@ pub async fn identify(
             library.save_metadata_in_media_folder,
             &req.provider,
             &api_key,
-            &auth.user.ui_language,
+            &language,
             &matched,
         )
         .await;

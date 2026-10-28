@@ -29,6 +29,7 @@ pub mod games;
 pub mod notifications;
 pub mod people;
 pub mod playback;
+pub mod profiles;
 pub mod scan_jobs;
 pub mod search;
 pub mod seasons;

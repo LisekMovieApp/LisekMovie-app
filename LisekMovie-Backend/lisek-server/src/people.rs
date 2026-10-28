@@ -217,7 +217,8 @@ pub async fn get_person(
         .map_err(|_| MediaError::Internal)?
         .ok_or(MediaError::NotFound)?;
     if details_are_stale(&person) {
-        refresh_details(&state, &pool, &person, &auth.user.ui_language).await;
+        let language = lisek_db::profiles::default_language(&pool).await.unwrap_or_else(|_| "en".to_owned());
+        refresh_details(&state, &pool, &person, &language).await;
         person = visible()
             .await
             .map_err(|_| MediaError::Internal)?

@@ -19,6 +19,7 @@ mod identify;
 mod env_file;
 mod media;
 mod playback;
+mod profile;
 mod games;
 mod hardware;
 mod logging;

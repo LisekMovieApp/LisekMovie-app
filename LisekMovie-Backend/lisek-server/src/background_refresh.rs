@@ -33,13 +33,6 @@ use crate::state::AppState;
 /// within the same day.
 const REFRESH_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
-/// This job's own stand-in for the scanning admin's UI language (see
-/// `scan_jobs::scan_library`'s identical use of `auth.user.ui_language`) — a
-/// background pass has no request/admin session to read one from, so it
-/// always asks providers for English-prioritized images until a real
-/// server-wide "metadata language" setting exists (see the roadmap).
-const REFRESH_LANGUAGE: &str = "en";
-
 /// Runs for as long as the process does: sleeps `REFRESH_INTERVAL`, then
 /// runs one pass. Deliberately sleeps *before* the first pass rather than
 /// running immediately on startup — a server that was just started (very
@@ -77,6 +70,11 @@ async fn run_once(state: &Arc<AppState>) {
     if items.is_empty() {
         return;
     }
+    // Providers fetch descriptions and artwork in the server's default
+    // language (Faza 19), like scans and Fix match.
+    let language = lisek_db::profiles::default_language(&pool)
+        .await
+        .unwrap_or_else(|_| "en".to_owned());
 
     let global_providers = match crate::provider_registry::enabled_provider_keys(&pool, &state.secrets).await {
         Ok(providers) => providers,
@@ -163,7 +161,7 @@ async fn run_once(state: &Arc<AppState>) {
             &target,
             &file_path,
             library.save_metadata_in_media_folder,
-            REFRESH_LANGUAGE,
+            &language,
             forced_provider.as_deref(),
         )
         .await;

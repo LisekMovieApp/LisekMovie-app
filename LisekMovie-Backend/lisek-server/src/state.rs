@@ -111,6 +111,8 @@ pub struct AppState {
     pub trickplay_progress: std::sync::Mutex<crate::trickplay::Progress>,
     /// Download URLs handed out (`download`).
     pub download_tickets: crate::download::DownloadTickets,
+    /// Throttled "last seen" writes for the admin user list (Faza 19).
+    pub presence: crate::profile::Presence,
 }
 
 impl AppState {
@@ -126,6 +128,7 @@ impl AppState {
             has_accounts: std::sync::atomic::AtomicBool::new(false),
             trickplay_progress: std::sync::Mutex::default(),
             download_tickets: crate::download::DownloadTickets::default(),
+            presence: crate::profile::Presence::default(),
         }
     }
 

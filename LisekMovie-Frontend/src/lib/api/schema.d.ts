@@ -616,7 +616,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list"];
+        /** Every account with avatar and online status. */
+        get: operations["admin_list"];
         put?: never;
         post: operations["create"];
         delete?: never;
@@ -1838,10 +1839,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/users/me/avatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Uploads a new avatar: the raw image as the request body (JPEG, PNG,
+         *     WebP or GIF, up to 10 MB). Stored as a 256×256 JPEG.
+         */
+        post: operations["upload_avatar"];
+        /** Removes the account's avatar (the initial is shown again). */
+        delete: operations["delete_avatar"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/me/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Keep-alive from an open app tab. The request itself marks the session
+         *     as seen (see `Presence`); nothing else happens.
+         */
+        post: operations["heartbeat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/me/language": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Changes the account's own interface language. */
+        put: operations["set_language"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/{id}/avatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An account's avatar (JPEG). Any signed-in account may load it; image
+         *     tags may pass the session as `?token=`.
+         */
+        get: operations["get_avatar"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description One account in the admin user list. */
+        AdminUserEntry: components["schemas"]["User"] & {
+            avatar_url?: string | null;
+            /** Format: date-time */
+            last_seen_at?: string | null;
+            /** @description What the account is playing right now. */
+            now_playing?: string | null;
+            /**
+             * @description A request within the last 3 minutes (an open app tab sends one
+             *     every minute) or playback in progress.
+             */
+            online: boolean;
+        };
         AudioOption: {
             /** Format: int32 */
             channels?: number | null;
@@ -1865,6 +1957,10 @@ export interface components {
             is_default: boolean;
             language?: string | null;
             title?: string | null;
+        };
+        AvatarResponse: {
+            /** @description Null after the avatar was removed. */
+            avatar_url?: string | null;
         };
         BalancingInfo: {
             /** @description Devices new transcodes are spread over, with their load. */
@@ -2596,6 +2692,16 @@ export interface components {
         };
         LogoutResponse: {
             ok: boolean;
+        };
+        /** @description The signed-in account as `/api/auth/me` returns it. */
+        Me: components["schemas"]["User"] & {
+            /** @description `/api/users/{id}/avatar?v=…`, or null without an avatar. */
+            avatar_url?: string | null;
+            /**
+             * @description The server's default language: metadata (descriptions, artwork,
+             *     category names) is fetched in it, whatever the account's UI language.
+             */
+            server_language: string;
         };
         /**
          * @description One item's full editable shape — what the metadata editor loads and
@@ -3404,6 +3510,10 @@ export interface components {
             username: string;
             /** Format: double */
             watched_seconds: number;
+        };
+        SetLanguage: {
+            /** @description `en` or `pl`. */
+            ui_language: string;
         };
         SetProviderKeyRequest: {
             api_key: string;
@@ -5659,7 +5769,7 @@ export interface operations {
             };
         };
     };
-    list: {
+    admin_list: {
         parameters: {
             query?: never;
             header?: never;
@@ -5673,7 +5783,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["User"][];
+                    "application/json": components["schemas"]["AdminUserEntry"][];
                 };
             };
             403: {
@@ -6132,7 +6242,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["User"];
+                    "application/json": components["schemas"]["Me"];
                 };
             };
             401: {
@@ -8686,6 +8796,171 @@ export interface operations {
                 content?: never;
             };
             /** @description The session is not the caller's, has ended or expired */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    upload_avatar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "image/*": number[];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AvatarResponse"];
+                };
+            };
+            /** @description avatar_empty / avatar_invalid_image */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description avatar_too_large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_avatar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AvatarResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    heartbeat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_language: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetLanguage"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_avatar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                };
+            };
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             404: {
                 headers: {
                     [name: string]: unknown;

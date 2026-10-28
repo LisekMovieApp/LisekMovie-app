@@ -99,9 +99,12 @@ pub async fn login(
 
 /// Also answers for a session that still has to change its temporary
 /// password, so the client can show the password form.
-#[utoipa::path(get,path="/api/auth/me",tag="auth",responses((status=200,body=User),(status=401),(status=500),(status=503)),security(("lisek_auth"=[])))]
-pub async fn me(SessionUser { user, .. }: SessionUser) -> Json<User> {
-    Json(user)
+#[utoipa::path(get,path="/api/auth/me",tag="auth",responses((status=200,body=crate::profile::Me),(status=401),(status=500),(status=503)),security(("lisek_auth"=[])))]
+pub async fn me(
+    SessionUser { user, .. }: SessionUser,
+    State(state): State<SharedState>,
+) -> Result<Json<crate::profile::Me>, crate::profile::ProfileError> {
+    Ok(Json(crate::profile::me_for(&state, user).await?))
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -196,6 +199,8 @@ async fn resolve_session(
         .await
         .map_err(|_| AuthError::Internal)?
         .ok_or(AuthError::InvalidToken)?;
+    // Online status in the admin user list (at most one write a minute).
+    state.presence.touch(&pool, &token_hash);
 
     let session = ResolvedSession {
         user,
@@ -291,6 +296,7 @@ fn is_image_path(path: &str) -> bool {
     let media = segments.len() >= 5 && segments[1] == "api" && segments[2] == "media";
     let collection = segments.len() == 5 && segments[1] == "api" && segments[2] == "collections";
     let person = segments.len() == 5 && segments[1] == "api" && segments[2] == "people";
+    let avatar = segments.len() == 5 && segments[1] == "api" && segments[2] == "users" && segments[4] == "avatar";
     // `/api/media/{id}/poster|backdrop|logo`, the trickplay sprite
     // sheets `/api/media/{id}/trickplay/{n}` (CSS backgrounds), chapter
     // thumbnails `/api/media/{id}/chapters/{n}/image`,
@@ -302,6 +308,7 @@ fn is_image_path(path: &str) -> bool {
         || (media && segments.len() == 5 && segments[4] == "thumb")
         || (collection && matches!(segments[4], "poster" | "backdrop"))
         || (person && segments[4] == "image")
+        || avatar
 }
 
 #[derive(Debug)]

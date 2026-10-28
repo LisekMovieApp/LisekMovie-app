@@ -483,6 +483,9 @@ def main():
             # Faza 17: log files, browser reports, ffprobe errors, the admin log viewer API.
             from logs_smoke import check_logs
             check_logs(request,ok_json,token,other_token,root,bool(args.ffprobe))
+            # Faza 19: avatars, own UI language, server language, online status.
+            from profiles_smoke import check_profiles
+            check_profiles(request,ok_json,sql,base,token,other_token,root)
             ok_json("/api/auth/logout","POST",{},token)
             if args.node:
                 event=notification_queue.get(timeout=15)
@@ -503,7 +506,7 @@ def main():
             server.wait(timeout=10)
             log.close()
             server = None
-            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls, fix match, downloads, cast and crew, details and chapters, series pages, global search, alpha picker, watch statistics, hardware diagnostics, fix match by IMDb id after a reload, central logs")
+            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls, fix match, downloads, cast and crew, details and chapters, series pages, global search, alpha picker, watch statistics, hardware diagnostics, fix match by IMDb id after a reload, central logs, avatars and online status")
     finally:
         if server:
             server.terminate()

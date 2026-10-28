@@ -23,13 +23,15 @@
 	import UserMenu from './UserMenu.svelte';
 	import SearchOverlay from './SearchOverlay.svelte';
 	import { isSearchShortcut } from '$lib/media/search';
+	import { startHeartbeat } from '$lib/users/profile';
 
 	interface Props {
 		username: string;
 		isAdmin: boolean;
+		avatarUrl?: string | null;
 	}
 
-	let { username, isAdmin }: Props = $props();
+	let { username, isAdmin, avatarUrl = null }: Props = $props();
 
 	let gamesEnabled = $state(false);
 	let scrolled = $state(false);
@@ -143,8 +145,12 @@
 				});
 		}
 
+		// Faza 19: online status in Admin -> Users while this tab is visible.
+		const stopHeartbeat = startHeartbeat(getSessionCookieClientSide);
+
 		return () => {
 			active = false;
+			stopHeartbeat();
 			window.removeEventListener('scroll', onScroll);
 			window.removeEventListener('lisek-games-changed', refreshGames);
 			window.removeEventListener('focus', refreshGames);
@@ -199,7 +205,7 @@
 		>
 			<Icon name="search" class="size-6" />
 		</button>
-		<UserMenu {username} {isAdmin} />
+		<UserMenu {username} {isAdmin} {avatarUrl} />
 	</div>
 </header>
 

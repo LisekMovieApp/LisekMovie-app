@@ -195,6 +195,10 @@ pub async fn finish(
     lisek_db::insert_admin_user(&pool, req.admin_username.trim(), &password_hash, &req.ui_language)
         .await
         .map_err(db_error_to_setup_error)?;
+    // The wizard's language is the server's default (metadata language).
+    lisek_db::profiles::set_default_language(&pool, &req.ui_language)
+        .await
+        .map_err(db_error_to_setup_error)?;
 
     state.has_accounts.store(true, std::sync::atomic::Ordering::Relaxed);
     if let Some(database) = database {

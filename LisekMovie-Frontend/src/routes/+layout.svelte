@@ -59,7 +59,11 @@
   /login, with no route-based check needed here.
 -->
 {#if data.user && !data.user.must_change_password && !watching}
-	<Navbar username={data.user.username} isAdmin={data.user.is_admin} />
+	<Navbar
+		username={data.user.username}
+		isAdmin={data.user.is_admin}
+		avatarUrl={data.user.avatar_url}
+	/>
 {/if}
 {@render children()}
 <Toaster />

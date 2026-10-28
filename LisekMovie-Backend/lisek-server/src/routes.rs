@@ -28,7 +28,7 @@ use crate::openapi::ApiDoc;
 use crate::state::SharedState;
 use crate::{
     admin, auth, browser_notifications, collections, details, download, games, hardware, identify, logging, media,
-    notifications, people, playback, scan_jobs, search, series, setup, stats, telemetry, trickplay, users,
+    notifications, people, playback, profile, scan_jobs, search, series, setup, stats, telemetry, trickplay, users,
 };
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -77,6 +77,10 @@ fn user() -> OpenApiRouter<SharedState> {
         .routes(routes!(auth::me))
         .routes(routes!(auth::logout))
         .routes(routes!(users::change))
+        .routes(routes!(profile::set_language))
+        .routes(routes!(profile::upload_avatar, profile::delete_avatar))
+        .routes(routes!(profile::get_avatar))
+        .routes(routes!(profile::heartbeat))
         .routes(routes!(media::home_feed))
         .routes(routes!(media::list_libraries))
         .routes(routes!(media::library_items))
@@ -125,7 +129,7 @@ fn user() -> OpenApiRouter<SharedState> {
 
 fn admin() -> OpenApiRouter<SharedState> {
     OpenApiRouter::new()
-        .routes(routes!(users::list, users::create))
+        .routes(routes!(profile::admin_list, users::create))
         .routes(routes!(users::edit))
         .routes(routes!(users::reset))
         .routes(routes!(users::get_restrictions, users::set_restrictions))
