@@ -375,6 +375,18 @@ pub async fn reserve(settings: &PlaybackSettings) -> Option<(Target, Reservation
     if list.is_empty() {
         return None;
     }
+    // Faza 21: only devices that open and encode here (a VA-API node
+    // without a driver is skipped; with none left the session uses the CPU).
+    let mut working = Vec::with_capacity(list.len());
+    for target in list {
+        if crate::hw_health::check(&target, settings).await {
+            working.push(target);
+        }
+    }
+    let list = working;
+    if list.is_empty() {
+        return None;
+    }
     let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
     let mut active = crate::session::target_sessions();
     for (id, n) in pending.iter() {

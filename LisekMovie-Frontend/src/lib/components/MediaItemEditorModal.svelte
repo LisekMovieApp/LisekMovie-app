@@ -15,6 +15,10 @@
   is locked automatically on save (shown live), otherwise the next scan
   would take the title back from the file name. Replacing a picture locks
   it the same way.
+
+  Faza 21: the score (0-10, stars on the pages) and the directors, for a
+  film or series and for each episode on its own. Seasons have their own
+  editor (`SeasonEditorModal`).
 -->
 <script lang="ts">
 	import { t } from '$lib/i18n';
@@ -22,6 +26,8 @@
 	import {
 		editorErrorKey,
 		fetchMediaItem,
+		parseNames,
+		parseRating,
 		updateMediaItem,
 		type ArtworkKind,
 		type EditScope,
@@ -33,9 +39,21 @@
 	import { showToast } from '$lib/toast/toast.svelte';
 	import ArtworkEditor from './ArtworkEditor.svelte';
 
-	const SHARED_FIELDS = ['title', 'original_title', 'year', 'overview'] as const;
+	const SHARED_FIELDS = [
+		'title',
+		'original_title',
+		'year',
+		'overview',
+		'rating',
+		'directors'
+	] as const;
 	const SHARED_ART: ArtworkKind[] = ['poster', 'backdrop', 'logo'];
-	const EPISODE_FIELDS = ['episode_title', 'episode_overview'] as const;
+	const EPISODE_FIELDS = [
+		'episode_title',
+		'episode_overview',
+		'episode_rating',
+		'episode_directors'
+	] as const;
 
 	interface Props {
 		itemId: string;
@@ -64,6 +82,10 @@
 	let episodeTitle = $state('');
 	let episodeOverview = $state('');
 	let airDate = $state('');
+	let rating = $state('');
+	let directors = $state('');
+	let episodeRating = $state('');
+	let episodeDirectors = $state('');
 	let metadataLocked = $state(false);
 	let forcedProvider = $state('');
 	/** Faza 6: '' = the provider's age rating applies. */
@@ -87,14 +109,20 @@
 
 	/** What the form had when it was loaded, to see which fields changed. */
 	let initial = $state<Record<string, string>>({});
-	const current = $derived<Record<string, string>>({
+	const snapshot = () => ({
 		title: title.trim(),
 		original_title: originalTitle.trim(),
-		year: year.trim(),
+		// A number input's bound value is a number (or null) once edited.
+		year: String(year ?? '').trim(),
 		overview: overview.trim(),
 		episode_title: episodeTitle.trim(),
-		episode_overview: episodeOverview.trim()
+		episode_overview: episodeOverview.trim(),
+		rating: String(parseRating(rating) ?? rating.trim()),
+		directors: parseNames(directors).join('\n'),
+		episode_rating: String(parseRating(episodeRating) ?? episodeRating.trim()),
+		episode_directors: parseNames(episodeDirectors).join('\n')
 	});
+	const current = $derived<Record<string, string>>(snapshot());
 	const changed = $derived(
 		lockable.filter((field) => field in current && current[field] !== initial[field])
 	);
@@ -145,6 +173,13 @@
 			episodeTitle = detail.episode_title ?? '';
 			episodeOverview = detail.episode_overview ?? '';
 			airDate = detail.episode_air_date ?? '';
+			rating = detail.rating !== null && detail.rating !== undefined ? String(detail.rating) : '';
+			directors = (detail.directors ?? []).join('\n');
+			episodeRating =
+				detail.episode_rating !== null && detail.episode_rating !== undefined
+					? String(detail.episode_rating)
+					: '';
+			episodeDirectors = (detail.episode_directors ?? []).join('\n');
 			metadataLocked = detail.metadata_locked;
 			forcedProvider = detail.forced_provider ?? '';
 			ageRating =
@@ -152,14 +187,7 @@
 					? String(detail.age_rating)
 					: '';
 			locked = [...detail.locked_fields];
-			initial = {
-				title: title.trim(),
-				original_title: originalTitle.trim(),
-				year: year.trim(),
-				overview: overview.trim(),
-				episode_title: episodeTitle.trim(),
-				episode_overview: episodeOverview.trim()
-			};
+			initial = snapshot();
 		} catch {
 			loadFailed = true;
 		} finally {
@@ -190,6 +218,11 @@
 		if (!token || !item) return;
 
 		let payload: UpdateMediaItemPayload;
+		const score = parseRating(episodeMode ? episodeRating : rating);
+		if (score === undefined) {
+			errorKey = 'admin.editor_errors.invalid_rating';
+			return;
+		}
 		if (episodeMode) {
 			if (airDate && !/^\d{4}-\d{2}-\d{2}$/.test(airDate)) {
 				errorKey = 'admin.editor_errors.invalid_air_date';
@@ -200,6 +233,8 @@
 				episode_title: episodeTitle.trim() || null,
 				episode_overview: episodeOverview.trim() || null,
 				episode_air_date: airDate || null,
+				episode_rating: score,
+				episode_directors: parseNames(episodeDirectors),
 				locked_fields: lockedForSave()
 			};
 		} else {
@@ -208,7 +243,7 @@
 				errorKey = 'admin.editor_title_empty';
 				return;
 			}
-			const trimmedYear = year.trim();
+			const trimmedYear = String(year ?? '').trim();
 			const parsedYear = trimmedYear === '' ? null : Number(trimmedYear);
 			payload = {
 				scope,
@@ -220,7 +255,9 @@
 				forced_provider: forcedProvider || null,
 				// Episode-level locks of the episodes are kept by the server.
 				locked_fields: lockedForSave(),
-				age_rating: ageRating === '' ? null : Number(ageRating)
+				age_rating: ageRating === '' ? null : Number(ageRating),
+				rating: score,
+				directors: parseNames(directors)
 			};
 		}
 
@@ -267,6 +304,43 @@
 	const tabClass =
 		'border-b-2 px-3 py-2 text-sm font-medium transition-colors aria-selected:border-gold aria-selected:text-white';
 </script>
+
+{#snippet scoreAndPeople(level: 'item' | 'episode')}
+	<div class="grid gap-3 sm:grid-cols-[8rem_1fr]">
+		<label class="flex flex-col gap-1 text-sm text-neutral-300">
+			{t(level === 'episode' ? 'admin.editor_field_episode_rating' : 'admin.editor_field_rating')}
+			{#if level === 'episode'}
+				<input
+					type="text"
+					inputmode="decimal"
+					bind:value={episodeRating}
+					placeholder={t('admin.editor_rating_placeholder')}
+					class={input}
+				/>
+			{:else}
+				<input
+					type="text"
+					inputmode="decimal"
+					bind:value={rating}
+					placeholder={t('admin.editor_rating_placeholder')}
+					class={input}
+				/>
+			{/if}
+			<span class="text-xs text-neutral-500">{t('admin.editor_rating_hint')}</span>
+		</label>
+		<label class="flex flex-col gap-1 text-sm text-neutral-300">
+			{t(
+				level === 'episode' ? 'admin.editor_field_episode_directors' : 'admin.editor_field_directors'
+			)}
+			{#if level === 'episode'}
+				<textarea bind:value={episodeDirectors} rows="2" class="resize-y {input}"></textarea>
+			{:else}
+				<textarea bind:value={directors} rows="2" class="resize-y {input}"></textarea>
+			{/if}
+			<span class="text-xs text-neutral-500">{t('admin.editor_directors_hint')}</span>
+		</label>
+	</div>
+{/snippet}
 
 <svelte:window onkeydown={handleBackdropKeydown} />
 
@@ -352,6 +426,7 @@
 							{t('admin.editor_field_episode_overview')}
 							<textarea bind:value={episodeOverview} rows="5" class="resize-y {input}"></textarea>
 						</label>
+						{@render scoreAndPeople('episode')}
 					{:else}
 						<label class="flex flex-col gap-1 text-sm text-neutral-300">
 							{scope === 'series'
@@ -378,6 +453,7 @@
 							{t('admin.editor_field_overview')}
 							<textarea bind:value={overview} rows="4" class="resize-y {input}"></textarea>
 						</label>
+						{@render scoreAndPeople('item')}
 
 						<div class="grid gap-3 sm:grid-cols-2">
 							<label class="flex flex-col gap-1 text-sm text-neutral-300">

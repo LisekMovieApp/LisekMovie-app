@@ -6,7 +6,12 @@ import {
 	fetchFallbackItems,
 	migrateFallbackItem,
 	fetchProviderOrder,
-	setProviderOrder
+	setProviderOrder,
+	fetchSeason,
+	updateSeason,
+	setSeasonPoster,
+	parseNames,
+	parseRating
 } from './mediaItems';
 import { AdminApiError } from './api';
 
@@ -170,5 +175,57 @@ describe('setProviderOrder', () => {
 		expect(url).toBe('/api/admin/libraries/lib-1/provider-order/movie');
 		expect(options.method).toBe('PUT');
 		expect(JSON.parse(options.body)).toEqual({ provider_order: ['thetvdb', 'tmdb'] });
+	});
+});
+
+describe('season editor calls (Faza 21)', () => {
+	it('loads and saves a season through any of its episodes', async () => {
+		const fetchMock = stubFetch({ ok: true, json: () => Promise.resolve({ season: 2 }) });
+		await fetchSeason('tok', 'ep-1', 2);
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/admin/media/ep-1/seasons/2');
+		await updateSeason('tok', 'ep-1', 2, {
+			name: 'Sezon 2',
+			overview: null,
+			air_year: 2024,
+			locked_fields: ['name']
+		});
+		const [url, init] = fetchMock.mock.calls[1];
+		expect(url).toBe('/api/admin/media/ep-1/seasons/2');
+		expect(init.method).toBe('PUT');
+		expect(JSON.parse(init.body)).toEqual({
+			name: 'Sezon 2',
+			overview: null,
+			air_year: 2024,
+			locked_fields: ['name']
+		});
+	});
+
+	it('sends a season poster as a file or a link', async () => {
+		const fetchMock = stubFetch({ ok: true, json: () => Promise.resolve({ url: '/p?v=1' }) });
+		const file = new Blob(['x'], { type: 'image/png' });
+		expect(await setSeasonPoster('tok', 'ep-1', 1, file)).toBe('/p?v=1');
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/admin/media/ep-1/seasons/1/poster');
+		expect(fetchMock.mock.calls[0][1].headers['Content-Type']).toBe('image/png');
+		await setSeasonPoster('tok', 'ep-1', 1, 'https://example.org/p.jpg');
+		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ url: 'https://example.org/p.jpg' });
+	});
+});
+
+describe('score and directors fields (Faza 21)', () => {
+	it('reads a score with a comma or a dot, rounded to one decimal', () => {
+		expect(parseRating('7,46')).toBe(7.5);
+		expect(parseRating(' 8 ')).toBe(8);
+		expect(parseRating('')).toBeNull();
+		expect(parseRating('11')).toBeUndefined();
+		expect(parseRating('dużo')).toBeUndefined();
+		expect(parseRating('-1')).toBeUndefined();
+	});
+
+	it('splits directors by line or comma, without duplicates', () => {
+		expect(parseNames('Jan Reżyser\nAnna Kamera, jan reżyser\n \n')).toEqual([
+			'Jan Reżyser',
+			'Anna Kamera'
+		]);
+		expect(parseNames('')).toEqual([]);
 	});
 });

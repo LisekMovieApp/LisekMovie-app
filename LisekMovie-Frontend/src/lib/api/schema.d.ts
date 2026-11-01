@@ -402,6 +402,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/media/{item_id}/seasons/{season}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_season"];
+        /** A season's name, overview and year. */
+        put: operations["update_season"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/media/{item_id}/seasons/{season}/poster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replaces a season's poster (raw picture or JSON `{url}`). */
+        put: operations["set_season_poster"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/media/{item_id}/trickplay": {
         parameters: {
             query?: never;
@@ -416,6 +450,22 @@ export interface paths {
          *     file in place, or to retry a failure).
          */
         post: operations["regenerate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/metadata/languages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_metadata_languages"];
+        put: operations["set_metadata_languages"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2406,8 +2456,12 @@ export interface components {
         /** @description A director or writer, linking to their page. */
         CrewMember: {
             name: string;
-            /** Format: uuid */
-            person_id: string;
+            /**
+             * Format: uuid
+             * @description The person's page; null for a name an administrator typed that
+             *     matches nobody in the library (Faza 21).
+             */
+            person_id?: string | null;
         };
         CurrentJob: {
             /** Format: int32 */
@@ -2479,6 +2533,19 @@ export interface components {
             video_copied: boolean;
             /** Format: int32 */
             width: number;
+        };
+        /** @description One device's verdict, for the admin panel. */
+        DeviceHealth: {
+            /** Format: date-time */
+            checked_at: string;
+            /** @description Still in force (failures are retried after 15 minutes). */
+            current: boolean;
+            /** @description The FFmpeg line that explains a failure. */
+            error?: string | null;
+            /** @description `gpu::Target::id`, e.g. `vaapi:/dev/dri/renderD128`, `nvenc:0`. */
+            id: string;
+            ok: boolean;
+            source: components["schemas"]["Source"];
         };
         DeviceLoad: {
             api: string;
@@ -2569,17 +2636,28 @@ export interface components {
         };
         /** @description The series and episode side of an item, for the editor. */
         EpisodeContext: {
+            directors: string[];
             episode_air_date?: string | null;
             /** Format: int32 */
             episode_count?: number | null;
+            episode_directors: string[];
             episode_overview?: string | null;
+            /** Format: double */
+            episode_rating?: number | null;
             episode_title?: string | null;
+            /**
+             * Format: double
+             * @description Faza 21: the item's (film / series) rating and manual directors.
+             */
+            rating?: number | null;
             /** Format: uuid */
             series_id?: string | null;
             series_title?: string | null;
         };
         EpisodeRowResponse: {
             air_date?: string | null;
+            /** @description Faza 21: the episode's directors (set in the metadata editor). */
+            directors: string[];
             /** Format: double */
             duration_seconds?: number | null;
             /** Format: int32 */
@@ -2798,6 +2876,12 @@ export interface components {
         HardwareStatus: {
             /** @description Live: devices transcodes are spread over and their load. */
             balancing: components["schemas"]["BalancingInfo"];
+            /**
+             * @description Faza 21: devices found working or broken (tests before sessions,
+             *     diagnostics, failed transcodes). A broken one is skipped and its
+             *     sessions run on the CPU.
+             */
+            health: components["schemas"]["DeviceHealth"][];
             /** @description The saved pool (Faza 14), also when no diagnostics ran yet. */
             pool: components["schemas"]["HardwareDevice"][];
             report?: null | components["schemas"]["HardwareReport"];
@@ -3190,6 +3274,24 @@ export interface components {
             /** Format: uuid */
             user_id: string;
             username: string;
+        };
+        /**
+         * @description A new metadata language order: codes (`pl`, `en`, `pt-br` ...) plus
+         *     `original` (the production's own language) and `any`. Empty: back to
+         *     the default order.
+         */
+        MetadataLanguagesPayload: {
+            languages: string[];
+        };
+        /**
+         * @description Faza 21: the metadata language order. `languages` is what the
+         *     administrator saved (empty: never set); `effective` is the order the
+         *     scanner uses (the saved one, or the server's default language, English,
+         *     the original language).
+         */
+        MetadataLanguagesResponse: {
+            effective: string[];
+            languages: string[];
         };
         MigrateFallbackResponse: {
             backdrop_migrated: boolean;
@@ -3793,6 +3895,27 @@ export interface components {
         SeasonCardsResponse: {
             items: components["schemas"]["SeasonCardResponse"][];
         };
+        /** @description One season as the editor loads it. */
+        SeasonDetail: {
+            /** Format: int32 */
+            air_year?: number | null;
+            /** Format: int64 */
+            episode_count: number;
+            /** @description `name`, `overview`, `air_year`, `poster`. */
+            locked_fields: string[];
+            name?: string | null;
+            overview?: string | null;
+            /** Format: int32 */
+            season: number;
+            /** Format: uuid */
+            series_id: string;
+            series_title: string;
+            /**
+             * Format: int64
+             * @description Cache-buster for the poster preview.
+             */
+            version: number;
+        };
         SeasonFlagsRequest: {
             favorite?: boolean | null;
             watched?: boolean | null;
@@ -3920,6 +4043,11 @@ export interface components {
             /** Format: double */
             watched_seconds: number;
         };
+        /**
+         * @description Where a verdict came from.
+         * @enum {string}
+         */
+        Source: "probe" | "diagnostics" | "runtime";
         /**
          * @description The client's choices when starting playback. Every field is optional;
          *     an empty body plays the default tracks the way the client's family
@@ -4261,9 +4389,17 @@ export interface components {
              * @description The administrator's own age rating (0–21); null: the provider's.
              */
             age_rating?: number | null;
+            /**
+             * @description Faza 21: directors shown instead of the provider's credits; empty:
+             *     the provider's; omitted: unchanged.
+             */
+            directors?: string[] | null;
             /** @description `YYYY-MM-DD`. */
             episode_air_date?: string | null;
+            episode_directors?: string[] | null;
             episode_overview?: string | null;
+            /** Format: double */
+            episode_rating?: number | null;
             episode_title?: string | null;
             forced_provider?: string | null;
             /**
@@ -4276,6 +4412,11 @@ export interface components {
             metadata_locked?: boolean;
             original_title?: string | null;
             overview?: string | null;
+            /**
+             * Format: double
+             * @description Faza 21: 0–10 (detail page stars); null clears it; omitted: unchanged.
+             */
+            rating?: number | null;
             scope?: components["schemas"]["EditScope"];
             /** @description Film or series title (required for `item` on a film, and `series`). */
             title?: string | null;
@@ -4296,6 +4437,15 @@ export interface components {
             enabled: boolean;
             /** Format: int32 */
             priority: number;
+        };
+        UpdateSeasonRequest: {
+            /** Format: int32 */
+            air_year?: number | null;
+            /** @description `name`, `overview`, `air_year`, `poster`; changed fields are added. */
+            locked_fields?: string[];
+            /** @description "Sezon 1", "Specials" …; null: the provider's (or none). */
+            name?: string | null;
+            overview?: string | null;
         };
         /**
          * @description A local account. Never carries the password hash — that stays inside the
@@ -5511,6 +5661,160 @@ export interface operations {
             };
         };
     };
+    get_season: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Any episode of the series */
+                item_id: string;
+                season: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeasonDetail"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_season: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+                season: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSeasonRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateMediaItemResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_season_poster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+                season: number;
+            };
+            cookie?: never;
+        };
+        /** @description JSON {url}, or the raw picture (image/*) */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtworkUrl"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtworkResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     regenerate: {
         parameters: {
             query?: never;
@@ -5541,6 +5845,102 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_metadata_languages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetadataLanguagesResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_metadata_languages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetadataLanguagesPayload"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetadataLanguagesResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

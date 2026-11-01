@@ -10,6 +10,11 @@
   header" pattern `UserMenu.svelte`'s logout already established, rather
   than threading the session token through another layer of load functions
   just for this one page.
+
+  Faza 21: below the list, the metadata language order
+  (`MetadataLanguagesPanel`). Plugins are asked in priority order; when
+  the first one lacks a synopsis, poster or genres, the next ones fill
+  the gaps.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -17,6 +22,7 @@
 	import { getSessionCookieClientSide } from '$lib/auth';
 	import { fetchProviders, updateProvider, type ProviderConfig } from '$lib/admin/providers';
 	import ProviderConfigModal from '$lib/components/ProviderConfigModal.svelte';
+	import MetadataLanguagesPanel from '$lib/components/MetadataLanguagesPanel.svelte';
 
 	let providers: ProviderConfig[] = $state([]);
 	let loading = $state(true);
@@ -75,6 +81,7 @@
 		<h1 class="text-2xl font-semibold text-neutral-100">{t('admin.plugins_title')}</h1>
 		<p class="mt-1 text-sm text-neutral-400">{t('admin.plugins_subtitle')}</p>
 		<p class="mt-2 text-xs text-neutral-500">{t('admin.plugins_order_hint')}</p>
+		<p class="mt-1 text-xs text-neutral-500">{t('admin.plugins_cascade_hint')}</p>
 
 		{#if loading}
 			<p class="mt-8 text-sm text-neutral-400">{t('admin.loading')}</p>
@@ -180,6 +187,8 @@
 				{/each}
 			</ul>
 		{/if}
+
+		<MetadataLanguagesPanel />
 	</div>
 </main>
 

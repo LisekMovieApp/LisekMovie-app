@@ -366,3 +366,36 @@ fn every_downmix_chain_runs_on_this_ffmpeg() {
         assert!(out.status.success(), "{algorithm:?}: {}", String::from_utf8_lossy(&out.stderr));
     }
 }
+
+/// Faza 21: a GPU that does not open (no VA-API driver, no render node)
+/// costs the viewer a moment, not the stream: the run is repeated on the CPU.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_vaapi_run_that_cannot_open_the_gpu_continues_on_the_cpu() {
+    if !have_ffmpeg() {
+        return;
+    }
+    let media = scratch("fallback-media");
+    let movie = make_movie(&media, "Fallback.mkv");
+    let mut settings = settings();
+    settings.hardware_acceleration = "vaapi".into();
+    // A render node that never exists, whatever this machine has.
+    settings.hardware_device_path = "/nonexistent/dri/renderD199".into();
+    settings.hardware_decoding_codecs = vec![];
+    let request = PlaybackRequest { max_height: Some(240), max_bitrate_kbps: Some(800), ..Default::default() };
+    let started = start("fallback", &movie, request, settings, 0.0, chrome()).await;
+    let s = &started.session;
+    let VideoAction::Encode(encode) = &s.spec().plan.video else { panic!("expected a transcode") };
+    if !encode.gpu_encode {
+        // This FFmpeg build has no h264_vaapi: nothing on the GPU to fail.
+        session::stop(&s.spec().id).await;
+        return;
+    }
+    let init = s.init_segment().await.expect("the CPU run produces the stream");
+    let first = s.media_segment(0).await.expect("first segment");
+    assert!(std::fs::metadata(&init).unwrap().len() > 0 && std::fs::metadata(&first).unwrap().len() > 0);
+    assert!(s.software_fallback(), "the session switched to the CPU");
+    assert_eq!(lisek_playback::hw_health::known("vaapi"), Some(false), "the device is marked broken");
+    let log = std::fs::read_to_string(started.dir.join("ffmpeg.log")).unwrap();
+    assert!(log.contains("continuing on the CPU"), "{log}");
+    session::stop(&s.spec().id).await;
+}

@@ -164,7 +164,12 @@ pub async fn search(
         id_kind: plan.id.as_ref().map(|id| id_kind(id).to_string()),
         failures: Vec::new(),
     };
-    let language = lisek_db::profiles::default_language(&pool).await.unwrap_or_else(|_| "en".to_owned());
+    let default_language = lisek_db::profiles::default_language(&pool).await.unwrap_or_else(|_| "en".to_owned());
+    let stored = lisek_db::profiles::metadata_languages(&pool).await.unwrap_or_default();
+    let language = crate::metadata_cascade::first_language(
+        &crate::metadata_cascade::effective_chain(&stored, &default_language),
+        &default_language,
+    );
     let mut seen = std::collections::HashSet::new();
     for (key, api_key) in providers {
         let Some(provider) = provider_registry::build_provider(&key, &api_key) else {
@@ -283,14 +288,20 @@ pub async fn identify(
         .ok_or(error(StatusCode::BAD_REQUEST, "provider_not_configured"))?;
     let provider = provider_registry::build_provider(&req.provider, &api_key)
         .ok_or(error(StatusCode::BAD_REQUEST, "provider_not_configured"))?;
-    // Metadata is always fetched in the server's default language.
-    let language = lisek_db::profiles::default_language(&pool).await.unwrap_or_else(|_| "en".to_owned());
+    // Faza 21: fetched in the metadata language order (the first
+    // language, then the next ones for an empty synopsis or title).
+    let default_language = lisek_db::profiles::default_language(&pool).await.unwrap_or_else(|_| "en".to_owned());
+    let mut cache = EnrichCache::default();
+    let chain = cache.language_chain(&pool, &default_language).await;
+    let language = crate::metadata_cascade::first_language(&chain, &default_language);
 
     let matched = match provider
         .lookup(kind, provider_id, &language)
         .await
     {
-        Ok(Some(matched)) => matched,
+        Ok(Some(matched)) => {
+            crate::metadata_enrichment::localize(&req.provider, &api_key, kind, matched, &language, &chain).await
+        }
         Ok(None) => return Err(error(StatusCode::NOT_FOUND, "provider_item_not_found")),
         Err(err) => {
             tracing::warn!(provider = req.provider, provider_id, %err, "fix match: lookup failed");
@@ -332,7 +343,6 @@ pub async fn identify(
     };
     let config = config_dir();
     let http = reqwest::Client::new();
-    let mut cache = EnrichCache::default();
     let mut image_saved = false;
     let mut warnings: Vec<String> = Vec::new();
     let mut unsaved = 0usize;

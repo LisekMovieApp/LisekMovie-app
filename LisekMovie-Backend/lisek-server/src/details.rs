@@ -45,7 +45,9 @@ pub struct NamedLink {
 /// A director or writer, linking to their page.
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct CrewMember {
-    pub person_id: Uuid,
+    /// The person's page; null for a name an administrator typed that
+    /// matches nobody in the library (Faza 21).
+    pub person_id: Option<Uuid>,
     pub name: String,
 }
 
@@ -416,7 +418,7 @@ pub async fn item_details(
             .iter()
             .filter(|c| c.role == role)
             .map(|c| CrewMember {
-                person_id: c.person_id,
+                person_id: Some(c.person_id),
                 name: c.name.clone(),
             })
             .collect::<Vec<_>>()
@@ -450,7 +452,19 @@ pub async fn item_details(
         tags: list(&provider, "tags", MAX_TAGS),
         studios: list(&provider, "studios", 8),
         external_links: external_links(&provider, is_series),
-        directors: crew("Director"),
+        directors: match lisek_db::editor::names(metadata.get("manual_directors").cloned()) {
+            // Faza 21: directors set in the metadata editor, linked to their
+            // page when the library knows the person.
+            manual if !manual.is_empty() => {
+                let mut list = Vec::with_capacity(manual.len());
+                for name in manual {
+                    let person_id = lisek_db::people::find_by_name(&pool, &name).await?;
+                    list.push(CrewMember { person_id, name });
+                }
+                list
+            }
+            _ => crew("Director"),
+        },
         writers: crew("Writer"),
         video: probe
             .as_ref()

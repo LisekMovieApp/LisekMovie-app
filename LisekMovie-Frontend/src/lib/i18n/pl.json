@@ -300,7 +300,9 @@
 			"artwork_too_large": "Obraz jest za duży (maks. 25 MB).",
 			"artwork_download_failed": "Nie udało się pobrać obrazu z tego linku.",
 			"artwork_empty": "Plik jest pusty.",
-			"artwork_failed": "Nie udało się zapisać obrazu. Spróbuj ponownie."
+			"artwork_failed": "Nie udało się zapisać obrazu. Spróbuj ponownie.",
+			"invalid_rating": "Ocena musi być liczbą od 0 do 10.",
+			"invalid_input": "Któraś wartość jest za długa lub nieprawidłowa."
 		},
 		"editor_art": {
 			"poster": "Plakat",
@@ -334,6 +336,54 @@
 			"xmltv_placeholder": "http://192.168.1.10:8409/iptv/xmltv.xml",
 			"m3u_line": "M3U: {url}",
 			"xmltv_line": "XMLTV: {url}"
+		},
+		"editor_field_rating": "Ocena",
+		"editor_field_directors": "Reżyserzy",
+		"editor_field_episode_rating": "Ocena odcinka",
+		"editor_field_episode_directors": "Reżyserzy odcinka",
+		"editor_rating_placeholder": "np. 7,5",
+		"editor_rating_hint": "0–10, wyświetlana jako gwiazdki. Puste: brak.",
+		"editor_directors_hint": "Po jednym w wierszu lub po przecinku. Puste: z wtyczki.",
+		"plugins_cascade_hint": "Gdy pierwszej pasującej wtyczce brakuje opisu, plakatu lub gatunków, kolejne wtyczki w tej kolejności uzupełniają luki (tylko dla tego samego tytułu).",
+		"season_editor": {
+			"menu_entry": "Edytuj sezon",
+			"title": "Edytuj sezon",
+			"subtitle": "{series} · sezon {season} · odcinki: {count}",
+			"field_name": "Nazwa sezonu",
+			"field_air_year": "Rok",
+			"field_overview": "Opis",
+			"field_poster": "Plakat",
+			"name_placeholder": "Sezon {season}",
+			"saved": "Sezon zapisany"
+		},
+		"metadata_languages": {
+			"title": "Języki metadanych",
+			"hint": "Wtyczki są pytane najpierw w pierwszym języku. Gdy tytuł lub opis jest w nim pusty, próbowany jest kolejny język i tak dalej.",
+			"default_note": "Domyślna kolejność: język serwera, angielski, język oryginalny.",
+			"move_up": "Przesuń {language} wyżej",
+			"move_down": "Przesuń {language} niżej",
+			"remove": "Usuń {language}",
+			"add_label": "Dodaj język",
+			"add_placeholder": "Dodaj język…",
+			"add": "Dodaj",
+			"reset": "Przywróć domyślne",
+			"saved": "Kolejność języków zapisana",
+			"save_failed": "Nie udało się zapisać kolejności języków.",
+			"lang_pl": "Polski",
+			"lang_en": "Angielski",
+			"lang_de": "Niemiecki",
+			"lang_fr": "Francuski",
+			"lang_es": "Hiszpański",
+			"lang_it": "Włoski",
+			"lang_pt": "Portugalski",
+			"lang_cs": "Czeski",
+			"lang_uk": "Ukraiński",
+			"lang_ru": "Rosyjski",
+			"lang_ja": "Japoński",
+			"lang_ko": "Koreański",
+			"lang_zh": "Chiński",
+			"lang_original": "Język oryginalny (kraj produkcji)",
+			"lang_any": "Dowolny inny"
 		}
 	},
 	"errors": {
@@ -1082,7 +1132,18 @@
 		"pool_failed": "Nie udało się zapisać puli.",
 		"pool_none_active": "Żadne urządzenie nie jest włączone: wszystko transkoduje procesor.",
 		"live_load": "Obciążenie teraz",
-		"load_of": "{count} / {max}"
+		"load_of": "{count} / {max}",
+		"health": {
+			"title": "Stan GPU",
+			"hint": "Urządzenia sprawdzone przez serwer przed transkodowaniem, w diagnostyce lub takie, które zawiodły podczas odtwarzania. Uszkodzone urządzenie jest pomijane, a odtwarzanie trwa na CPU.",
+			"ok": "Działa",
+			"broken": "Uszkodzone",
+			"source_probe": "Test przed transkodowaniem",
+			"source_diagnostics": "Diagnostyka",
+			"source_runtime": "Błąd podczas odtwarzania",
+			"expired": "zostanie sprawdzone ponownie",
+			"on_cpu": "Transkodowanie używa CPU (software fallback), dopóki urządzenie znów nie zadziała."
+		}
 	},
 	"stats": {
 		"title": "Statystyki oglądania",

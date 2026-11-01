@@ -110,6 +110,8 @@ pub struct EpisodeRowResponse {
     pub runtime_minutes: Option<u32>,
     pub rating: Option<f64>,
     pub air_date: Option<String>,
+    /// Faza 21: the episode's directors (set in the metadata editor).
+    pub directors: Vec<String>,
     /// `/api/media/{id}/thumb` (`?token=` works).
     pub thumb_url: String,
     pub watched: bool,
@@ -160,6 +162,7 @@ fn episode_row(row: db::EpisodeRow) -> EpisodeRowResponse {
             .and_then(Value::as_f64)
             .filter(|r| r.is_finite() && *r > 0.0 && *r <= 10.0),
         air_date: text(&data, "air_date"),
+        directors: lisek_db::editor::names(data.get("directors").cloned()),
         watched: row.watched,
         favorite: row.favorite,
         position_seconds: row.position_seconds,
@@ -226,7 +229,7 @@ pub async fn season_poster(
     Path((item_id, season)): Path<(Uuid, i32)>,
 ) -> Result<Response, PlaybackError> {
     let pool = visible(&state, &auth, item_id).await?;
-    if let Some((series_id, file)) = db::season_poster_source(&pool, item_id, season).await? {
+    if let Some((series_id, file, poster_override_at)) = db::season_poster_source(&pool, item_id, season).await? {
         let name = layout::season_poster_name(season);
         let mut candidates = Vec::with_capacity(2);
         if let Some(dir) = layout::series_folder(FsPath::new(&file)) {
@@ -243,7 +246,10 @@ pub async fn season_poster(
             .await
             .ok()
             .flatten()
-            .and_then(|(_, reset_at)| reset_at);
+            .and_then(|(_, reset_at)| reset_at)
+            // Faza 21: a poster replaced in the editor beats older files.
+            .max(poster_override_at)
+            .or(poster_override_at);
         for (i, path) in candidates.iter().enumerate() {
             let bytes = if i + 1 < candidates.len() {
                 read_fresh_media_file(path, reset_at).await

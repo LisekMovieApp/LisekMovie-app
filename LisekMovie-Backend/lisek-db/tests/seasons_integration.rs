@@ -226,7 +226,7 @@ async fn seasons_cards_pages_and_flags() {
         0
     );
 
-    let (series_id, file) = seasons::season_poster_source(pool, e1, 2)
+    let (series_id, file, _) = seasons::season_poster_source(pool, e1, 2)
         .await
         .unwrap()
         .unwrap();

@@ -158,8 +158,14 @@ fn admin() -> OpenApiRouter<SharedState> {
             admin::set_provider_order
         ))
         .routes(routes!(admin::list_fallback_items))
+        .routes(routes!(
+            admin::get_metadata_languages,
+            admin::set_metadata_languages
+        ))
         .routes(routes!(editor::get_item, editor::update_item))
         .routes(routes!(editor::set_artwork))
+        .routes(routes!(editor::get_season, editor::update_season))
+        .routes(routes!(editor::set_season_poster))
         .routes(routes!(admin::migrate_fallback_item))
         .routes(routes!(scan_jobs::scan_library))
         .routes(routes!(scan_jobs::list))

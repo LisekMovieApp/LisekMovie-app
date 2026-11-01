@@ -183,6 +183,13 @@ def main():
             cleanup.callback(mock_imdb.server_close)
             cleanup.callback(mock_imdb.shutdown)
             env["LISEK_PROVIDER_URL_IMDB"]=mock_imdb_url
+            # Faza 21: TMDB and OMDb mocks for the metadata cascade.
+            from phase21_smoke import start_mock_metadata
+            mock_meta,mock_meta_url,mock_meta_seen=start_mock_metadata()
+            cleanup.callback(mock_meta.server_close)
+            cleanup.callback(mock_meta.shutdown)
+            env["LISEK_PROVIDER_URL_TMDB"]=mock_meta_url+"/tmdb"
+            env["LISEK_PROVIDER_URL_OMDB"]=mock_meta_url+"/omdb/"
             with socket.socket() as sock:
                 sock.bind(("127.0.0.1", 0))
                 port = sock.getsockname()[1]
@@ -493,6 +500,13 @@ def main():
                 phase20_smoke.check_quality(ok_json,sql,token,CHROME)
             phase20_smoke.check_syncplay(request,ok_json,sql,base,token,other_token,args.node)
             phase20_smoke.check_live_tv(request,ok_json,sql,base,token,other_token,root,args.ffmpeg)
+            # Faza 21: software fallback, season editor, language order, metadata cascade.
+            import phase21_smoke
+            if args.ffmpeg and args.ffprobe:
+                phase21_smoke.check_hardware_fallback(request,ok_json,sql,token,CHROME)
+            phase21_smoke.check_season_and_episode_editor(request,ok_json,sql,base,token,other_token)
+            phase21_smoke.check_languages(request,ok_json,token,other_token)
+            phase21_smoke.check_cascade(request,ok_json,sql,token,root,movie_path,mock_meta_seen)
             ok_json("/api/auth/logout","POST",{},token)
             if args.node:
                 event=notification_queue.get(timeout=15)
@@ -513,7 +527,7 @@ def main():
             server.wait(timeout=10)
             log.close()
             server = None
-            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls, fix match, downloads, cast and crew, details and chapters, series pages, global search, alpha picker, watch statistics, hardware diagnostics, fix match by IMDb id after a reload, central logs, avatars and online status, metadata editor and artwork, quality presets, watch together, live TV")
+            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls, fix match, downloads, cast and crew, details and chapters, series pages, global search, alpha picker, watch statistics, hardware diagnostics, fix match by IMDb id after a reload, central logs, avatars and online status, metadata editor and artwork, quality presets, watch together, live TV, GPU software fallback, season editor, metadata language order and cascade")
     finally:
         if server:
             server.terminate()

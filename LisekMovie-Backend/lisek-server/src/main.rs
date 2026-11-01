@@ -31,6 +31,7 @@ mod notifications;
 mod people;
 mod browser_notifications;
 mod openapi;
+mod metadata_cascade;
 mod metadata_enrichment;
 mod provider_registry;
 mod rate_limit;

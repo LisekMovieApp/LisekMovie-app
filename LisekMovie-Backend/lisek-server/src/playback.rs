@@ -812,6 +812,7 @@ pub async fn set_settings(_admin: AdminUser, State(state): State<SharedState>, J
     }
     db::set_settings(&pool(&state).await?, &req).await?;
     transcode::forget_tools();
+    lisek_playback::hw_health::reset();
     Ok(StatusCode::NO_CONTENT)
 }
 #[utoipa::path(post,path="/api/admin/playback/capabilities",request_body=lisek_core::playback_settings::PlaybackSettings,responses((status=200,body=transcode::Capabilities),(status=400),(status=403),(status=503)),security(("lisek_auth"=[])))]

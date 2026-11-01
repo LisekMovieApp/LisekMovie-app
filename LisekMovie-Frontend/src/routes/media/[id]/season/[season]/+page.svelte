@@ -25,6 +25,8 @@
 	import EpisodeInfoModal from '$lib/components/EpisodeInfoModal.svelte';
 	import EpisodeList from '$lib/components/EpisodeList.svelte';
 	import MediaItemEditorModal from '$lib/components/MediaItemEditorModal.svelte';
+	import SeasonEditorModal from '$lib/components/SeasonEditorModal.svelte';
+	import MoreMenu from '$lib/components/MoreMenu.svelte';
 	import WatchTogetherModal from '$lib/components/WatchTogetherModal.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import PlaystateButton from '$lib/components/PlaystateButton.svelte';
@@ -46,6 +48,9 @@
 	/** Faza 20: an episode in the administrator's editor / a watch-together room. */
 	let editingEpisode = $state<EpisodeRow | null>(null);
 	let togetherEpisode = $state<EpisodeRow | null>(null);
+	/** Faza 21: the season's own editor; a new poster busts the cache. */
+	let editingSeason = $state(false);
+	let posterVersion = $state(0);
 	const isAdmin = $derived(page.data.user?.is_admin === true);
 	function episodeLabel(episode: EpisodeRow): string {
 		const name = episode.title ?? t('series.episode_number', { number: String(episode.episode) });
@@ -213,7 +218,10 @@
 					>
 						{#if !posterFailed}
 							<img
-								src={imageUrl(season.poster_url, token)}
+								src={imageUrl(
+									posterVersion ? `${season.poster_url}?v=${posterVersion}` : season.poster_url,
+									token
+								)}
 								alt=""
 								onerror={() => (posterFailed = true)}
 								class="size-full object-cover"
@@ -268,6 +276,16 @@
 						>
 							<Icon name={allFavorite ? 'heart_filled' : 'heart'} class="size-6" />
 						</button>
+						{#if isAdmin && season.episodes.length > 0}
+							<MoreMenu
+								entries={[
+									{
+										labelKey: 'admin.season_editor.menu_entry',
+										onselect: () => (editingSeason = true)
+									}
+								]}
+							/>
+						{/if}
 					</div>
 					{#if actionError}
 						<p role="alert" class="mt-2 text-sm text-gold">{t(actionError)}</p>
@@ -312,6 +330,18 @@
 		scope="episode"
 		onClose={() => (editingEpisode = null)}
 		onSaved={() => triggerLoad(seriesId, seasonNumber)}
+	/>
+{/if}
+
+{#if editingSeason && season && season.episodes[0]}
+	<SeasonEditorModal
+		itemId={season.episodes[0].id}
+		season={season.season}
+		onClose={() => (editingSeason = false)}
+		onSaved={() => {
+			posterVersion = Date.now();
+			triggerLoad(seriesId, seasonNumber);
+		}}
 	/>
 {/if}
 

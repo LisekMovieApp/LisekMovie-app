@@ -6,6 +6,9 @@
   test encode per hardware encoder and device. Faza 14: below the button,
   the transcoding pool editor (`TranscodePool`) turns the result into
   devices the administrator switches on and assigns codecs to.
+  Faza 21: the verdict on each GPU the server tried (a test before the
+  first transcode, the diagnostics, or a transcode that failed and went on
+  on the CPU), so a broken VAAPI/QSV device is visible here.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -17,6 +20,7 @@
 
 	type Report = components['schemas']['HardwareReport'];
 	type Status = components['schemas']['HardwareStatus'];
+	type Health = components['schemas']['DeviceHealth'];
 
 	interface Props {
 		/** The pool was saved (the settings form reloads). */
@@ -28,11 +32,13 @@
 	let report = $state<Report | null>(null);
 	let running = $state(false);
 	let failed = $state(false);
+	let health = $state<Health[]>([]);
 
 	async function refresh() {
 		try {
 			const status = await api<Status>(token, '/api/admin/hardware');
 			report ??= status.report ?? null;
+			health = status.health ?? [];
 		} catch {
 			// The card keeps the last values.
 		}
@@ -48,6 +54,7 @@
 		} finally {
 			running = false;
 		}
+		void refresh();
 	}
 
 	onMount(() => {
@@ -83,6 +90,42 @@
 		{running ? t('hardware.running') : t('hardware.run')}
 	</button>
 	{#if failed}<p role="alert" class="mt-3 text-sm text-red-400">{t('hardware.failed')}</p>{/if}
+
+	{#if health.length > 0}
+		<section class="mt-4 {card}" aria-labelledby="hardware-health-title">
+			<h2 id="hardware-health-title" class="text-sm font-semibold text-neutral-100">
+				{t('hardware.health.title')}
+			</h2>
+			<p class="mt-1 text-xs text-neutral-400">{t('hardware.health.hint')}</p>
+			<ul class="mt-3 flex flex-col gap-2">
+				{#each health as device (device.id)}
+					<li
+						class="rounded-lg px-3 py-2 text-sm ring-1 {device.ok
+							? 'bg-emerald-500/10 text-emerald-200 ring-emerald-400/30'
+							: 'bg-red-500/10 text-red-200 ring-red-400/30'}"
+					>
+						<div class="flex flex-wrap items-center gap-2">
+							<span class="font-mono">{device.id}</span>
+							<span class={chip}>
+								{device.ok ? t('hardware.health.ok') : t('hardware.health.broken')}
+							</span>
+							<span class="text-xs text-neutral-400">
+								{t(`hardware.health.source_${device.source}`)} ·
+								{new Date(device.checked_at).toLocaleString()}
+								{#if !device.current}· {t('hardware.health.expired')}{/if}
+							</span>
+						</div>
+						{#if !device.ok && device.error}
+							<p class="mt-1 font-mono text-xs break-all text-red-300/90">{device.error}</p>
+						{/if}
+						{#if !device.ok && device.current}
+							<p class="mt-1 text-xs text-neutral-300">{t('hardware.health.on_cpu')}</p>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
 
 	<TranscodePool {report} {onsaved} />
 

@@ -87,8 +87,8 @@ pub async fn persist_scan_results(
 ///   facts (size, mtime) are refreshed.
 /// - an individual field in `locked_fields` keeps its old value: `title`
 ///   when `'title'` is locked, `year` when `'year'` is locked.
-/// - `original_title` and `provider_data` are carried forward, since the
-///   scanner has no fresh value for either.
+/// - `original_title`, `provider_data` and the editor's `manual_directors`
+///   are carried forward, since the scanner has no fresh value for them.
 /// - `probed_at` is cleared when the file's size or mtime changed, which
 ///   puts the item back on the probe list.
 pub async fn persist_scan_results_with_progress(
@@ -265,6 +265,10 @@ async fn upsert_batch(
                     || CASE WHEN 'year' = ANY(media_items.locked_fields) AND media_items.metadata ? 'year'
                             THEN jsonb_build_object('year', media_items.metadata->'year')
                             ELSE '{}'::jsonb END
+                    -- Faza 21: directors typed in the metadata editor.
+                    || CASE WHEN media_items.metadata ? 'manual_directors'
+                            THEN jsonb_build_object('manual_directors', media_items.metadata->'manual_directors')
+                            ELSE '{}'::jsonb END
             END,
             file_size = EXCLUDED.file_size,
             file_modified_at = EXCLUDED.file_modified_at,
@@ -329,6 +333,12 @@ pub async fn attach_provider_metadata(
                     THEN jsonb_build_object('overview', metadata->'provider_data'->'overview')
                     ELSE '{}'::jsonb
                 END
+                -- Faza 21: an edited rating stays too.
+                || CASE
+                    WHEN 'rating' = ANY(locked_fields) AND metadata->'provider_data' ? 'rating'
+                    THEN jsonb_build_object('rating', metadata->'provider_data'->'rating')
+                    ELSE '{}'::jsonb
+                END
                 -- An episode keeps its own data (title, still ...) when this
                 -- match came without it (the episode lookup failed).
                 || CASE
@@ -340,13 +350,19 @@ pub async fn attach_provider_metadata(
                 -- edited survives the provider's.
                 || CASE
                     WHEN ($3::jsonb ? 'episode')
-                         AND ('episode_title' = ANY(locked_fields) OR 'episode_overview' = ANY(locked_fields))
+                         AND (locked_fields && ARRAY['episode_title', 'episode_overview', 'episode_rating', 'episode_directors'])
                     THEN jsonb_build_object('episode', ($3::jsonb->'episode')
                         || CASE WHEN 'episode_title' = ANY(locked_fields)
                                 THEN jsonb_build_object('title', metadata->'provider_data'->'episode'->'title')
                                 ELSE '{}'::jsonb END
                         || CASE WHEN 'episode_overview' = ANY(locked_fields)
                                 THEN jsonb_build_object('overview', metadata->'provider_data'->'episode'->'overview')
+                                ELSE '{}'::jsonb END
+                        || CASE WHEN 'episode_rating' = ANY(locked_fields)
+                                THEN jsonb_build_object('rating', metadata->'provider_data'->'episode'->'rating')
+                                ELSE '{}'::jsonb END
+                        || CASE WHEN 'episode_directors' = ANY(locked_fields)
+                                THEN jsonb_build_object('directors', metadata->'provider_data'->'episode'->'directors')
                                 ELSE '{}'::jsonb END)
                     ELSE '{}'::jsonb
                 END

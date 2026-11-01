@@ -32,6 +32,10 @@ pub struct HardwareStatus {
     pub balancing: BalancingInfo,
     /// The saved pool (Faza 14), also when no diagnostics ran yet.
     pub pool: Vec<HardwareDevice>,
+    /// Faza 21: devices found working or broken (tests before sessions,
+    /// diagnostics, failed transcodes). A broken one is skipped and its
+    /// sessions run on the CPU.
+    pub health: Vec<lisek_playback::hw_health::DeviceHealth>,
 }
 
 #[utoipa::path(get, path = "/api/admin/hardware", responses((status = 200, body = HardwareStatus), (status = 401), (status = 403)), security(("lisek_auth" = [])))]
@@ -44,6 +48,7 @@ pub async fn status(
         report: hardware::last_report(),
         balancing: hardware::balancing(&settings).await,
         pool: settings.hardware_pool,
+        health: lisek_playback::hw_health::snapshot(),
     }))
 }
 
@@ -80,9 +85,12 @@ pub async fn set_pool(
         return Err(PlaybackError(StatusCode::BAD_REQUEST, "invalid_pool"));
     }
     lisek_db::playback::set_settings(&pool, &settings).await?;
+    // Other devices or paths: test them again.
+    lisek_playback::hw_health::reset();
     Ok(Json(HardwareStatus {
         report: hardware::last_report(),
         balancing: hardware::balancing(&settings).await,
         pool: settings.hardware_pool,
+        health: lisek_playback::hw_health::snapshot(),
     }))
 }

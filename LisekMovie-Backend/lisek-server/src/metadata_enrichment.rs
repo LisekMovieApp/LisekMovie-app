@@ -40,9 +40,12 @@ use lisek_metadata::image_cache::{
     store_image,
 };
 use lisek_metadata::layout;
-use lisek_plugin_api::{MovieQuery, ProviderEpisode, ProviderMatch, ProviderPerson, SeriesQuery};
+use lisek_plugin_api::{
+    MediaKind, MovieQuery, ProviderEpisode, ProviderMatch, ProviderPerson, SeriesQuery,
+};
 use uuid::Uuid;
 
+use crate::metadata_cascade;
 use crate::provider_registry;
 
 /// Builds `provider_key`'s extension (see [`provider_registry`]) and asks
@@ -126,6 +129,135 @@ async fn try_provider(
     }
 }
 
+fn kind_of(target: &EnrichTarget) -> MediaKind {
+    match target {
+        EnrichTarget::Movie { .. } => MediaKind::Movie,
+        EnrichTarget::Series { .. } => MediaKind::Series,
+    }
+}
+
+/// Faza 21, the language chain: `base` was fetched in `fetched_in`; the
+/// same title is fetched again by the plugin's own id in the languages of
+/// `chain` (see [`metadata_cascade`]). Languages ranked above
+/// `fetched_in` (the chain starts with `original`, say) are always
+/// fetched and win; the ones below are fetched only while the synopsis
+/// (or the title, a season name) is still empty. A plugin without its own
+/// id in the match, or a failed lookup, leaves the text as it is.
+pub(crate) async fn localize(
+    provider_key: &str,
+    api_key: &str,
+    kind: MediaKind,
+    mut base: ProviderMatch,
+    fetched_in: &str,
+    chain: &[String],
+) -> ProviderMatch {
+    let resolved = metadata_cascade::resolve_chain(
+        chain,
+        metadata_cascade::original_language(&base).as_deref(),
+    );
+    let (higher, lower): (&[String], &[String]) =
+        match resolved.iter().position(|code| code == fetched_in) {
+            Some(at) => (&resolved[..at], &resolved[at + 1..]),
+            None => (&resolved[..], &[]),
+        };
+    let wants_lower = metadata_cascade::needs_language(&base) && !lower.is_empty();
+    if let (Some(id), true) = (
+        metadata_cascade::own_id(&base, provider_key),
+        !higher.is_empty() || wants_lower,
+    ) && let Some(provider) = provider_registry::build_provider(provider_key, api_key)
+    {
+        // Lowest of the higher ones first: the best-ranked text is put
+        // last and stays.
+        for code in higher.iter().rev() {
+            match provider.lookup(kind, &id, code).await {
+                Ok(Some(other)) => metadata_cascade::prefer_text(&mut base, &other, code),
+                Ok(None) => {}
+                Err(err) => tracing::warn!(provider = provider_key, language = %code, %err, "metadata lookup in another language failed"),
+            }
+        }
+        for code in lower {
+            if !metadata_cascade::needs_language(&base) {
+                break;
+            }
+            match provider.lookup(kind, &id, code).await {
+                Ok(Some(other)) => {
+                    if metadata_cascade::fill_text(&mut base, &other, code) {
+                        tracing::debug!(provider = provider_key, language = %code, "text filled from the next metadata language");
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => tracing::warn!(provider = provider_key, language = %code, %err, "metadata lookup in another language failed"),
+            }
+        }
+    }
+    if chain.iter().any(|entry| entry == metadata_cascade::ANY) {
+        metadata_cascade::title_from_original(&mut base);
+    }
+    base
+}
+
+/// Faza 21: the first plugin in the administrator's order that matches
+/// `target`, completed in the language chain ([`localize`]); then, while
+/// it lacks a synopsis, poster or genres, the plugins after it fill the
+/// gaps ([`metadata_cascade::fill_from`]) — only with a match for the same
+/// title ([`metadata_cascade::consistent`]). `cascade == false` (a forced
+/// plugin) asks just the first one.
+async fn find_complete(
+    providers: &[(String, String)],
+    target: &EnrichTarget,
+    chain: &[String],
+    first_language: &str,
+    cascade: bool,
+) -> Option<Found> {
+    let kind = kind_of(target);
+    let mut rest = providers.iter();
+    let mut found = None;
+    for (provider_key, api_key) in rest.by_ref() {
+        if let Some(matched) = try_provider(provider_key, api_key, target, first_language).await {
+            let matched = localize(provider_key, api_key, kind, matched, first_language, chain).await;
+            found = Some((provider_key.clone(), matched));
+            break;
+        }
+    }
+    let (primary_key, mut merged) = found?;
+    if cascade {
+        for (provider_key, api_key) in rest {
+            let missing = metadata_cascade::missing_key_fields(&merged);
+            if missing.is_empty() {
+                break;
+            }
+            let Some(other) = try_provider(provider_key, api_key, target, first_language).await
+            else {
+                continue;
+            };
+            if !metadata_cascade::consistent(&merged.fields, &other.fields) {
+                tracing::info!(
+                    primary = %primary_key,
+                    provider = %provider_key,
+                    ?target,
+                    "another plugin matched a different title (ids or year differ) — not used to fill gaps"
+                );
+                continue;
+            }
+            let other = if missing.contains(&"overview") {
+                localize(provider_key, api_key, kind, other, first_language, chain).await
+            } else {
+                other
+            };
+            let filled = metadata_cascade::fill_from(&mut merged, &other, provider_key);
+            if !filled.is_empty() {
+                tracing::info!(
+                    primary = %primary_key,
+                    provider = %provider_key,
+                    ?filled,
+                    "metadata gaps filled from the next plugin"
+                );
+            }
+        }
+    }
+    Some((primary_key, merged))
+}
+
 /// Where a provider match's poster/backdrop should be written inside the
 /// media folder itself — `None` when the library has media-folder saving
 /// turned off, or when `file_path` unexpectedly has no parent directory
@@ -156,15 +288,62 @@ fn series_folder_destination(
     layout::series_folder(episode_file).map(|dir| dir.join(filename))
 }
 
+/// One season's episodes from the provider in `language`, once per pass
+/// (`None`: the lookup failed).
+async fn season_list(
+    cache: &mut EnrichCache,
+    provider_key: &str,
+    api_key: &str,
+    series_id: &str,
+    season: i32,
+    language: &str,
+) -> Option<Vec<ProviderEpisode>> {
+    let key = (provider_key.to_owned(), series_id.to_owned(), season, language.to_owned());
+    if !cache.season_episodes.contains_key(&key) {
+        let found = match provider_registry::build_provider(provider_key, api_key) {
+            Some(provider) => match provider.season_episodes(series_id, season, language).await {
+                Ok(episodes) => Some(episodes),
+                Err(err) => {
+                    tracing::warn!(provider = provider_key, series_id, season, language, %err, "season episodes lookup failed");
+                    None
+                }
+            },
+            None => None,
+        };
+        cache.season_episodes.insert(key.clone(), found);
+    }
+    cache.season_episodes.get(&key)?.clone()
+}
+
+fn episode_title(episodes: &[ProviderEpisode], place: &lisek_db::seasons::Placement) -> Option<String> {
+    let episode = episodes.iter().find(|e| e.episode == place.episode)?;
+    match place.end_episode {
+        Some(end) if end > place.episode => {
+            let titles: Vec<&str> = (place.episode..=end)
+                .filter_map(|n| episodes.iter().find(|e| e.episode == n)?.title.as_deref())
+                .filter(|t| !t.trim().is_empty())
+                .collect();
+            (!titles.is_empty()).then(|| titles.join(" / "))
+        }
+        _ => episode.title.clone().filter(|t| !t.trim().is_empty()),
+    }
+}
+
 /// The provider's facts about one episode (for a double episode, the first
 /// one), as `provider_data.episode`: title, overview, runtime_minutes,
 /// rating, still_url, air_date. `None` when the provider has none or the
 /// season lookup failed (the episode then keeps what it had).
+///
+/// Faza 21: asked in the metadata language order (`chain`, `language`
+/// when empty); a title or synopsis missing in one language comes from
+/// the next. The other facts come from the first language that knows
+/// the episode.
 async fn episode_facts(
     cache: &mut EnrichCache,
     provider_key: &str,
     api_key: &str,
     language: &str,
+    chain: &[String],
     series_fields: &serde_json::Value,
     place: &lisek_db::seasons::Placement,
 ) -> Option<serde_json::Value> {
@@ -173,34 +352,40 @@ async fn episode_facts(
         serde_json::Value::String(s) if !s.is_empty() => s.clone(),
         _ => return None,
     };
-    let key = (provider_key.to_owned(), series_id.clone(), place.season);
-    if !cache.season_episodes.contains_key(&key) {
-        let found = match provider_registry::build_provider(provider_key, api_key) {
-            Some(provider) => match provider.season_episodes(&series_id, place.season, language).await {
-                Ok(episodes) => Some(episodes),
-                Err(err) => {
-                    tracing::warn!(provider = provider_key, series_id, season = place.season, %err, "season episodes lookup failed");
-                    None
-                }
-            },
-            None => None,
-        };
-        cache.season_episodes.insert(key.clone(), found);
+    let original = series_fields
+        .get("original_language")
+        .and_then(|v| v.as_str());
+    let mut languages = metadata_cascade::resolve_chain(chain, original);
+    if !languages.iter().any(|l| l == language) {
+        languages.insert(0, language.to_owned());
     }
-    let episodes = cache.season_episodes.get(&key)?.as_ref()?;
-    let episode = episodes.iter().find(|e| e.episode == place.episode)?;
-    let title = match place.end_episode {
-        Some(end) if end > place.episode => {
-            let titles: Vec<&str> = (place.episode..=end)
-                .filter_map(|n| episodes.iter().find(|e| e.episode == n)?.title.as_deref())
-                .collect();
-            (!titles.is_empty()).then(|| titles.join(" / "))
+    let mut base: Option<ProviderEpisode> = None;
+    let mut title: Option<String> = None;
+    let mut overview: Option<String> = None;
+    for code in &languages {
+        if base.is_some() && title.is_some() && overview.is_some() {
+            break;
         }
-        _ => episode.title.clone(),
-    };
+        let Some(episodes) = season_list(cache, provider_key, api_key, &series_id, place.season, code).await else {
+            continue;
+        };
+        let Some(episode) = episodes.iter().find(|e| e.episode == place.episode) else {
+            continue;
+        };
+        if title.is_none() {
+            title = episode_title(&episodes, place);
+        }
+        if overview.is_none() {
+            overview = episode.overview.clone().filter(|o| !o.trim().is_empty());
+        }
+        if base.is_none() {
+            base = Some(episode.clone());
+        }
+    }
+    let episode = base?;
     Some(serde_json::json!({
         "title": title,
-        "overview": episode.overview,
+        "overview": overview,
         "runtime_minutes": episode.runtime_minutes,
         "rating": episode.rating,
         "still_url": episode.still_url,
@@ -262,8 +447,8 @@ async fn sync_series_layout(
             tracing::warn!(%series_id, season = season.number, %err, "cannot save season metadata");
         }
         // No season data at all (another provider, a failed lookup): keep
-        // whatever poster is there.
-        if matched.seasons.is_empty() {
+        // whatever poster is there. A poster replaced by hand stays too.
+        if matched.seasons.is_empty() || season.locked_fields.iter().any(|f| f == "poster") {
             continue;
         }
         let wanted = provided.and_then(|p| p.poster_url.as_deref());
@@ -369,10 +554,26 @@ pub struct EnrichCache {
     series_done: HashSet<Uuid>,
     /// A season's episodes from the provider, once per pass:
     /// `(provider, series id, season)` → episodes (`None`: lookup failed).
-    season_episodes: HashMap<(String, String, i32), Option<Vec<ProviderEpisode>>>,
+    /// `(provider, series id, season, language)`.
+    season_episodes: HashMap<(String, String, i32, String), Option<Vec<ProviderEpisode>>>,
+    /// Faza 21: the metadata language order in effect, read once per pass.
+    languages: Option<Vec<String>>,
 }
 
 impl EnrichCache {
+    /// The metadata language order (`metadata_cascade::effective_chain`):
+    /// the administrator's, or `fallback` (the server's default
+    /// language), English, the original language.
+    pub(crate) async fn language_chain(&mut self, pool: &PgPool, fallback: &str) -> Vec<String> {
+        if self.languages.is_none() {
+            let stored = lisek_db::profiles::metadata_languages(pool)
+                .await
+                .unwrap_or_default();
+            self.languages = Some(metadata_cascade::effective_chain(&stored, fallback));
+        }
+        self.languages.clone().unwrap_or_default()
+    }
+
     async fn image(
         &mut self,
         http: &reqwest::Client,
@@ -468,19 +669,20 @@ pub async fn enrich_item_cached(
         None => providers,
     };
 
+    let chain = cache.language_chain(pool, primary_language).await;
+    let first_language = metadata_cascade::first_language(&chain, primary_language);
     let memo_key = (target.clone(), forced_provider.map(str::to_owned));
     let found = match cache.lookups.get(&memo_key) {
         Some(found) => found.clone(),
         None => {
-            let mut found = None;
-            for (provider_key, api_key) in providers {
-                if let Some(matched) =
-                    try_provider(provider_key, api_key, target, primary_language).await
-                {
-                    found = Some((provider_key.clone(), matched));
-                    break;
-                }
-            }
+            let found = find_complete(
+                providers,
+                target,
+                &chain,
+                &first_language,
+                forced_provider.is_none(),
+            )
+            .await;
             if matches!(target, EnrichTarget::Series { .. }) {
                 cache.lookups.insert(memo_key, found.clone());
             }
@@ -507,7 +709,7 @@ pub async fn enrich_item_cached(
         save_in_media_folder,
         &provider_key,
         api_key,
-        primary_language,
+        &first_language,
         &matched,
     )
     .await
@@ -549,6 +751,11 @@ pub async fn apply_match(
     );
 
     let is_series = matches!(target, EnrichTarget::Series { .. });
+    let chain = if is_series {
+        cache.language_chain(pool, language).await
+    } else {
+        Vec::new()
+    };
     let placement = if is_series {
         lisek_db::seasons::placement(pool, item_id).await.ok().flatten()
     } else {
@@ -567,7 +774,7 @@ pub async fn apply_match(
     let mut episode_known = false;
     if let Some(place) = &placement
         && let Some(episode) =
-            episode_facts(cache, provider_key, api_key, language, &matched.fields, place).await
+            episode_facts(cache, provider_key, api_key, language, &chain, &matched.fields, place).await
     {
         still_url = episode.get("still_url").and_then(|u| u.as_str()).map(str::to_owned);
         episode_known = true;

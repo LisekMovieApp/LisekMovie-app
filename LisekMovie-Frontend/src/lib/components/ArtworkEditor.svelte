@@ -4,12 +4,19 @@
   (button or drag and drop) or from a link. The server decodes and
   re-encodes it, so only a clean picture is stored, and locks the kind
   against provider refreshes.
+
+  Faza 21: with `season`, the picture is that season's poster.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { t } from '$lib/i18n';
 	import { getSessionCookieClientSide } from '$lib/auth';
-	import { editorErrorKey, setArtwork, type ArtworkKind } from '$lib/admin/mediaItems';
+	import {
+		editorErrorKey,
+		setArtwork,
+		setSeasonPoster,
+		type ArtworkKind
+	} from '$lib/admin/mediaItems';
 	import Icon from './Icon.svelte';
 
 	interface Props {
@@ -17,10 +24,12 @@
 		kind: ArtworkKind;
 		/** Cache-buster of the image as loaded with the editor. */
 		version: number;
+		/** A season's poster instead of the item's picture (`kind` is `poster`). */
+		season?: number;
 		onchanged?: (kind: ArtworkKind) => void;
 	}
 
-	let { itemId, kind, version, onchanged }: Props = $props();
+	let { itemId, kind, version, season, onchanged }: Props = $props();
 
 	const MAX_BYTES = 25 * 1024 * 1024;
 	const ASPECT: Record<ArtworkKind, string> = {
@@ -46,7 +55,9 @@
 
 	onMount(() => {
 		token = getSessionCookieClientSide() ?? '';
-		src = withToken(`/api/media/${encodeURIComponent(itemId)}/${kind}?v=${version}`);
+		const path =
+			season === undefined ? kind : `seasons/${encodeURIComponent(String(season))}/poster`;
+		src = withToken(`/api/media/${encodeURIComponent(itemId)}/${path}?v=${version}`);
 	});
 
 	async function send(source: Blob | string) {
@@ -55,7 +66,10 @@
 		errorKey = null;
 		done = false;
 		try {
-			const next = await setArtwork(token, itemId, kind, source);
+			const next =
+				season === undefined
+					? await setArtwork(token, itemId, kind, source)
+					: await setSeasonPoster(token, itemId, season, source);
 			src = withToken(next);
 			missing = false;
 			done = true;

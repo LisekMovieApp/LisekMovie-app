@@ -152,6 +152,14 @@
 				</p>
 			{/if}
 
+			{#if episode.directors && episode.directors.length > 0}
+				<!-- Faza 21: the episode's own directors (metadata editor). -->
+				<p class="text-sm text-neutral-300">
+					<span class="text-neutral-400">{t('details.director')}:</span>
+					<span class="text-gold">{episode.directors.join(', ')}</span>
+				</p>
+			{/if}
+
 			<div>
 				<!-- eslint-disable svelte/no-navigation-without-resolve -- playHref builds on resolve() -->
 				<a

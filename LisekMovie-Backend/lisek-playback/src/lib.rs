@@ -12,6 +12,7 @@ pub mod fmp4;
 pub mod gpu;
 pub mod hardware;
 pub mod hls;
+pub mod hw_health;
 pub mod keyframes;
 pub mod profile;
 pub mod session;

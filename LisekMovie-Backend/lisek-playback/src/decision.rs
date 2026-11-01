@@ -307,6 +307,57 @@ fn select_backend(settings: &PlaybackSettings, tools: &FfmpegTools) -> Option<To
     )
 }
 
+/// Faza 21: the same plan on the CPU only — no hardware decoding,
+/// encoding or GPU tone mapping — for when the GPU fails at run time.
+/// HEVC stays HEVC with `libx265`; without it the stream becomes H.264,
+/// which `keep_codec` (the client already has the first segments) forbids.
+/// `None`: nothing to change (no video encode, nothing on the GPU) or no
+/// CPU equivalent.
+pub fn software_variant(
+    plan: &PlaybackPlan,
+    settings: &PlaybackSettings,
+    tools: &FfmpegTools,
+    keep_codec: bool,
+) -> Option<(PlaybackPlan, PlaybackSettings)> {
+    let VideoAction::Encode(encode) = &plan.video else { return None };
+    let on_gpu = encode.gpu_decode
+        || encode.gpu_encode
+        || hardware_api(settings).is_some()
+        || encode.tonemap.as_ref().is_some_and(|t| t.backend != TonemapBackend::Software);
+    if !on_gpu {
+        return None;
+    }
+    let mut software = settings.clone();
+    software.hardware_acceleration = "none".into();
+    let mut e = (**encode).clone();
+    e.gpu_decode = false;
+    e.gpu_encode = false;
+    let mut output_codec = plan.output_video_codec.clone();
+    if e.codec == OutputCodec::Hevc && !tools.has_encoder("libx265") {
+        if keep_codec {
+            return None;
+        }
+        e.codec = OutputCodec::H264;
+        e.hdr_passthrough = false;
+        output_codec = "h264".into();
+    }
+    if let Some(plan_tonemap) = &mut e.tonemap
+        && plan_tonemap.backend != TonemapBackend::Software
+    {
+        match tonemap::select("software", tools, false) {
+            Some(backend) => {
+                plan_tonemap.backend = backend;
+                plan_tonemap.algorithm = tonemap::algorithm_name(backend, &settings.tonemapping_algorithm, tools);
+            }
+            None => e.tonemap = None,
+        }
+    }
+    let mut variant = plan.clone();
+    variant.video = VideoAction::Encode(Box::new(e));
+    variant.output_video_codec = output_codec;
+    Some((variant, software))
+}
+
 /// The hardware API a session's settings use: `nvenc`, `qsv` or `vaapi`
 /// (a pool is resolved to one of them per session before deciding).
 pub fn hardware_api(settings: &PlaybackSettings) -> Option<&'static str> {
@@ -821,7 +872,7 @@ pub(crate) mod tests {
         }
     }
 
-    fn nvidia_tools() -> FfmpegTools {
+    pub(crate) fn nvidia_tools() -> FfmpegTools {
         FfmpegTools::parse(
             "ffmpeg version 7.1.2-Jellyfin",
             " ... tonemap_cuda V->V x\n ... scale_cuda V->V x\n ... libplacebo N->V x\n ... zscale V->V x\n ... tonemap V->V x\n",

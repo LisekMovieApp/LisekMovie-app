@@ -1215,6 +1215,202 @@
         ]
       }
     },
+    "/api/admin/media/{item_id}/seasons/{season}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "get_season",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "description": "Any episode of the series",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "season",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeasonDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "A season's name, overview and year.",
+        "operationId": "update_season",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "season",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSeasonRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateMediaItemResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/media/{item_id}/seasons/{season}/poster": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Replaces a season's poster (raw picture or JSON `{url}`).",
+        "operationId": "set_season_poster",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "season",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "JSON {url}, or the raw picture (image/*)",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtworkUrl"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtworkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "413": {
+            "description": ""
+          },
+          "502": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/admin/media/{item_id}/trickplay": {
       "post": {
         "tags": [
@@ -1244,6 +1440,91 @@
             "description": ""
           },
           "404": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/metadata/languages": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "get_metadata_languages",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetadataLanguagesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "set_metadata_languages",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetadataLanguagesPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetadataLanguagesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "500": {
             "description": ""
           },
           "503": {
@@ -6804,7 +7085,6 @@
         "type": "object",
         "description": "A director or writer, linking to their page.",
         "required": [
-          "person_id",
           "name"
         ],
         "properties": {
@@ -6812,8 +7092,12 @@
             "type": "string"
           },
           "person_id": {
-            "type": "string",
-            "format": "uuid"
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The person's page; null for a name an administrator typed that\nmatches nobody in the library (Faza 21)."
           }
         }
       },
@@ -7062,6 +7346,44 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "DeviceHealth": {
+        "type": "object",
+        "description": "One device's verdict, for the admin panel.",
+        "required": [
+          "id",
+          "ok",
+          "source",
+          "checked_at",
+          "current"
+        ],
+        "properties": {
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "current": {
+            "type": "boolean",
+            "description": "Still in force (failures are retried after 15 minutes)."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The FFmpeg line that explains a failure."
+          },
+          "id": {
+            "type": "string",
+            "description": "`gpu::Target::id`, e.g. `vaapi:/dev/dri/renderD128`, `nvenc:0`."
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/Source"
           }
         }
       },
@@ -7317,7 +7639,17 @@
       "EpisodeContext": {
         "type": "object",
         "description": "The series and episode side of an item, for the editor.",
+        "required": [
+          "directors",
+          "episode_directors"
+        ],
         "properties": {
+          "directors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "episode_air_date": {
             "type": [
               "string",
@@ -7331,17 +7663,38 @@
             ],
             "format": "int32"
           },
+          "episode_directors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "episode_overview": {
             "type": [
               "string",
               "null"
             ]
           },
+          "episode_rating": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
           "episode_title": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "rating": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Faza 21: the item's (film / series) rating and manual directors."
           },
           "series_id": {
             "type": [
@@ -7363,6 +7716,7 @@
         "required": [
           "id",
           "episode",
+          "directors",
           "thumb_url",
           "watched",
           "favorite",
@@ -7374,6 +7728,13 @@
               "string",
               "null"
             ]
+          },
+          "directors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Faza 21: the episode's directors (set in the metadata editor)."
           },
           "duration_seconds": {
             "type": [
@@ -7950,12 +8311,20 @@
         "type": "object",
         "required": [
           "balancing",
-          "pool"
+          "pool",
+          "health"
         ],
         "properties": {
           "balancing": {
             "$ref": "#/components/schemas/BalancingInfo",
             "description": "Live: devices transcodes are spread over and their load."
+          },
+          "health": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceHealth"
+            },
+            "description": "Faza 21: devices found working or broken (tests before sessions,\ndiagnostics, failed transcodes). A broken one is skipped and its\nsessions run on the CPU."
           },
           "pool": {
             "type": "array",
@@ -9027,6 +9396,43 @@
           },
           "username": {
             "type": "string"
+          }
+        }
+      },
+      "MetadataLanguagesPayload": {
+        "type": "object",
+        "description": "A new metadata language order: codes (`pl`, `en`, `pt-br` ...) plus\n`original` (the production's own language) and `any`. Empty: back to\nthe default order.",
+        "required": [
+          "languages"
+        ],
+        "properties": {
+          "languages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "MetadataLanguagesResponse": {
+        "type": "object",
+        "description": "Faza 21: the metadata language order. `languages` is what the\nadministrator saved (empty: never set); `effective` is the order the\nscanner uses (the saved one, or the server's default language, English,\nthe original language).",
+        "required": [
+          "languages",
+          "effective"
+        ],
+        "properties": {
+          "effective": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "languages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -10316,6 +10722,66 @@
           }
         }
       },
+      "SeasonDetail": {
+        "type": "object",
+        "description": "One season as the editor loads it.",
+        "required": [
+          "series_id",
+          "series_title",
+          "season",
+          "locked_fields",
+          "episode_count",
+          "version"
+        ],
+        "properties": {
+          "air_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "episode_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "locked_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`name`, `overview`, `air_year`, `poster`."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "overview": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "season": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "series_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "series_title": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Cache-buster for the poster preview."
+          }
+        }
+      },
       "SeasonFlagsRequest": {
         "type": "object",
         "properties": {
@@ -10673,6 +11139,15 @@
             "format": "double"
           }
         }
+      },
+      "Source": {
+        "type": "string",
+        "description": "Where a verdict came from.",
+        "enum": [
+          "probe",
+          "diagnostics",
+          "runtime"
+        ]
       },
       "StartRequest": {
         "type": "object",
@@ -11559,6 +12034,16 @@
             "format": "int32",
             "description": "The administrator's own age rating (0–21); null: the provider's."
           },
+          "directors": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Faza 21: directors shown instead of the provider's credits; empty:\nthe provider's; omitted: unchanged."
+          },
           "episode_air_date": {
             "type": [
               "string",
@@ -11566,11 +12051,27 @@
             ],
             "description": "`YYYY-MM-DD`."
           },
+          "episode_directors": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
           "episode_overview": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "episode_rating": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
           },
           "episode_title": {
             "type": [
@@ -11605,6 +12106,14 @@
               "string",
               "null"
             ]
+          },
+          "rating": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Faza 21: 0–10 (detail page stars); null clears it; omitted: unchanged."
           },
           "scope": {
             "$ref": "#/components/schemas/EditScope"
@@ -11664,6 +12173,38 @@
           "priority": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "UpdateSeasonRequest": {
+        "type": "object",
+        "properties": {
+          "air_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "locked_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`name`, `overview`, `air_year`, `poster`; changed fields are added."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "\"Sezon 1\", \"Specials\" …; null: the provider's (or none)."
+          },
+          "overview": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

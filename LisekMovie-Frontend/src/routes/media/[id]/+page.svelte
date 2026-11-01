@@ -527,22 +527,31 @@
 							{#if details.directors.length > 0}
 								<dt class="text-neutral-300">{t('details.director')}</dt>
 								<dd class="commas">
-									{#each details.directors as person (person.person_id)}
-										<a
-											href={resolve('/person/[id]', { id: person.person_id })}
-											class="text-gold hover:underline focus-visible:outline-2">{person.name}</a
-										>
+									<!-- Faza 21: a director typed in the editor may have no page. -->
+									{#each details.directors as person (person.person_id ?? person.name)}
+										{#if person.person_id}
+											<a
+												href={resolve('/person/[id]', { id: person.person_id })}
+												class="text-gold hover:underline focus-visible:outline-2">{person.name}</a
+											>
+										{:else}
+											<span class="text-gold">{person.name}</span>
+										{/if}
 									{/each}
 								</dd>
 							{/if}
 							{#if details.writers.length > 0}
 								<dt class="text-neutral-300">{t('details.writers')}</dt>
 								<dd class="commas">
-									{#each details.writers as person (person.person_id)}
-										<a
-											href={resolve('/person/[id]', { id: person.person_id })}
-											class="text-gold hover:underline focus-visible:outline-2">{person.name}</a
-										>
+									{#each details.writers as person (person.person_id ?? person.name)}
+										{#if person.person_id}
+											<a
+												href={resolve('/person/[id]', { id: person.person_id })}
+												class="text-gold hover:underline focus-visible:outline-2">{person.name}</a
+											>
+										{:else}
+											<span class="text-gold">{person.name}</span>
+										{/if}
 									{/each}
 								</dd>
 							{/if}

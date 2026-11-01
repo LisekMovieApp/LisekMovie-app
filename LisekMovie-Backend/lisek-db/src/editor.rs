@@ -27,9 +27,19 @@ pub const SERIES_LEVEL_FIELDS: &[&str] = &[
     "poster",
     "backdrop",
     "logo",
+    "rating",
+    "directors",
 ];
 /// Lock names of one episode's own fields.
-pub const EPISODE_LEVEL_FIELDS: &[&str] = &["episode_title", "episode_overview", "thumb"];
+pub const EPISODE_LEVEL_FIELDS: &[&str] = &[
+    "episode_title",
+    "episode_overview",
+    "episode_rating",
+    "episode_directors",
+    "thumb",
+];
+/// Lock names of a season's own fields (`seasons.locked_fields`).
+pub const SEASON_FIELDS: &[&str] = &["name", "overview", "air_year", "poster"];
 /// Artwork kinds an administrator can replace.
 pub const ARTWORK_KINDS: &[&str] = &["poster", "backdrop", "logo", "thumb"];
 
@@ -61,6 +71,11 @@ pub struct SharedFields<'a> {
     /// Series-level lock names only (others are ignored).
     pub locked_fields: &'a [String],
     pub age_rating: Option<i32>,
+    /// 0–10 (stars on the detail page); `None` clears it.
+    pub rating: Option<f64>,
+    /// Directors shown instead of the provider's credits (Faza 21);
+    /// empty: the provider's.
+    pub directors: &'a [String],
 }
 
 /// One episode's own fields.
@@ -68,6 +83,8 @@ pub struct EpisodeFields<'a> {
     pub title: Option<&'a str>,
     pub overview: Option<&'a str>,
     pub air_date: Option<&'a str>,
+    pub rating: Option<f64>,
+    pub directors: &'a [String],
     /// Episode-level lock names only (others are ignored).
     pub locked_fields: &'a [String],
 }
@@ -81,15 +98,37 @@ pub struct EpisodeContext {
     pub episode_title: Option<String>,
     pub episode_overview: Option<String>,
     pub episode_air_date: Option<String>,
+    /// Faza 21: the item's (film / series) rating and manual directors.
+    pub rating: Option<f64>,
+    pub directors: Vec<String>,
+    pub episode_rating: Option<f64>,
+    pub episode_directors: Vec<String>,
 }
 
 pub async fn episode_context(pool: &PgPool, item_id: Uuid) -> Result<EpisodeContext, DbError> {
-    type Row = (Option<Uuid>, Option<String>, Option<i32>, Option<String>, Option<String>, Option<String>);
+    type Row = (
+        Option<Uuid>,
+        Option<String>,
+        Option<i32>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<f64>,
+        Option<serde_json::Value>,
+        Option<f64>,
+        Option<serde_json::Value>,
+    );
     let row: Option<Row> = sqlx::query_as(
         "SELECT s.id, s.title, s.episode_count, \
                 m.metadata->'provider_data'->'episode'->>'title', \
                 m.metadata->'provider_data'->'episode'->>'overview', \
-                m.metadata->'provider_data'->'episode'->>'air_date' \
+                m.metadata->'provider_data'->'episode'->>'air_date', \
+                CASE WHEN jsonb_typeof(m.metadata->'provider_data'->'rating') = 'number' \
+                     THEN (m.metadata->'provider_data'->>'rating')::float8 END, \
+                m.metadata->'manual_directors', \
+                CASE WHEN jsonb_typeof(m.metadata->'provider_data'->'episode'->'rating') = 'number' \
+                     THEN (m.metadata->'provider_data'->'episode'->>'rating')::float8 END, \
+                m.metadata->'provider_data'->'episode'->'directors' \
          FROM media_items m \
          LEFT JOIN episodes e ON e.media_item_id = m.id \
          LEFT JOIN series s ON s.id = e.series_id \
@@ -106,8 +145,23 @@ pub async fn episode_context(pool: &PgPool, item_id: Uuid) -> Result<EpisodeCont
             episode_title: r.3,
             episode_overview: r.4,
             episode_air_date: r.5,
+            rating: r.6,
+            directors: names(r.7),
+            episode_rating: r.8,
+            episode_directors: names(r.9),
         })
         .unwrap_or_default())
+}
+
+/// A JSON array of names as strings (anything else: none).
+pub fn names(value: Option<serde_json::Value>) -> Vec<String> {
+    match value {
+        Some(serde_json::Value::Array(items)) => items
+            .into_iter()
+            .filter_map(|v| v.as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned))
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn only(names: &[String], allowed: &[&str]) -> Vec<String> {
@@ -134,8 +188,9 @@ const SHARED_SET: &str = r#"
             || jsonb_build_object(
                 'provider_data',
                 COALESCE(metadata->'provider_data', '{}'::jsonb)
-                    || jsonb_build_object('overview', $5::text)
-            ),
+                    || jsonb_build_object('overview', $5::text, 'rating', $11::float8)
+            )
+            || jsonb_build_object('manual_directors', $12::jsonb),
         metadata_locked = $6,
         forced_provider = $7,
         locked_fields = ARRAY(
@@ -166,6 +221,8 @@ async fn write_shared(
         .bind(&locks)
         .bind(fields.age_rating)
         .bind(&keep)
+        .bind(fields.rating)
+        .bind(serde_json::json!(fields.directors))
         .execute(&mut **tx)
         .await?;
     Ok(result.rows_affected())
@@ -243,7 +300,8 @@ pub async fn update_episode(pool: &PgPool, item_id: Uuid, fields: &EpisodeFields
                 COALESCE(metadata->'provider_data', '{}'::jsonb) || jsonb_build_object(
                     'episode',
                     COALESCE(metadata->'provider_data'->'episode', '{}'::jsonb)
-                        || jsonb_build_object('title', $2::text, 'overview', $3::text, 'air_date', $4::text)
+                        || jsonb_build_object('title', $2::text, 'overview', $3::text, 'air_date', $4::text,
+                                              'rating', $7::float8, 'directors', $8::jsonb)
                 )
             ),
             locked_fields = ARRAY(
@@ -261,6 +319,8 @@ pub async fn update_episode(pool: &PgPool, item_id: Uuid, fields: &EpisodeFields
     .bind(fields.air_date)
     .bind(&locks)
     .bind(&keep)
+    .bind(fields.rating)
+    .bind(serde_json::json!(fields.directors))
     .execute(pool)
     .await?;
     if result.rows_affected() == 0 {
@@ -341,4 +401,90 @@ pub async fn item_version(pool: &PgPool, item_id: Uuid) -> Result<Option<i64>, D
         .bind(item_id)
         .fetch_optional(pool)
         .await?)
+}
+
+/// One season as the editor loads it.
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+pub struct SeasonDetail {
+    pub series_id: Uuid,
+    pub series_title: String,
+    pub season: i32,
+    pub name: Option<String>,
+    pub overview: Option<String>,
+    pub air_year: Option<i32>,
+    /// `name`, `overview`, `air_year`, `poster`.
+    pub locked_fields: Vec<String>,
+    pub episode_count: i64,
+    /// Cache-buster for the poster preview.
+    pub version: i64,
+}
+
+/// The season `season` of the series `item_id` (any of its episodes) belongs to.
+pub async fn season_detail(pool: &PgPool, item_id: Uuid, season: i32) -> Result<Option<SeasonDetail>, DbError> {
+    type Row = (Uuid, String, i32, Option<String>, Option<String>, Option<i32>, Vec<String>, i64, Option<i64>);
+    let row: Option<Row> = sqlx::query_as(
+        "SELECT s.id, s.title, se.season_number, se.name, se.overview, se.air_year, se.locked_fields, \
+                (SELECT count(*) FROM episodes e2 WHERE e2.season_id = se.id), se.poster_override_at \
+         FROM episodes e JOIN series s ON s.id = e.series_id \
+         JOIN seasons se ON se.series_id = s.id AND se.season_number = $2 \
+         WHERE e.media_item_id = $1",
+    )
+    .bind(item_id)
+    .bind(season)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| SeasonDetail {
+        series_id: r.0,
+        series_title: r.1,
+        season: r.2,
+        name: r.3,
+        overview: r.4,
+        air_year: r.5,
+        locked_fields: r.6,
+        episode_count: r.7,
+        version: r.8.unwrap_or(0),
+    }))
+}
+
+pub struct SeasonFields<'a> {
+    pub name: Option<&'a str>,
+    pub overview: Option<&'a str>,
+    pub air_year: Option<i32>,
+    pub locked_fields: &'a [String],
+}
+
+/// Writes a season's name, overview and year (an administrator's edit).
+pub async fn update_season(pool: &PgPool, series_id: Uuid, season: i32, fields: &SeasonFields<'_>) -> Result<(), EditError> {
+    let locks = only(fields.locked_fields, SEASON_FIELDS);
+    let result = sqlx::query(
+        "UPDATE seasons SET name = $3, overview = $4, air_year = $5, locked_fields = $6 \
+         WHERE series_id = $1 AND season_number = $2",
+    )
+    .bind(series_id)
+    .bind(season)
+    .bind(fields.name)
+    .bind(fields.overview)
+    .bind(fields.air_year)
+    .bind(&locks)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(EditError::NotFound);
+    }
+    Ok(())
+}
+
+/// A season poster replaced by hand: locked, older folder files ignored.
+pub async fn record_season_poster(pool: &PgPool, series_id: Uuid, season: i32, at_ms: i64) -> Result<(), DbError> {
+    sqlx::query(
+        "UPDATE seasons SET poster_override_at = $3, \
+                locked_fields = CASE WHEN 'poster' = ANY(locked_fields) THEN locked_fields ELSE locked_fields || 'poster'::text END \
+         WHERE series_id = $1 AND season_number = $2",
+    )
+    .bind(series_id)
+    .bind(season)
+    .bind(at_ms)
+    .execute(pool)
+    .await?;
+    Ok(())
 }

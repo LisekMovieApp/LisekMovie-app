@@ -76,9 +76,47 @@ describe('MediaItemEditorModal', () => {
 			episode_title: 'Najwyższy czas',
 			episode_overview: 'Od dostawcy',
 			episode_air_date: '2025-02-01',
+			episode_rating: null,
+			episode_directors: [],
 			locked_fields: ['episode_title']
 		});
 		expect(onSaved).toHaveBeenCalled();
+	});
+
+	it('edits an episode score and directors (Faza 21)', async () => {
+		fetchMediaItem.mockResolvedValue({
+			...episode,
+			episode_rating: 6.8,
+			episode_directors: ['Ala']
+		});
+		render(MediaItemEditorModal, {
+			itemId: 'ep1',
+			providers: [],
+			scope: 'episode',
+			onClose: vi.fn(),
+			onSaved: vi.fn()
+		});
+		await wait();
+		const score = screen.getByRole('textbox', { name: /^Episode rating/ }) as HTMLInputElement;
+		expect(score.value).toBe('6.8');
+		await fireEvent.input(score, { target: { value: '12' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		await wait();
+		expect(updateMediaItem).not.toHaveBeenCalled();
+		expect(screen.getByRole('alert').textContent).toContain('from 0 to 10');
+		await fireEvent.input(score, { target: { value: '8,25' } });
+		await fireEvent.input(screen.getByRole('textbox', { name: /^Episode directors/ }), {
+			target: { value: 'Ala\nOla, ala' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		await wait();
+		const [, , payload] = updateMediaItem.mock.calls[0];
+		expect(payload).toMatchObject({
+			scope: 'episode',
+			episode_rating: 8.3,
+			episode_directors: ['Ala', 'Ola']
+		});
+		expect(payload.locked_fields).toEqual(['episode_rating', 'episode_directors']);
 	});
 
 	it('edits the whole series from the series page', async () => {

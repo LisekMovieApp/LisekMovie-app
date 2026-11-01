@@ -300,7 +300,9 @@
 			"artwork_too_large": "The picture is too large (max 25 MB).",
 			"artwork_download_failed": "The picture could not be downloaded from that link.",
 			"artwork_empty": "The file is empty.",
-			"artwork_failed": "The picture could not be saved. Try again."
+			"artwork_failed": "The picture could not be saved. Try again.",
+			"invalid_rating": "The rating must be a number from 0 to 10.",
+			"invalid_input": "A value is too long or not valid."
 		},
 		"editor_art": {
 			"poster": "Poster",
@@ -334,6 +336,54 @@
 			"xmltv_placeholder": "http://192.168.1.10:8409/iptv/xmltv.xml",
 			"m3u_line": "M3U: {url}",
 			"xmltv_line": "XMLTV: {url}"
+		},
+		"editor_field_rating": "Rating",
+		"editor_field_directors": "Directors",
+		"editor_field_episode_rating": "Episode rating",
+		"editor_field_episode_directors": "Episode directors",
+		"editor_rating_placeholder": "e.g. 7.5",
+		"editor_rating_hint": "0–10, shown as stars. Empty: none.",
+		"editor_directors_hint": "One per line or separated by commas. Empty: from the plugin.",
+		"plugins_cascade_hint": "When the first plugin that matches lacks a description, poster or genres, the next plugins in this order fill the gaps (only for the same title).",
+		"season_editor": {
+			"menu_entry": "Edit season",
+			"title": "Edit season",
+			"subtitle": "{series} · season {season} · {count} episodes",
+			"field_name": "Season name",
+			"field_air_year": "Year",
+			"field_overview": "Description",
+			"field_poster": "Poster",
+			"name_placeholder": "Season {season}",
+			"saved": "Season saved"
+		},
+		"metadata_languages": {
+			"title": "Metadata languages",
+			"hint": "Plugins are asked in the first language. When the title or description is empty in it, the next language is tried, and so on.",
+			"default_note": "Default order: the server language, English, the original language.",
+			"move_up": "Move {language} up",
+			"move_down": "Move {language} down",
+			"remove": "Remove {language}",
+			"add_label": "Add a language",
+			"add_placeholder": "Add a language…",
+			"add": "Add",
+			"reset": "Restore default",
+			"saved": "Language order saved",
+			"save_failed": "The language order could not be saved.",
+			"lang_pl": "Polish",
+			"lang_en": "English",
+			"lang_de": "German",
+			"lang_fr": "French",
+			"lang_es": "Spanish",
+			"lang_it": "Italian",
+			"lang_pt": "Portuguese",
+			"lang_cs": "Czech",
+			"lang_uk": "Ukrainian",
+			"lang_ru": "Russian",
+			"lang_ja": "Japanese",
+			"lang_ko": "Korean",
+			"lang_zh": "Chinese",
+			"lang_original": "Original language (country of production)",
+			"lang_any": "Any other"
 		}
 	},
 	"errors": {
@@ -1082,7 +1132,18 @@
 		"pool_failed": "The pool could not be saved.",
 		"pool_none_active": "No device is switched on: the CPU transcodes everything.",
 		"live_load": "Load now",
-		"load_of": "{count} / {max}"
+		"load_of": "{count} / {max}",
+		"health": {
+			"title": "GPU status",
+			"hint": "Devices the server tested before transcoding, in the diagnostics, or that failed during playback. A broken device is skipped and playback continues on the CPU.",
+			"ok": "Works",
+			"broken": "Broken",
+			"source_probe": "Test before transcoding",
+			"source_diagnostics": "Diagnostics",
+			"source_runtime": "Failed during playback",
+			"expired": "will be tested again",
+			"on_cpu": "Transcoding uses the CPU (software fallback) until the device works again."
+		}
 	},
 	"stats": {
 		"title": "Watch statistics",

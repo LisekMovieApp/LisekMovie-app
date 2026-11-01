@@ -128,6 +128,9 @@ pub struct Session {
     changed: Notify,
     playhead: watch::Sender<usize>,
     touched: std::sync::Mutex<Instant>,
+    /// Faza 21: set once the GPU failed; every later run uses this CPU-only
+    /// plan and settings (`decision::software_variant`).
+    fallback: std::sync::OnceLock<(PlaybackPlan, PlaybackSettings)>,
 }
 
 static SESSIONS: LazyLock<std::sync::Mutex<HashMap<String, Arc<Session>>>> =
@@ -147,7 +150,9 @@ pub fn encoding_sessions() -> usize {
 pub fn target_sessions() -> HashMap<String, usize> {
     let mut counts = HashMap::new();
     for session in registry().values() {
-        if let Some(id) = &session.spec.hw_target {
+        if let Some(id) = &session.spec.hw_target
+            && session.fallback.get().is_none()
+        {
             *counts.entry(id.clone()).or_insert(0) += 1;
         }
     }
@@ -187,6 +192,7 @@ pub async fn create(mut spec: SessionSpec) -> Result<Arc<Session>, SessionError>
         state: Mutex::new(State::default()),
         changed: Notify::new(),
         touched: std::sync::Mutex::new(Instant::now()),
+        fallback: std::sync::OnceLock::new(),
     });
     {
         let mut state = session.state.lock().await;
@@ -475,10 +481,14 @@ impl Session {
             .iter()
             .map(|index| (*index, spec.directory.join(format!("sub-{index}-r{seq}.vtt"))))
             .collect();
+        let (plan, settings) = match self.fallback.get() {
+            Some((plan, settings)) => (plan, settings),
+            None => (&spec.plan, &spec.settings),
+        };
         let args = command::hls_run_args(&RunArgs {
             input: &spec.input,
-            plan: &spec.plan,
-            settings: &spec.settings,
+            plan,
+            settings,
             tools: &spec.tools,
             start: spec.segments.start(start),
             origin: spec.origin,
@@ -538,6 +548,56 @@ impl Session {
                 Ok(Err(_)) | Err(_) => return false,
             }
         }
+    }
+
+    /// Restarts run `seq` on the CPU when it failed with a hardware error.
+    /// `true` when a CPU run took its place.
+    async fn try_software_fallback(self: &Arc<Self>, seq: u64, log: &str) -> bool {
+        if self.fallback.get().is_some() || !crate::hw_health::is_hardware_failure(log) {
+            return false;
+        }
+        let mut state = self.state.lock().await;
+        let Some(next) = state.run.as_ref().filter(|r| r.seq == seq).map(|r| r.next) else {
+            return false;
+        };
+        // Once the client has the first segments the codec must stay.
+        let keep_codec = state.tracks.is_some();
+        let Some(variant) =
+            crate::decision::software_variant(&self.spec.plan, &self.spec.settings, &self.spec.tools, keep_codec)
+        else {
+            return false;
+        };
+        let reason = crate::hw_health::explain(log);
+        let device = self
+            .spec
+            .hw_target
+            .clone()
+            .or_else(|| crate::decision::hardware_api(&self.spec.settings).map(str::to_owned));
+        if let Some(device) = &device {
+            crate::hw_health::record(device, false, reason.clone(), crate::hw_health::Source::Runtime);
+        }
+        tracing::warn!(
+            session = %self.spec.id,
+            device = device.as_deref().unwrap_or("gpu"),
+            error = reason.as_deref().unwrap_or(""),
+            segment = next,
+            "hardware transcoding failed; continuing on the CPU"
+        );
+        let _ = self.fallback.set(variant);
+        // This task is the run being replaced: take it out without
+        // aborting it, then start the CPU run where it stopped.
+        state.run = None;
+        let _ = tokio::fs::write(
+            self.spec.directory.join("ffmpeg.log"),
+            format!("[lisek] hardware failed, continuing on the CPU: {}\n", reason.unwrap_or_default()),
+        )
+        .await;
+        self.start_run(&mut state, next).is_ok()
+    }
+
+    /// Whether the session gave up on the GPU and transcodes on the CPU.
+    pub fn software_fallback(&self) -> bool {
+        self.fallback.get().is_some()
     }
 
     /// Applies `update` to run `seq` if it is still the current run.
@@ -609,6 +669,11 @@ async fn run(
     };
     if let Some(failure) = &failure {
         let tail = log_tail(&session.spec.directory.join("ffmpeg.log")).await;
+        // Faza 21: the GPU failed (no driver, no device): the same run on
+        // the CPU, a moment later, instead of a broken stream.
+        if session.try_software_fallback(seq, &tail).await {
+            return;
+        }
         tracing::warn!(session = %session.spec.id, %failure, ffmpeg = %tail, "ffmpeg run failed");
     }
     session

@@ -555,6 +555,57 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_gpu_run_is_repeated_entirely_on_the_cpu() {
+        // Faza 21: VA-API that does not open (i5-5300U without a driver).
+        let mut f = Fixture::new(bluray_rip(), ClientFamily::Chrome);
+        f.request.max_height = Some(480);
+        f.request.max_bitrate_kbps = Some(2000);
+        f.settings.hardware_acceleration = "vaapi".into();
+        f.tools = intel_tools();
+        let plan = f.decide().unwrap();
+        let VideoAction::Encode(encode) = &plan.video else { panic!() };
+        assert!(encode.gpu_encode);
+        let (software, settings) =
+            crate::decision::software_variant(&plan, &f.settings, &f.tools, false).expect("a CPU plan");
+        let args: Vec<String> = hls_run_args(&RunArgs {
+            input: Path::new("/media/film.mkv"),
+            plan: &software,
+            settings: &settings,
+            tools: &f.tools,
+            start: 0.0,
+            origin: 0.0,
+            segment_seconds: 4.0,
+            subtitle_outputs: &[],
+            external_charset: None,
+        })
+        .into_iter()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect();
+        assert!(!args.iter().any(|a| a == "-init_hw_device" || a == "-hwaccel"), "{args:?}");
+        assert!(!args.join(" ").contains("vaapi"), "{args:?}");
+        let encoder = args.iter().rposition(|a| a == "-c:v").unwrap();
+        assert_eq!(args[encoder + 1], "libx264");
+        let VideoAction::Encode(cpu) = &software.video else { panic!() };
+        assert_eq!((cpu.width, cpu.height, cpu.bitrate_kbps), (encode.width, encode.height, encode.bitrate_kbps));
+        // Already on the CPU: nothing to fall back to.
+        assert!(crate::decision::software_variant(&software, &settings, &f.tools, false).is_none());
+    }
+
+    #[test]
+    fn hdr_tone_mapped_on_cuda_falls_back_to_the_cpu_tone_mapper() {
+        let mut f = Fixture::new(hdr_rip(), ClientFamily::Chrome);
+        f.client.video_codecs.push("hevc_10bit".into());
+        f.settings.tonemapping = true;
+        f.settings.hardware_acceleration = "nvenc".into();
+        f.tools = crate::decision::tests::nvidia_tools();
+        let plan = f.decide().unwrap();
+        let (software, _) = crate::decision::software_variant(&plan, &f.settings, &f.tools, true).unwrap();
+        let VideoAction::Encode(e) = &software.video else { panic!() };
+        assert!(!e.gpu_decode && !e.gpu_encode);
+        assert!(e.tonemap.as_ref().is_none_or(|t| t.backend == crate::tonemap::TonemapBackend::Software));
+    }
+
+    #[test]
     fn quick_sync_hdr_is_tone_mapped_on_the_cpu_and_encoded_on_the_gpu() {
         let mut f = Fixture::new(hdr_rip(), ClientFamily::Chrome);
         f.settings.tonemapping = true;

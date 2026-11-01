@@ -509,6 +509,65 @@ pub async fn set_provider_order(
     Ok(Json(json!({ "ok": true })))
 }
 
+/// Faza 21: the metadata language order. `languages` is what the
+/// administrator saved (empty: never set); `effective` is the order the
+/// scanner uses (the saved one, or the server's default language, English,
+/// the original language).
+#[derive(Serialize, Deserialize, utoipa::ToSchema)]
+pub struct MetadataLanguagesResponse {
+    pub languages: Vec<String>,
+    pub effective: Vec<String>,
+}
+
+/// A new metadata language order: codes (`pl`, `en`, `pt-br` ...) plus
+/// `original` (the production's own language) and `any`. Empty: back to
+/// the default order.
+#[derive(Serialize, Deserialize, utoipa::ToSchema)]
+pub struct MetadataLanguagesPayload {
+    pub languages: Vec<String>,
+}
+
+async fn metadata_languages_response(
+    pool: &lisek_db::PgPool,
+) -> Result<MetadataLanguagesResponse, AdminError> {
+    let languages = lisek_db::profiles::metadata_languages(pool)
+        .await
+        .map_err(map_db_error)?;
+    let default = lisek_db::profiles::default_language(pool)
+        .await
+        .map_err(map_db_error)?;
+    let effective = crate::metadata_cascade::effective_chain(&languages, &default);
+    Ok(MetadataLanguagesResponse {
+        languages,
+        effective,
+    })
+}
+
+#[utoipa::path(get,path="/api/admin/metadata/languages",tag="admin",responses((status=200,body=MetadataLanguagesResponse),(status=401),(status=403),(status=500),(status=503)),security(("lisek_auth"=[])))]
+pub async fn get_metadata_languages(
+    _admin: AdminUser,
+    State(state): State<SharedState>,
+) -> Result<Json<MetadataLanguagesResponse>, AdminError> {
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
+    Ok(Json(metadata_languages_response(&pool).await?))
+}
+
+#[utoipa::path(put,path="/api/admin/metadata/languages",tag="admin",request_body=MetadataLanguagesPayload,responses((status=200,body=MetadataLanguagesResponse),(status=400),(status=401),(status=403),(status=500),(status=503)),security(("lisek_auth"=[])))]
+pub async fn set_metadata_languages(
+    AdminUser(auth): AdminUser,
+    State(state): State<SharedState>,
+    Json(req): Json<MetadataLanguagesPayload>,
+) -> Result<Json<MetadataLanguagesResponse>, AdminError> {
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
+    let languages = crate::metadata_cascade::validate(&req.languages)
+        .map_err(|bad| AdminError::InvalidInput(format!("invalid metadata language: {bad}")))?;
+    lisek_db::profiles::set_metadata_languages(&pool, &languages)
+        .await
+        .map_err(map_db_error)?;
+    tracing::info!(?languages, admin = %auth.user.username, "metadata language order updated");
+    Ok(Json(metadata_languages_response(&pool).await?))
+}
+
 /// Maps a library's own type (`"movies"`/`"tv_shows"`,
 /// `lisek_library::LibraryType`'s db strings) to the item_type vocabulary
 /// `media_items` and `library_provider_config` both actually store

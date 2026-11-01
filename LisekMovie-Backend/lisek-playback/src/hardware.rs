@@ -993,6 +993,8 @@ pub async fn diagnose(settings: &PlaybackSettings) -> HardwareReport {
         }
     });
     let encoders: Vec<EncoderTest> = futures_join_all(tests).await;
+    // Faza 21: the next sessions trust these results.
+    crate::hw_health::record_diagnostics(&encoders);
 
     let mut warnings = Vec::new();
     if ffmpeg.version.is_none() {

@@ -32,6 +32,29 @@ pub async fn set_default_language(pool: &PgPool, language: &str) -> Result<(), D
     Ok(())
 }
 
+/// Faza 21: the administrator's metadata language order as stored
+/// (`server_settings.metadata_languages`): codes plus `original` and
+/// `any`. Empty when never set.
+pub async fn metadata_languages(pool: &PgPool) -> Result<Vec<String>, DbError> {
+    let stored: Option<Vec<String>> =
+        sqlx::query_scalar("SELECT metadata_languages FROM server_settings WHERE id")
+            .fetch_optional(pool)
+            .await?;
+    Ok(stored.unwrap_or_default())
+}
+
+/// Stores the metadata language order (already validated by the caller).
+pub async fn set_metadata_languages(pool: &PgPool, languages: &[String]) -> Result<(), DbError> {
+    sqlx::query(
+        "INSERT INTO server_settings (id, metadata_languages) VALUES (true, $1) \
+         ON CONFLICT (id) DO UPDATE SET metadata_languages = EXCLUDED.metadata_languages",
+    )
+    .bind(languages)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// The account's avatar version: outer `None` when the account does not
 /// exist, inner `None` when it has no avatar.
 pub async fn avatar_version(pool: &PgPool, user_id: Uuid) -> Result<Option<Option<i64>>, DbError> {

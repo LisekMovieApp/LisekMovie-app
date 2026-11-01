@@ -135,6 +135,19 @@ pub struct UpdateMediaItemRequest {
     /// The administrator's own age rating (0–21); null: the provider's.
     #[serde(default)]
     pub age_rating: Option<i32>,
+    /// Faza 21: 0–10 (detail page stars); null clears it; omitted: unchanged.
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<f64>)]
+    pub rating: Option<Option<f64>>,
+    /// Faza 21: directors shown instead of the provider's credits; empty:
+    /// the provider's; omitted: unchanged.
+    #[serde(default)]
+    pub directors: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<f64>)]
+    pub episode_rating: Option<Option<f64>>,
+    #[serde(default)]
+    pub episode_directors: Option<Vec<String>>,
     pub episode_title: Option<String>,
     pub episode_overview: Option<String>,
     /// `YYYY-MM-DD`.
@@ -152,6 +165,30 @@ pub struct UpdateMediaItemResponse {
 
 fn clean(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|v| !v.is_empty())
+}
+
+/// A field that is there (even as `null`) is `Some`; a missing one `None`.
+fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+/// Trimmed, non-empty names; `None` when the list is unusable.
+fn clean_names(names: &[String]) -> Option<Vec<String>> {
+    let names: Vec<String> = names.iter().map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
+    (names.len() <= 20 && names.iter().all(|n| n.chars().count() <= 200)).then_some(names)
+}
+
+fn valid_rating(rating: Option<f64>) -> bool {
+    rating.is_none_or(|r| r.is_finite() && (0.0..=10.0).contains(&r))
+}
+
+/// A rating as stored: one decimal.
+fn round_rating(rating: Option<f64>) -> Option<f64> {
+    rating.map(|r| (r * 10.0).round() / 10.0)
 }
 
 fn valid_air_date(value: &str) -> bool {
@@ -209,6 +246,15 @@ pub async fn update_item(
             return Err(bad("invalid_input"));
         }
         let before = db::episode_context(&pool, item_id).await?;
+        let rating = match req.episode_rating {
+            Some(rating) if !valid_rating(rating) => return Err(bad("invalid_rating")),
+            Some(rating) => round_rating(rating),
+            None => before.episode_rating,
+        };
+        let directors = match &req.episode_directors {
+            Some(names) => clean_names(names).ok_or_else(|| bad("invalid_input"))?,
+            None => before.episode_directors.clone(),
+        };
         let mut auto_locked = Vec::new();
         if clean(before.episode_title.as_deref()) != title {
             auto_locked.push("episode_title".to_string());
@@ -216,12 +262,18 @@ pub async fn update_item(
         if clean(before.episode_overview.as_deref()) != overview {
             auto_locked.push("episode_overview".to_string());
         }
+        if before.episode_rating != rating {
+            auto_locked.push("episode_rating".to_string());
+        }
+        if before.episode_directors != directors {
+            auto_locked.push("episode_directors".to_string());
+        }
         let mut locks = req.locked_fields.clone();
         locks.extend(auto_locked.iter().cloned());
         db::update_episode(
             &pool,
             item_id,
-            &db::EpisodeFields { title, overview, air_date, locked_fields: &locks },
+            &db::EpisodeFields { title, overview, air_date, rating, directors: &directors, locked_fields: &locks },
         )
         .await?;
         tracing::info!(%item_id, admin = %auth.user.username, ?auto_locked, "episode metadata updated");
@@ -240,18 +292,31 @@ pub async fn update_item(
     }
     let original_title = clean(req.original_title.as_deref());
     let overview = clean(req.overview.as_deref());
+    let context = db::episode_context(&pool, item_id).await?;
     let before_title = if scope == EditScope::Series {
-        db::episode_context(&pool, item_id)
-            .await?
-            .series_title
-            .unwrap_or_else(|| detail.title.clone())
+        context.series_title.clone().unwrap_or_else(|| detail.title.clone())
     } else {
         detail.title.clone()
     };
-    let auto_locked = changed_shared(
+    let rating = match req.rating {
+        Some(rating) if !valid_rating(rating) => return Err(bad("invalid_rating")),
+        Some(rating) => round_rating(rating),
+        None => context.rating,
+    };
+    let directors = match &req.directors {
+        Some(names) => clean_names(names).ok_or_else(|| bad("invalid_input"))?,
+        None => context.directors.clone(),
+    };
+    let mut auto_locked = changed_shared(
         (&before_title, clean(detail.original_title.as_deref()), detail.year, clean(detail.overview.as_deref())),
         (title, original_title, req.year, overview),
     );
+    if context.rating != rating {
+        auto_locked.push("rating".to_string());
+    }
+    if context.directors != directors {
+        auto_locked.push("directors".to_string());
+    }
     let mut locks = req.locked_fields.clone();
     locks.extend(auto_locked.iter().cloned());
     let fields = db::SharedFields {
@@ -263,6 +328,8 @@ pub async fn update_item(
         forced_provider: clean(req.forced_provider.as_deref()),
         locked_fields: &locks,
         age_rating: req.age_rating,
+        rating,
+        directors: &directors,
     };
     let updated = if scope == EditScope::Series {
         db::update_series(&pool, item_id, &fields).await?
@@ -424,24 +491,9 @@ fn cache_path(config: &FsPath, kind: ArtworkKind, id: Uuid) -> PathBuf {
     }
 }
 
-/// Replaces one picture. Poster, backdrop and logo of an episode belong to
-/// its series (every episode gets them); `thumb` is an episode's still.
-#[utoipa::path(put,path="/api/admin/media/{item_id}/artwork/{kind}",tag="admin",params(("item_id"=Uuid,Path),("kind"=String,Path,description="poster, backdrop, logo or thumb")),request_body(content=ArtworkUrl,description="JSON {url}, or the raw picture (image/*)"),responses((status=200,body=ArtworkResponse),(status=400),(status=401),(status=403),(status=404),(status=413),(status=502,description="artwork_download_failed")),security(("lisek_auth"=[])))]
-pub async fn set_artwork(
-    AdminUser(auth): AdminUser,
-    State(state): State<SharedState>,
-    Path((item_id, kind)): Path<(Uuid, String)>,
-    headers: HeaderMap,
-    body: Body,
-) -> Result<Json<ArtworkResponse>, EditorError> {
-    let kind = ArtworkKind::parse(&kind).ok_or_else(|| bad("invalid_artwork_kind"))?;
-    let pool = pool(&state)?;
-    let detail = lisek_db::get_media_item_detail(&pool, item_id).await?.ok_or_else(not_found)?;
-    let is_episode = detail.item_type == "episode";
-    if kind == ArtworkKind::Thumb && !is_episode {
-        return Err(bad("not_an_episode"));
-    }
-
+/// The picture of an artwork request: the raw body, or the image at the
+/// link in a JSON body.
+async fn read_picture(headers: &HeaderMap, body: Body) -> Result<Vec<u8>, EditorError> {
     let raw = axum::body::to_bytes(body, MAX_ARTWORK_BYTES + 64 * 1024)
         .await
         .map_err(|_| EditorError(StatusCode::PAYLOAD_TOO_LARGE, "artwork_too_large"))?;
@@ -461,13 +513,39 @@ pub async fn set_artwork(
     if source.is_empty() {
         return Err(bad("artwork_empty"));
     }
-    let picture = tokio::task::spawn_blocking(move || normalize_artwork(&source, kind))
+    Ok(source)
+}
+
+async fn clean_picture(source: Vec<u8>, kind: ArtworkKind) -> Result<Vec<u8>, EditorError> {
+    tokio::task::spawn_blocking(move || normalize_artwork(&source, kind))
         .await
         .map_err(|_| internal())?
         .map_err(|e| match e {
             ArtworkImageError::Unsupported => bad("artwork_invalid_image"),
             ArtworkImageError::TooLarge => EditorError(StatusCode::PAYLOAD_TOO_LARGE, "artwork_too_large"),
-        })?;
+        })
+}
+
+/// Replaces one picture. Poster, backdrop and logo of an episode belong to
+/// its series (every episode gets them); `thumb` is an episode's still.
+#[utoipa::path(put,path="/api/admin/media/{item_id}/artwork/{kind}",tag="admin",params(("item_id"=Uuid,Path),("kind"=String,Path,description="poster, backdrop, logo or thumb")),request_body(content=ArtworkUrl,description="JSON {url}, or the raw picture (image/*)"),responses((status=200,body=ArtworkResponse),(status=400),(status=401),(status=403),(status=404),(status=413),(status=502,description="artwork_download_failed")),security(("lisek_auth"=[])))]
+pub async fn set_artwork(
+    AdminUser(auth): AdminUser,
+    State(state): State<SharedState>,
+    Path((item_id, kind)): Path<(Uuid, String)>,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Json<ArtworkResponse>, EditorError> {
+    let kind = ArtworkKind::parse(&kind).ok_or_else(|| bad("invalid_artwork_kind"))?;
+    let pool = pool(&state)?;
+    let detail = lisek_db::get_media_item_detail(&pool, item_id).await?.ok_or_else(not_found)?;
+    let is_episode = detail.item_type == "episode";
+    if kind == ArtworkKind::Thumb && !is_episode {
+        return Err(bad("not_an_episode"));
+    }
+
+    let source = read_picture(&headers, body).await?;
+    let picture = clean_picture(source, kind).await?;
 
     let series_wide = is_episode && kind != ArtworkKind::Thumb;
     let ids = if series_wide {
@@ -509,6 +587,104 @@ pub async fn set_artwork(
         _ => format!("/api/media/{item_id}/{}?v={at}", kind.name()),
     };
     Ok(Json(ArtworkResponse { kind: kind.name().to_string(), url, items: written }))
+}
+
+// ---- Seasons (Faza 21) -------------------------------------------------------
+
+#[utoipa::path(get,path="/api/admin/media/{item_id}/seasons/{season}",tag="admin",params(("item_id"=Uuid,Path,description="Any episode of the series"),("season"=i32,Path)),responses((status=200,body=db::SeasonDetail),(status=401),(status=403),(status=404)),security(("lisek_auth"=[])))]
+pub async fn get_season(
+    _admin: AdminUser,
+    State(state): State<SharedState>,
+    Path((item_id, season)): Path<(Uuid, i32)>,
+) -> Result<Json<db::SeasonDetail>, EditorError> {
+    let pool = pool(&state)?;
+    Ok(Json(db::season_detail(&pool, item_id, season).await?.ok_or_else(not_found)?))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct UpdateSeasonRequest {
+    /// "Sezon 1", "Specials" …; null: the provider's (or none).
+    pub name: Option<String>,
+    pub overview: Option<String>,
+    pub air_year: Option<i32>,
+    /// `name`, `overview`, `air_year`, `poster`; changed fields are added.
+    #[serde(default)]
+    pub locked_fields: Vec<String>,
+}
+
+/// A season's name, overview and year.
+#[utoipa::path(put,path="/api/admin/media/{item_id}/seasons/{season}",tag="admin",params(("item_id"=Uuid,Path),("season"=i32,Path)),request_body=UpdateSeasonRequest,responses((status=200,body=UpdateMediaItemResponse),(status=400),(status=401),(status=403),(status=404)),security(("lisek_auth"=[])))]
+pub async fn update_season(
+    AdminUser(auth): AdminUser,
+    State(state): State<SharedState>,
+    Path((item_id, season)): Path<(Uuid, i32)>,
+    Json(req): Json<UpdateSeasonRequest>,
+) -> Result<Json<UpdateMediaItemResponse>, EditorError> {
+    let pool = pool(&state)?;
+    let before = db::season_detail(&pool, item_id, season).await?.ok_or_else(not_found)?;
+    let name = clean(req.name.as_deref());
+    let overview = clean(req.overview.as_deref());
+    if name.is_some_and(|n| n.chars().count() > 200) || overview.is_some_and(|o| o.len() > 20_000) {
+        return Err(bad("invalid_input"));
+    }
+    if req.air_year.is_some_and(|y| !(1800..=2200).contains(&y)) {
+        return Err(bad("invalid_year"));
+    }
+    let mut auto_locked = Vec::new();
+    if clean(before.name.as_deref()) != name {
+        auto_locked.push("name".to_string());
+    }
+    if clean(before.overview.as_deref()) != overview {
+        auto_locked.push("overview".to_string());
+    }
+    if before.air_year != req.air_year {
+        auto_locked.push("air_year".to_string());
+    }
+    let mut locks = req.locked_fields.clone();
+    locks.extend(auto_locked.iter().cloned());
+    db::update_season(
+        &pool,
+        before.series_id,
+        season,
+        &db::SeasonFields { name, overview, air_year: req.air_year, locked_fields: &locks },
+    )
+    .await?;
+    tracing::info!(series = %before.series_id, season, admin = %auth.user.username, ?auto_locked, "season metadata updated");
+    Ok(Json(UpdateMediaItemResponse { ok: true, updated: 1, auto_locked }))
+}
+
+/// Replaces a season's poster (raw picture or JSON `{url}`).
+#[utoipa::path(put,path="/api/admin/media/{item_id}/seasons/{season}/poster",tag="admin",params(("item_id"=Uuid,Path),("season"=i32,Path)),request_body(content=ArtworkUrl,description="JSON {url}, or the raw picture (image/*)"),responses((status=200,body=ArtworkResponse),(status=400),(status=401),(status=403),(status=404),(status=413),(status=502)),security(("lisek_auth"=[])))]
+pub async fn set_season_poster(
+    AdminUser(auth): AdminUser,
+    State(state): State<SharedState>,
+    Path((item_id, season)): Path<(Uuid, i32)>,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Json<ArtworkResponse>, EditorError> {
+    let pool = pool(&state)?;
+    let detail = db::season_detail(&pool, item_id, season).await?.ok_or_else(not_found)?;
+    let source = read_picture(&headers, body).await?;
+    let picture = clean_picture(source, ArtworkKind::Poster).await?;
+    let file_path = lisek_db::get_media_item_file_path(&pool, item_id).await?.ok_or_else(not_found)?;
+    let library_id = lisek_db::get_media_item_detail(&pool, item_id).await?.ok_or_else(not_found)?.library_id;
+    let save_in_folder = lisek_db::get_library(&pool, library_id).await?.is_some_and(|l| l.save_metadata_in_media_folder);
+    let media_dest = save_in_folder
+        .then(|| layout::series_folder(FsPath::new(&file_path)).map(|d| d.join(layout::season_poster_name(season))))
+        .flatten();
+    let cache = layout::season_poster_cache_path(&crate::state::config_dir(), &detail.series_id.to_string(), season);
+    let at = chrono::Utc::now().timestamp_millis();
+    db::record_season_poster(&pool, detail.series_id, season, at).await?;
+    store_image(&picture, media_dest.as_deref(), &cache).await.map_err(|e| {
+        tracing::error!(error = %e, season, "saving a season poster failed");
+        EditorError(StatusCode::INTERNAL_SERVER_ERROR, "artwork_save_failed")
+    })?;
+    tracing::info!(series = %detail.series_id, season, admin = %auth.user.username, "season poster replaced");
+    Ok(Json(ArtworkResponse {
+        kind: "season_poster".into(),
+        url: format!("/api/media/{item_id}/seasons/{season}/poster?v={at}"),
+        items: 1,
+    }))
 }
 
 #[cfg(test)]
@@ -555,6 +731,19 @@ mod tests {
         assert_eq!(ArtworkKind::parse("../poster"), None);
         assert!(valid_air_date("2026-11-01"));
         assert!(!valid_air_date("1.11.2026"));
+    }
+
+    #[test]
+    fn a_null_rating_clears_and_a_missing_one_keeps() {
+        let clear: UpdateMediaItemRequest = serde_json::from_str(r#"{"rating": null, "episode_rating": 7.5}"#).unwrap();
+        assert_eq!(clear.rating, Some(None));
+        assert_eq!(clear.episode_rating, Some(Some(7.5)));
+        let keep: UpdateMediaItemRequest = serde_json::from_str("{}").unwrap();
+        assert_eq!(keep.rating, None);
+        assert!(valid_rating(Some(10.0)) && !valid_rating(Some(10.5)) && !valid_rating(Some(f64::NAN)));
+        assert_eq!(round_rating(Some(7.26)), Some(7.3));
+        assert_eq!(clean_names(&[" Anna ".into(), "".into()]), Some(vec!["Anna".to_string()]));
+        assert_eq!(clean_names(&vec!["x".to_string(); 21]), None);
     }
 
     #[test]

@@ -390,6 +390,18 @@ pub async fn filmography(
         .collect())
 }
 
+/// A person of the library with exactly this name (case-insensitive), the
+/// best known one first.
+pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<Uuid>, DbError> {
+    Ok(sqlx::query_scalar(
+        "SELECT p.id FROM people p WHERE lower(p.name) = lower($1) \
+         ORDER BY (SELECT count(*) FROM media_people mp WHERE mp.person_id = p.id) DESC, p.id LIMIT 1",
+    )
+    .bind(name)
+    .fetch_optional(pool)
+    .await?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

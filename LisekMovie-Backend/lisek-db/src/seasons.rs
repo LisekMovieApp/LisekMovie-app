@@ -36,6 +36,8 @@ pub async fn placement(pool: &PgPool, item_id: Uuid) -> Result<Option<Placement>
 pub struct StoredSeason {
     pub number: i32,
     pub poster_url: Option<String>,
+    /// Faza 21: fields an administrator edited (`poster` stays as it is).
+    pub locked_fields: Vec<String>,
 }
 
 /// The seasons of a series and the files of its episodes (enrichment:
@@ -45,7 +47,7 @@ pub async fn series_layout(
     series_id: Uuid,
 ) -> Result<(Vec<StoredSeason>, Vec<String>), DbError> {
     let seasons: Vec<StoredSeason> = sqlx::query_as(
-        "SELECT season_number AS number, poster_url FROM seasons
+        "SELECT season_number AS number, poster_url, locked_fields FROM seasons
          WHERE series_id = $1 ORDER BY season_number",
     )
     .bind(series_id)
@@ -70,10 +72,17 @@ pub async fn set_season_metadata(
     overview: Option<&str>,
     air_year: Option<i32>,
 ) -> Result<(), DbError> {
+    // Faza 21: what an administrator edited (`locked_fields`) stays.
     sqlx::query(
-        "UPDATE seasons SET name = $3, overview = $4, air_year = $5
+        "UPDATE seasons SET
+             name = CASE WHEN 'name' = ANY(locked_fields) THEN name ELSE $3 END,
+             overview = CASE WHEN 'overview' = ANY(locked_fields) THEN overview ELSE $4 END,
+             air_year = CASE WHEN 'air_year' = ANY(locked_fields) THEN air_year ELSE $5 END
          WHERE series_id = $1 AND season_number = $2
-           AND (name, overview, air_year) IS DISTINCT FROM ($3, $4, $5)",
+           AND (name, overview, air_year) IS DISTINCT FROM (
+               CASE WHEN 'name' = ANY(locked_fields) THEN name ELSE $3 END,
+               CASE WHEN 'overview' = ANY(locked_fields) THEN overview ELSE $4 END,
+               CASE WHEN 'air_year' = ANY(locked_fields) THEN air_year ELSE $5 END)",
     )
     .bind(series_id)
     .bind(season)
@@ -263,9 +272,11 @@ pub async fn season_poster_source(
     pool: &PgPool,
     item_id: Uuid,
     season: i32,
-) -> Result<Option<(Uuid, String)>, DbError> {
+) -> Result<Option<(Uuid, String, Option<i64>)>, DbError> {
     Ok(sqlx::query_as(
-        "SELECT e.series_id, m.file_path FROM episodes e JOIN media_items m ON m.id = e.media_item_id
+        "SELECT e.series_id, m.file_path, \
+                (SELECT poster_override_at FROM seasons se WHERE se.id = e.season_id) \
+         FROM episodes e JOIN media_items m ON m.id = e.media_item_id
          WHERE e.series_id = (SELECT series_id FROM episodes WHERE media_item_id = $1)
            AND e.season_number = $2
          ORDER BY e.episode_number LIMIT 1",
