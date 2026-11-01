@@ -24,6 +24,8 @@
 	import { ApiError } from '$lib/playback/api';
 	import EpisodeInfoModal from '$lib/components/EpisodeInfoModal.svelte';
 	import EpisodeList from '$lib/components/EpisodeList.svelte';
+	import MediaItemEditorModal from '$lib/components/MediaItemEditorModal.svelte';
+	import WatchTogetherModal from '$lib/components/WatchTogetherModal.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import PlaystateButton from '$lib/components/PlaystateButton.svelte';
 	import { PLAY_TONE, TOGGLE_SHAPE, toggleTone } from '$lib/components/toggleTone';
@@ -41,6 +43,14 @@
 	let posterFailed = $state(false);
 	let canDownload = $state(false);
 	let info = $state<EpisodeRow | null>(null);
+	/** Faza 20: an episode in the administrator's editor / a watch-together room. */
+	let editingEpisode = $state<EpisodeRow | null>(null);
+	let togetherEpisode = $state<EpisodeRow | null>(null);
+	const isAdmin = $derived(page.data.user?.is_admin === true);
+	function episodeLabel(episode: EpisodeRow): string {
+		const name = episode.title ?? t('series.episode_number', { number: String(episode.episode) });
+		return series ? `${series.title} · ${name}` : name;
+	}
 	let busy = $state(false);
 	let actionError = $state<string | null>(null);
 	let now = $state(Date.now());
@@ -283,11 +293,35 @@
 					{canDownload}
 					oninfo={(episode) => (info = episode)}
 					ondownload={download}
+					extra={(episode) => [
+						{ labelKey: 'syncplay.menu_entry', onselect: () => (togetherEpisode = episode) },
+						...(isAdmin
+							? [{ labelKey: 'series.edit_episode', onselect: () => (editingEpisode = episode) }]
+							: [])
+					]}
 				/>
 			</section>
 		</div>
 	{/if}
 </main>
+
+{#if editingEpisode}
+	<MediaItemEditorModal
+		itemId={editingEpisode.id}
+		providers={[]}
+		scope="episode"
+		onClose={() => (editingEpisode = null)}
+		onSaved={() => triggerLoad(seriesId, seasonNumber)}
+	/>
+{/if}
+
+{#if togetherEpisode}
+	<WatchTogetherModal
+		itemId={togetherEpisode.id}
+		title={episodeLabel(togetherEpisode)}
+		onclose={() => (togetherEpisode = null)}
+	/>
+{/if}
 
 {#if info && season}
 	<EpisodeInfoModal

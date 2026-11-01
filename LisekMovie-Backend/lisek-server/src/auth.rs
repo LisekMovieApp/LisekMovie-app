@@ -297,6 +297,7 @@ fn is_image_path(path: &str) -> bool {
     let collection = segments.len() == 5 && segments[1] == "api" && segments[2] == "collections";
     let person = segments.len() == 5 && segments[1] == "api" && segments[2] == "people";
     let avatar = segments.len() == 5 && segments[1] == "api" && segments[2] == "users" && segments[4] == "avatar";
+    let channel_logo = segments.len() == 6 && segments[1] == "api" && segments[2] == "livetv" && segments[3] == "channels" && segments[5] == "logo";
     // `/api/media/{id}/poster|backdrop|logo`, the trickplay sprite
     // sheets `/api/media/{id}/trickplay/{n}` (CSS backgrounds), chapter
     // thumbnails `/api/media/{id}/chapters/{n}/image`,
@@ -309,6 +310,7 @@ fn is_image_path(path: &str) -> bool {
         || (collection && matches!(segments[4], "poster" | "backdrop"))
         || (person && segments[4] == "image")
         || avatar
+        || channel_logo
 }
 
 #[derive(Debug)]

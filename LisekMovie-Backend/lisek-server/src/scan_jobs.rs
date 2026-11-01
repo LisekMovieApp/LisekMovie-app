@@ -61,10 +61,15 @@ pub async fn scan_library(
     Path(library_id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ScanJob>), AdminError> {
     let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
-    lisek_db::get_library(&pool, library_id)
+    let library = lisek_db::get_library(&pool, library_id)
         .await
         .map_err(map_db_error)?
         .ok_or(AdminError::LibraryNotFound)?;
+    if library.library_type == lisek_db::livetv::LIVE_TV {
+        return Err(AdminError::InvalidInput(
+            "a Live TV library is refreshed with POST /api/admin/livetv/{library_id}/refresh".to_string(),
+        ));
+    }
 
     let (job, created) = db::enqueue(&pool, library_id, Some(auth.user.id))
         .await

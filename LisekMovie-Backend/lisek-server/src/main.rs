@@ -15,6 +15,7 @@ mod background_refresh;
 mod collections;
 mod details;
 mod download;
+mod editor;
 mod identify;
 mod env_file;
 mod media;
@@ -22,6 +23,8 @@ mod playback;
 mod profile;
 mod games;
 mod hardware;
+mod livetv;
+mod livetv_parse;
 mod logging;
 mod http_cache;
 mod notifications;
@@ -38,6 +41,7 @@ mod series;
 mod setup;
 mod state;
 mod stats;
+mod syncplay;
 mod telemetry;
 mod trickplay;
 
@@ -112,6 +116,8 @@ async fn main() {
     tokio::spawn(notifications::run(state.clone()));
     tokio::spawn(scan_jobs::run_worker(state.clone()));
     tokio::spawn(trickplay::run_worker(state.clone()));
+    tokio::spawn(livetv::run(state.clone()));
+    tokio::spawn(livetv::run_reaper(state.clone()));
     tokio::spawn(async {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;

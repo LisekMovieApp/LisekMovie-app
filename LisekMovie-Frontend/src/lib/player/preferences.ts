@@ -5,6 +5,7 @@
  * means defaults.
  */
 import type { DownmixPreference } from '$lib/playback/api';
+import { isQualityId, type QualityId } from './quality';
 
 export type SubtitleSize = 'small' | 'medium' | 'large';
 
@@ -16,6 +17,8 @@ export interface PlayerPreferences {
 	/** Language of the last subtitle picked; `''` = subtitles off; `null` = server default. */
 	subtitleLanguage: string | null;
 	subtitleSize: SubtitleSize;
+	/** Faza 20: picture quality picked in the player. */
+	quality: QualityId;
 }
 
 const KEY = 'lisek.player';
@@ -26,7 +29,8 @@ export const DEFAULT_PREFERENCES: PlayerPreferences = {
 	downmix: 'auto',
 	compatible: false,
 	subtitleLanguage: null,
-	subtitleSize: 'medium'
+	subtitleSize: 'medium',
+	quality: 'original'
 };
 
 const DOWNMIX: DownmixPreference[] = ['auto', 'standard', 'dialogue', 'night', 'pro_logic_ii'];
@@ -56,7 +60,8 @@ export function parsePreferences(raw: string | null): PlayerPreferences {
 				: null,
 		subtitleSize: SIZES.includes(data.subtitleSize as SubtitleSize)
 			? (data.subtitleSize as SubtitleSize)
-			: 'medium'
+			: 'medium',
+		quality: isQualityId(data.quality) ? data.quality : 'original'
 	};
 }
 

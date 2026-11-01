@@ -48,7 +48,9 @@
 
 	// The player covers the whole screen; the navbar behind it would only
 	// catch Tab focus.
-	const watching = $derived(page.route.id?.startsWith('/watch/') ?? false);
+	const watching = $derived(
+		(page.route.id?.startsWith('/watch/') || page.route.id === '/live-tv/[channel]') ?? false
+	);
 </script>
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>

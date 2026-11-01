@@ -336,6 +336,20 @@ pub async fn attach_provider_metadata(
                     THEN jsonb_build_object('episode', metadata->'provider_data'->'episode')
                     ELSE '{}'::jsonb
                 END
+                -- Faza 20: an episode title or overview the administrator
+                -- edited survives the provider's.
+                || CASE
+                    WHEN ($3::jsonb ? 'episode')
+                         AND ('episode_title' = ANY(locked_fields) OR 'episode_overview' = ANY(locked_fields))
+                    THEN jsonb_build_object('episode', ($3::jsonb->'episode')
+                        || CASE WHEN 'episode_title' = ANY(locked_fields)
+                                THEN jsonb_build_object('title', metadata->'provider_data'->'episode'->'title')
+                                ELSE '{}'::jsonb END
+                        || CASE WHEN 'episode_overview' = ANY(locked_fields)
+                                THEN jsonb_build_object('overview', metadata->'provider_data'->'episode'->'overview')
+                                ELSE '{}'::jsonb END)
+                    ELSE '{}'::jsonb
+                END
             ),
             updated_at = now()
         WHERE id = $1

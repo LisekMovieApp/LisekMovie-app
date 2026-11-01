@@ -206,6 +206,12 @@ pub struct CreateLibraryRequest {
     pub root_paths: Vec<String>,
     #[serde(default = "default_save_metadata_in_media_folder")]
     pub save_metadata_in_media_folder: bool,
+    /// Faza 20, `live_tv` only: the M3U channel list (http(s) or a path on
+    /// the server) and the optional XMLTV guide. `root_paths` stays empty.
+    #[serde(default)]
+    pub m3u_url: Option<String>,
+    #[serde(default)]
+    pub xmltv_url: Option<String>,
 }
 
 #[utoipa::path(post,path="/api/admin/libraries",tag="admin",request_body=CreateLibraryRequest,responses((status=200,body=LibraryResponse),(status=400),(status=401),(status=403),(status=500),(status=503)),security(("lisek_auth"=[])))]
@@ -218,7 +224,19 @@ pub async fn create_library(
     if name.is_empty() {
         return Err(AdminError::InvalidInput("name cannot be empty".to_string()));
     }
-    if req.root_paths.is_empty() {
+    let live_tv = req.library_type == lisek_db::livetv::LIVE_TV;
+    let source = if live_tv {
+        let source = crate::livetv::SetSource {
+            m3u_url: req.m3u_url.clone().unwrap_or_default(),
+            xmltv_url: req.xmltv_url.clone(),
+        };
+        crate::livetv::check_source(&source)
+            .map_err(|_| AdminError::InvalidInput("a valid M3U link or server path is required".to_string()))?;
+        Some(source)
+    } else {
+        None
+    };
+    if !live_tv && req.root_paths.is_empty() {
         return Err(AdminError::InvalidInput(
             "at least one root path is required".to_string(),
         ));
@@ -229,11 +247,22 @@ pub async fn create_library(
         &pool,
         name,
         &req.library_type,
-        &req.root_paths,
+        if live_tv { &[] } else { &req.root_paths },
         req.save_metadata_in_media_folder,
     )
     .await
     .map_err(map_db_error)?;
+    if let Some(source) = source {
+        let xmltv = source.xmltv_url.as_deref().map(str::trim).filter(|u| !u.is_empty());
+        lisek_db::livetv::set_source(&pool, library.id, source.m3u_url.trim(), xmltv)
+            .await
+            .map_err(map_db_error)?;
+        // Channels and guide arrive in the background (big guides take a while).
+        let (pool, library_id) = (pool.clone(), library.id);
+        tokio::spawn(async move {
+            let _ = crate::livetv::refresh(&pool, library_id).await;
+        });
+    }
 
     tracing::info!(
         library_id = %library.id,
@@ -323,98 +352,6 @@ pub async fn list_library_items(
         .await
         .map_err(map_db_error)?;
     Ok(Json(items))
-}
-
-/// One item's full editable shape, for the metadata editor to load when
-/// it opens.
-#[utoipa::path(get,path="/api/admin/media/{item_id}",tag="admin",params(("item_id"=uuid::Uuid,Path)),responses((status=200,body=lisek_db::MediaItemDetail),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
-pub async fn get_media_item(
-    _admin: AdminUser,
-    State(state): State<SharedState>,
-    Path(item_id): Path<Uuid>,
-) -> Result<Json<lisek_db::MediaItemDetail>, AdminError> {
-    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
-
-    let item = lisek_db::get_media_item_detail(&pool, item_id)
-        .await
-        .map_err(map_db_error)?
-        .ok_or(AdminError::ItemNotFound)?;
-    Ok(Json(item))
-}
-
-#[derive(Deserialize, utoipa::ToSchema)]
-pub struct UpdateMediaItemRequest {
-    pub title: String,
-    pub original_title: Option<String>,
-    pub year: Option<i32>,
-    pub overview: Option<String>,
-    pub metadata_locked: bool,
-    pub forced_provider: Option<String>,
-    pub locked_fields: Vec<String>,
-    /// Faza 6: the administrator's own age rating (minimum viewer age,
-    /// 0–21) for parental controls; `null` or absent leaves the
-    /// provider's rating in charge.
-    #[serde(default)]
-    pub age_rating: Option<i32>,
-}
-
-/// The metadata editor's save action — see `lisek_db::update_media_item`'s
-/// own doc comment for why this is the one write in the whole admin
-/// surface that's never gated on `locked_fields` (an admin's own edit
-/// always applies) and the one place `locked_fields` itself, plus
-/// `metadata_locked`/`forced_provider`, actually get written.
-#[utoipa::path(put,path="/api/admin/media/{item_id}",tag="admin",params(("item_id"=Uuid,Path)),request_body=UpdateMediaItemRequest,responses((status=200,body=Value),(status=400),(status=404),(status=401),(status=403),(status=500),(status=503)),security(("lisek_auth"=[])))]
-pub async fn update_media_item(
-    AdminUser(auth): AdminUser,
-    State(state): State<SharedState>,
-    Path(item_id): Path<Uuid>,
-    Json(req): Json<UpdateMediaItemRequest>,
-) -> Result<Json<Value>, AdminError> {
-    let title = req.title.trim();
-    if title.is_empty() {
-        return Err(AdminError::InvalidInput(
-            "title cannot be empty".to_string(),
-        ));
-    }
-
-    if req
-        .age_rating
-        .is_some_and(|age| !(0..=lisek_db::access::MAX_AGE_RATING).contains(&age))
-    {
-        return Err(AdminError::InvalidInput(
-            "age_rating must be between 0 and 21".to_string(),
-        ));
-    }
-
-    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
-    let updated = lisek_db::update_media_item(
-        &pool,
-        item_id,
-        title,
-        req.original_title.as_deref(),
-        req.year,
-        req.overview.as_deref(),
-        req.metadata_locked,
-        req.forced_provider.as_deref(),
-        &req.locked_fields,
-        req.age_rating,
-    )
-    .await
-    .map_err(map_db_error)?;
-
-    if !updated {
-        return Err(AdminError::ItemNotFound);
-    }
-
-    tracing::info!(
-        %item_id,
-        metadata_locked = req.metadata_locked,
-        forced_provider = req.forced_provider.as_deref(),
-        admin = %auth.user.username,
-        "media item metadata updated"
-    );
-
-    Ok(Json(json!({ "ok": true })))
 }
 
 /// Every item currently flagged `metadata_fallback` — the Admin Panel's

@@ -24,8 +24,10 @@ mod scan;
 
 pub mod access;
 pub mod collections;
+pub mod editor;
 pub mod episodes;
 pub mod games;
+pub mod livetv;
 pub mod notifications;
 pub mod people;
 pub mod playback;

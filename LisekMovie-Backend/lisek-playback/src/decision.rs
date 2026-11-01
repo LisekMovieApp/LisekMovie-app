@@ -659,11 +659,14 @@ fn video_encode(
         Some(AudioAction::Copy) => 256,
         None => 0,
     };
-    let bitrate_kbps = match limit {
-        Some(limit) => (limit.saturating_mul(90) / 100)
-            .saturating_sub(audio_kbps)
-            .min(settings.video_bitrate_kbps),
-        None => settings.video_bitrate_kbps,
+    // A quality the viewer picked in the player (Faza 20) is the budget
+    // itself, above the server's default transcoding bitrate if need be;
+    // otherwise the default, within any remote limit.
+    let budget = |limit: u32| (limit.saturating_mul(90) / 100).saturating_sub(audio_kbps);
+    let bitrate_kbps = match (request.max_bitrate_kbps, limit) {
+        (Some(_), Some(limit)) => budget(limit),
+        (None, Some(limit)) => budget(limit).min(settings.video_bitrate_kbps),
+        (_, None) => settings.video_bitrate_kbps,
     };
     if bitrate_kbps < 100 {
         return Err("streaming_limit_too_low");
@@ -968,6 +971,32 @@ pub(crate) mod tests {
         assert_eq!(encode.bitrate_kbps, 900 - 128);
         f.remote = Some(200);
         assert_eq!(f.decide().unwrap_err(), "streaming_limit_too_low");
+    }
+
+    #[test]
+    fn a_quality_picked_in_the_player_scales_and_sets_the_bitrate() {
+        // Faza 20: "720p (4 Mbps)" on a 1080p Blu-ray rip.
+        let mut f = Fixture::new(bluray_rip(), ClientFamily::Chrome);
+        f.request.max_height = Some(720);
+        f.request.max_bitrate_kbps = Some(4000);
+        let plan = f.decide().unwrap();
+        assert_eq!(plan.method, PlayMethod::Transcode);
+        assert!(plan.reasons.contains(&TranscodeReason::ResolutionAboveRequested));
+        let VideoAction::Encode(encode) = &plan.video else { panic!() };
+        assert_eq!(encode.height, 720);
+        assert!(encode.width <= 1280);
+        assert_eq!(encode.bitrate_kbps, 3600 - 128, "the picked budget, not the 2.5 Mbps default");
+        // "360p (1 Mbps)".
+        f.request.max_height = Some(360);
+        f.request.max_bitrate_kbps = Some(1000);
+        let VideoAction::Encode(encode) = f.decide().unwrap().video else { panic!() };
+        assert_eq!((encode.height, encode.bitrate_kbps), (360, 900 - 128));
+        // A remote limit still wins over a higher pick.
+        f.remote = Some(2000);
+        f.request.max_height = Some(1080);
+        f.request.max_bitrate_kbps = Some(8000);
+        let VideoAction::Encode(encode) = f.decide().unwrap().video else { panic!() };
+        assert_eq!(encode.bitrate_kbps, 1800 - 128);
     }
 
     #[test]

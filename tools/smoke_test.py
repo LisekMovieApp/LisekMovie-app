@@ -486,6 +486,13 @@ def main():
             # Faza 19: avatars, own UI language, server language, online status.
             from profiles_smoke import check_profiles
             check_profiles(request,ok_json,sql,base,token,other_token,root)
+            # Faza 20: metadata editor and artwork, quality presets, watching together, Live TV.
+            import phase20_smoke
+            phase20_smoke.check_editor(request,ok_json,sql,base,token,other_token)
+            if args.ffmpeg and args.ffprobe:
+                phase20_smoke.check_quality(ok_json,sql,token,CHROME)
+            phase20_smoke.check_syncplay(request,ok_json,sql,base,token,other_token,args.node)
+            phase20_smoke.check_live_tv(request,ok_json,sql,base,token,other_token,root,args.ffmpeg)
             ok_json("/api/auth/logout","POST",{},token)
             if args.node:
                 event=notification_queue.get(timeout=15)
@@ -506,7 +513,7 @@ def main():
             server.wait(timeout=10)
             log.close()
             server = None
-            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls, fix match, downloads, cast and crew, details and chapters, series pages, global search, alpha picker, watch statistics, hardware diagnostics, fix match by IMDb id after a reload, central logs, avatars and online status")
+            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls, fix match, downloads, cast and crew, details and chapters, series pages, global search, alpha picker, watch statistics, hardware diagnostics, fix match by IMDb id after a reload, central logs, avatars and online status, metadata editor and artwork, quality presets, watch together, live TV")
     finally:
         if server:
             server.terminate()

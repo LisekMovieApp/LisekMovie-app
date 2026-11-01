@@ -6,7 +6,8 @@ import type { components } from '$lib/api/schema';
 import { buildAuthHeader } from '$lib/auth';
 import { assertOk } from './api';
 
-export type LibraryType = 'movies' | 'tv_shows';
+/** Faza 20: `live_tv` — channels from an M3U list, no folders. */
+export type LibraryType = 'movies' | 'tv_shows' | 'live_tv';
 
 export interface Library {
 	id: string;
@@ -53,7 +54,8 @@ export async function createLibrary(
 	name: string,
 	libraryType: LibraryType,
 	rootPaths: string[],
-	saveMetadataInMediaFolder: boolean = true
+	saveMetadataInMediaFolder: boolean = true,
+	liveTv: { m3u_url: string; xmltv_url: string | null } | null = null
 ): Promise<Library> {
 	const response = await fetch('/api/admin/libraries', {
 		method: 'POST',
@@ -62,7 +64,8 @@ export async function createLibrary(
 			name,
 			library_type: libraryType,
 			root_paths: rootPaths,
-			save_metadata_in_media_folder: saveMetadataInMediaFolder
+			save_metadata_in_media_folder: saveMetadataInMediaFolder,
+			...(liveTv ?? {})
 		})
 	});
 	await assertOk(response);

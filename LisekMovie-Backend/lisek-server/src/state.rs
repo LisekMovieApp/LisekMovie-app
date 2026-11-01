@@ -113,6 +113,10 @@ pub struct AppState {
     pub download_tickets: crate::download::DownloadTickets,
     /// Throttled "last seen" writes for the admin user list (Faza 19).
     pub presence: crate::profile::Presence,
+    /// Watch-together rooms (Faza 20).
+    pub syncplay: crate::syncplay::Rooms,
+    /// Running live TV streams (Faza 20).
+    pub live: crate::livetv::LiveSessions,
 }
 
 impl AppState {
@@ -129,6 +133,8 @@ impl AppState {
             trickplay_progress: std::sync::Mutex::default(),
             download_tickets: crate::download::DownloadTickets::default(),
             presence: crate::profile::Presence::default(),
+            syncplay: crate::syncplay::Rooms::default(),
+            live: crate::livetv::LiveSessions::default(),
         }
     }
 

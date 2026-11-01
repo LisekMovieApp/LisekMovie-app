@@ -212,6 +212,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/livetv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every Live TV library with its source and the last refresh. */
+        get: operations["admin_sources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/livetv/{library_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Changes a Live TV library's links and refreshes it. */
+        put: operations["admin_set_source"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/livetv/{library_id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Downloads the channel list and guide again now. */
+        post: operations["admin_refresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/logs": {
         parameters: {
             query?: never;
@@ -290,19 +341,33 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        get: operations["get_item"];
         /**
-         * One item's full editable shape, for the metadata editor to load when
-         *     it opens.
+         * The metadata editor's save. Never gated on `locked_fields` — an
+         *     administrator's own edit always applies; the locks only protect it
+         *     from automatic rescans and refreshes afterwards.
          */
-        get: operations["get_media_item"];
+        put: operations["update_item"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/media/{item_id}/artwork/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
         /**
-         * The metadata editor's save action — see `lisek_db::update_media_item`'s
-         *     own doc comment for why this is the one write in the whole admin
-         *     surface that's never gated on `locked_fields` (an admin's own edit
-         *     always applies) and the one place `locked_fields` itself, plus
-         *     `metadata_locked`/`forced_provider`, actually get written.
+         * Replaces one picture. Poster, backdrop and logo of an episode belong to
+         *     its series (every episode gets them); `thumb` is an episode's still.
          */
-        put: operations["update_media_item"];
+        put: operations["set_artwork"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1111,6 +1176,125 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/livetv/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every channel with what is on now and next. */
+        get: operations["channels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/livetv/channels/{channel_id}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A channel's logo, fetched once and kept in `<config>/livetv/logos`. */
+        get: operations["logo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/livetv/channels/{channel_id}/play": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Starts watching a channel. Answers once the first segment is ready. */
+        post: operations["play"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/livetv/guide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The programme guide: every channel with its programmes in a window. */
+        get: operations["guide"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/livetv/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Stops a live stream (leaving the player). */
+        delete: operations["stop"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/livetv/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether Live TV is there for this account (the main menu's tab). */
+        get: operations["status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/livetv/stream/{session_id}/{ticket}/{file}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A live playlist or segment. The ticket in the path authorizes it. */
+        get: operations["stream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/logs/client": {
         parameters: {
             query?: never;
@@ -1823,6 +2007,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/syncplay/rooms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Opens a room for a film or an episode. */
+        post: operations["create_room"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/syncplay/rooms/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A room's item, members and state (for the join link). */
+        get: operations["get_room"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/syncplay/socket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["socket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/telemetry/playback-progress": {
         parameters: {
             query?: never;
@@ -1934,6 +2168,17 @@ export interface components {
              */
             online: boolean;
         };
+        ArtworkResponse: {
+            /** @description Items that got the new picture (a series counts every episode). */
+            items: number;
+            kind: string;
+            /** @description The image URL with a cache-buster. */
+            url: string;
+        };
+        ArtworkUrl: {
+            /** @description An `http(s)` link to the picture. */
+            url: string;
+        };
         AudioOption: {
             /** Format: int32 */
             channels?: number | null;
@@ -1990,6 +2235,12 @@ export interface components {
         ChangePassword: {
             current_password?: string | null;
             new_password: string;
+        };
+        ChannelResponse: components["schemas"]["LiveChannel"] & {
+            /** @description `/api/livetv/channels/{id}/logo`, or null. */
+            logo_url?: string | null;
+            next?: null | components["schemas"]["LiveProgram"];
+            now?: null | components["schemas"]["LiveProgram"];
         };
         ChapterResponse: {
             /** @description `/api/media/{id}/chapters/{index}/image?v=...` (`?token=` works). */
@@ -2104,15 +2355,37 @@ export interface components {
         };
         CreateLibraryRequest: {
             library_type: string;
+            /**
+             * @description Faza 20, `live_tv` only: the M3U channel list (http(s) or a path on
+             *     the server) and the optional XMLTV guide. `root_paths` stays empty.
+             */
+            m3u_url?: string | null;
             name: string;
             root_paths: string[];
             save_metadata_in_media_folder?: boolean;
+            xmltv_url?: string | null;
+        };
+        CreateRoom: {
+            /** Format: uuid */
+            item_id: string;
+            /**
+             * Format: double
+             * @description Where the room starts (seconds); 0 when omitted.
+             */
+            position?: number;
         };
         CreateUser: {
             is_admin?: boolean;
             password?: string | null;
             ui_language?: string | null;
             username: string;
+        };
+        CreatedRoom: {
+            code: string;
+            /** Format: uuid */
+            item_id: string;
+            /** @description Path to share: opens the player in this room. */
+            link: string;
         };
         CreatedUser: {
             temporary_password: string;
@@ -2241,11 +2514,27 @@ export interface components {
          * @enum {string}
          */
         DownmixPreference: "auto" | "standard" | "dialogue" | "night" | "pro_logic_ii";
+        /**
+         * @description What a save edits.
+         * @enum {string}
+         */
+        EditScope: "item" | "series" | "episode";
         EditUser: {
             disabled: boolean;
             is_admin: boolean;
             ui_language: string;
             username: string;
+        };
+        /**
+         * @description One item as the editor loads it: the item's own fields, its series and
+         *     episode side, and a version for the artwork previews.
+         */
+        EditorItem: components["schemas"]["MediaItemDetail"] & components["schemas"]["EpisodeContext"] & {
+            /**
+             * Format: int64
+             * @description Changes whenever the item is saved: a cache-buster for previews.
+             */
+            version: number;
         };
         EncoderTest: {
             /** @description `nvenc`, `vaapi`, `qsv`, `amf`, `videotoolbox`. */
@@ -2277,6 +2566,17 @@ export interface components {
             name: string;
             subscribed_events: string[];
             url: string;
+        };
+        /** @description The series and episode side of an item, for the editor. */
+        EpisodeContext: {
+            episode_air_date?: string | null;
+            /** Format: int32 */
+            episode_count?: number | null;
+            episode_overview?: string | null;
+            episode_title?: string | null;
+            /** Format: uuid */
+            series_id?: string | null;
+            series_title?: string | null;
         };
         EpisodeRowResponse: {
             air_date?: string | null;
@@ -2400,6 +2700,19 @@ export interface components {
             utilization_percent?: number | null;
             /** @description `nvidia`, `intel`, `amd` or `other`. */
             vendor: string;
+        };
+        GuideChannel: components["schemas"]["LiveChannel"] & {
+            logo_url?: string | null;
+            programs: components["schemas"]["LiveProgram"][];
+        };
+        GuideResponse: {
+            channels: components["schemas"]["GuideChannel"][];
+            /** Format: date-time */
+            end: string;
+            /** Format: date-time */
+            now: string;
+            /** Format: date-time */
+            start: string;
         };
         /** @description One transcoding device of the pool (Faza 14). */
         HardwareDevice: {
@@ -2638,6 +2951,50 @@ export interface components {
             /** Format: int64 */
             total: number;
         };
+        LiveChannel: {
+            group_title?: string | null;
+            /** @description Whether a logo exists (served by `/api/livetv/channels/{id}/logo`). */
+            has_logo: boolean;
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            library_id: string;
+            name: string;
+            number?: string | null;
+        };
+        LiveProgram: {
+            category?: string | null;
+            /** Format: uuid */
+            channel_id: string;
+            description?: string | null;
+            /** Format: date-time */
+            ends_at: string;
+            /** Format: int64 */
+            id: number;
+            /** Format: date-time */
+            starts_at: string;
+            subtitle?: string | null;
+            title: string;
+        };
+        LiveTvSource: {
+            /** Format: int32 */
+            channel_count: number;
+            last_error?: string | null;
+            /** Format: uuid */
+            library_id: string;
+            library_name: string;
+            m3u_url: string;
+            /** Format: int32 */
+            program_count: number;
+            /** Format: date-time */
+            refreshed_at?: string | null;
+            xmltv_url?: string | null;
+        };
+        LiveTvStatus: {
+            /** @description Whether this account has any channel to watch. */
+            available: boolean;
+            channel_count: number;
+        };
         LogDayResponse: {
             date: string;
             /** @description Oldest first (a console scrolls down to the newest). */
@@ -2829,6 +3186,11 @@ export interface components {
             /** Format: int32 */
             year?: number | null;
         };
+        Member: {
+            /** Format: uuid */
+            user_id: string;
+            username: string;
+        };
         MigrateFallbackResponse: {
             backdrop_migrated: boolean;
             poster_migrated: boolean;
@@ -2910,6 +3272,20 @@ export interface components {
              *     for here.
              */
             role: string;
+        };
+        PlayRequest: {
+            /** @description Re-encode the video to H.264 (for streams the browser cannot decode). */
+            transcode?: boolean;
+        };
+        PlayResponse: {
+            /** Format: uuid */
+            channel_id: string;
+            name: string;
+            /** Format: uuid */
+            session_id: string;
+            /** @description Live HLS playlist (no headers needed). */
+            stream_url: string;
+            transcoding: boolean;
         };
         /** @description One progress report (`POST /api/telemetry/playback-progress`). */
         PlaybackProgress: {
@@ -3305,6 +3681,16 @@ export interface components {
              */
             max_age_rating?: number | null;
         };
+        RoomInfo: {
+            code: string;
+            /** Format: uuid */
+            item_id: string;
+            members: components["schemas"]["Member"][];
+            playing: boolean;
+            /** Format: double */
+            position: number;
+            title: string;
+        };
         SafetyConfig: {
             enabled: boolean;
             /** Format: int32 */
@@ -3517,6 +3903,12 @@ export interface components {
         };
         SetProviderKeyRequest: {
             api_key: string;
+        };
+        SetSource: {
+            /** @description http(s) link to the M3U playlist, or an absolute path on the server. */
+            m3u_url: string;
+            /** @description XMLTV guide (optional; `.xml` or `.xml.gz`). */
+            xmltv_url?: string | null;
         };
         /** @description One slice of a breakdown (platform, device type, content type). */
         Slice: {
@@ -3866,19 +4258,39 @@ export interface components {
         UpdateMediaItemRequest: {
             /**
              * Format: int32
-             * @description Faza 6: the administrator's own age rating (minimum viewer age,
-             *     0–21) for parental controls; `null` or absent leaves the
-             *     provider's rating in charge.
+             * @description The administrator's own age rating (0–21); null: the provider's.
              */
             age_rating?: number | null;
+            /** @description `YYYY-MM-DD`. */
+            episode_air_date?: string | null;
+            episode_overview?: string | null;
+            episode_title?: string | null;
             forced_provider?: string | null;
-            locked_fields: string[];
-            metadata_locked: boolean;
+            /**
+             * @description Fields protected from rescans and provider refreshes (`title`,
+             *     `original_title`, `year`, `overview`, `poster`, `backdrop`, `logo`;
+             *     for an episode `episode_title`, `episode_overview`, `thumb`). Fields
+             *     this save changes are added automatically.
+             */
+            locked_fields?: string[];
+            metadata_locked?: boolean;
             original_title?: string | null;
             overview?: string | null;
-            title: string;
+            scope?: components["schemas"]["EditScope"];
+            /** @description Film or series title (required for `item` on a film, and `series`). */
+            title?: string | null;
             /** Format: int32 */
             year?: number | null;
+        };
+        UpdateMediaItemResponse: {
+            /** @description Fields locked automatically because this save changed them. */
+            auto_locked: string[];
+            ok: boolean;
+            /**
+             * Format: int64
+             * @description Items written (a series counts every episode).
+             */
+            updated: number;
         };
         UpdateProviderRequest: {
             enabled: boolean;
@@ -4570,6 +4982,125 @@ export interface operations {
             };
         };
     };
+    admin_sources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveTvSource"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    admin_set_source: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                library_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSource"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveTvSource"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    admin_refresh: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                library_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveTvSource"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list: {
         parameters: {
             query?: never;
@@ -4751,7 +5282,7 @@ export interface operations {
             };
         };
     };
-    get_media_item: {
+    get_item: {
         parameters: {
             query?: never;
             header?: never;
@@ -4767,14 +5298,8 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MediaItemDetail"];
+                    "application/json": components["schemas"]["EditorItem"];
                 };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             401: {
                 headers: {
@@ -4794,12 +5319,6 @@ export interface operations {
                 };
                 content?: never;
             };
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -4808,7 +5327,7 @@ export interface operations {
             };
         };
     };
-    update_media_item: {
+    update_item: {
         parameters: {
             query?: never;
             header?: never;
@@ -4828,7 +5347,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["UpdateMediaItemResponse"];
                 };
             };
             400: {
@@ -4855,13 +5374,79 @@ export interface operations {
                 };
                 content?: never;
             };
-            500: {
+            /** @description series_title_taken */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_artwork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+                /** @description poster, backdrop, logo or thumb */
+                kind: string;
+            };
+            cookie?: never;
+        };
+        /** @description JSON {url}, or the raw picture (image/*) */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtworkUrl"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtworkResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description artwork_download_failed */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6983,6 +7568,240 @@ export interface operations {
             };
         };
     };
+    channels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelResponse"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    logo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channel_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    play: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channel_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlayRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description live_capacity_reached */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description live_stream_unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    guide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Window start (RFC 3339); default: half an hour ago. */
+                start: string | null;
+                /** @description Window length in hours (1–48); default 6. */
+                hours: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuideResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveTvStatus"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                ticket: string;
+                file: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HLS playlist or MPEG-TS segment */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     client: {
         parameters: {
             query?: never;
@@ -8747,6 +9566,105 @@ export interface operations {
                 content?: never;
             };
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    create_room: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRoom"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedRoom"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description too_many_rooms */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_room: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoomInfo"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    socket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description WebSocket. First frame: JSON {token, code}. Server sends joined (room, members, state), then members, command {action: play|pause|seek, position, by} and state {playing, position} every 10 s. Client sends {type: play|pause|seek, position} or {type: state}. Errors: {type: error, code: room_not_found|room_full|unauthorized}. */
+            101: {
                 headers: {
                     [name: string]: unknown;
                 };

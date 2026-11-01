@@ -19,6 +19,7 @@
 	import { fetchProviders, type ProviderConfig } from '$lib/admin/providers';
 	import MediaActions from '$lib/components/MediaActions.svelte';
 	import MediaItemEditorModal from '$lib/components/MediaItemEditorModal.svelte';
+	import WatchTogetherModal from '$lib/components/WatchTogetherModal.svelte';
 	import FixMatchModal from '$lib/components/FixMatchModal.svelte';
 	import { showToast } from '$lib/toast/toast.svelte';
 	import CastRow from '$lib/components/CastRow.svelte';
@@ -56,6 +57,8 @@
 	let posterFailed = $state(false);
 	let providers: ProviderConfig[] = $state([]);
 	let editing = $state(false);
+	/** Faza 20: the watch-together dialog. */
+	let together = $state(false);
 	/** Only ever populated for a `'series'` item — see the "Sezony" fetch
 	 * in `load()` below. Stays `[]` for a movie. */
 	let seasons: SeriesSeason[] = $state([]);
@@ -297,6 +300,9 @@
 		return end ? formatClock(end, getLocale()) : null;
 	});
 	const moreEntries = $derived([
+		...(item && playId
+			? [{ labelKey: 'syncplay.menu_entry', onselect: () => (together = true) }]
+			: []),
 		...(canDownload && isMovie && item
 			? [
 					{
@@ -595,8 +601,20 @@
 	<MediaItemEditorModal
 		itemId={item.id}
 		{providers}
+		scope={item.item_type === 'series' ? 'series' : 'item'}
 		onClose={() => (editing = false)}
-		onSaved={() => triggerLoad(itemId)}
+		onSaved={() => {
+			imageVersion = Date.now();
+			triggerLoad(itemId);
+		}}
+	/>
+{/if}
+
+{#if together && item}
+	<WatchTogetherModal
+		itemId={playId}
+		title={item.title}
+		onclose={() => (together = false)}
 	/>
 {/if}
 

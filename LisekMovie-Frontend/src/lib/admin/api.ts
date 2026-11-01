@@ -7,13 +7,24 @@
 // needs one).
 
 export class AdminApiError extends Error {
-	constructor(public status: number) {
+	constructor(
+		public status: number,
+		/** The server's `error_code`, when the body had one (Faza 20). */
+		public code: string | null = null
+	) {
 		super(`Admin API request failed with status ${status}`);
 	}
 }
 
 export async function assertOk(response: Response): Promise<void> {
 	if (!response.ok) {
-		throw new AdminApiError(response.status);
+		let code: string | null = null;
+		try {
+			const body = (await response.clone().json()) as { error_code?: unknown };
+			if (typeof body?.error_code === 'string') code = body.error_code;
+		} catch {
+			// Not JSON: the status alone.
+		}
+		throw new AdminApiError(response.status, code);
 	}
 }

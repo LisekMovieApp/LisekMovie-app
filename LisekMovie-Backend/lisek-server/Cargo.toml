@@ -51,6 +51,9 @@ utoipa-axum = "0.2"
 arc-swap = "1"
 # Avatar uploads (Faza 19): decode JPEG/PNG/WebP/GIF, resize, encode JPEG.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
+# Live TV (Faza 20): XMLTV guides, gzip-compressed guides.
+quick-xml = "0.38"
+flate2 = "1.1"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

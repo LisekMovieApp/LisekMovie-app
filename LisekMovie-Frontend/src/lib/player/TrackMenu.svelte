@@ -23,6 +23,7 @@
 	import type { DownmixPreference, PlaybackSession } from '$lib/playback/api';
 	import { audioTrackLabel, subtitleTrackLabel } from './labels';
 	import type { SubtitleSize } from './preferences';
+	import { QUALITIES, type QualityId } from './quality';
 
 	interface Props {
 		view: 'tracks' | 'settings';
@@ -33,6 +34,8 @@
 		downmix: DownmixPreference;
 		compatible: boolean;
 		subtitleSize: SubtitleSize;
+		/** Faza 20: picture quality. */
+		quality: QualityId;
 		busy: boolean;
 		stats: PlaybackStats;
 		onaudio: (index: number) => void;
@@ -41,6 +44,7 @@
 		oncompatible: (value: boolean) => void;
 		onburnin: (value: boolean) => void;
 		onsize: (size: SubtitleSize) => void;
+		onquality: (quality: QualityId) => void;
 		onclose: () => void;
 	}
 
@@ -53,6 +57,7 @@
 		downmix,
 		compatible,
 		subtitleSize,
+		quality,
 		busy,
 		stats,
 		onaudio,
@@ -61,6 +66,7 @@
 		oncompatible,
 		onburnin,
 		onsize,
+		onquality,
 		onclose
 	}: Props = $props();
 
@@ -201,6 +207,37 @@
 										{label.detail}{track.kind === 'image' ? ` · ${t('player.burnt_in')}` : ''}
 									</span>
 								</span>
+							</button>
+						{/each}
+					</div>
+				</section>
+				<section use:navGroup class="md:col-span-2">
+					<h3 class={heading}>{t('player.stream_quality')}</h3>
+					<p class="mb-2 px-3 text-xs text-neutral-500">{t('player.stream_quality_hint')}</p>
+					<div
+						role="radiogroup"
+						aria-label={t('player.stream_quality')}
+						class="grid grid-cols-2 gap-1 sm:grid-cols-3 md:grid-cols-5"
+					>
+						{#each QUALITIES as option (option.id)}
+							{@const on = quality === option.id}
+							<button
+								type="button"
+								role="radio"
+								aria-checked={on}
+								class="flex flex-col items-start rounded-lg px-3 py-2 text-left ring-1 transition-colors focus-visible:bg-white/15 {on
+									? 'bg-white/10 text-white ring-gold'
+									: 'ring-white/10 hover:bg-white/10'}"
+								onclick={() => onquality(option.id)}
+							>
+								<span class="text-sm {on ? 'font-semibold' : ''}"
+									>{t(`player.stream_qualities.${option.id}`)}</span
+								>
+								<span class="text-xs text-neutral-500"
+									>{option.maxBitrateKbps
+										? t('player.mbps', { value: String(option.maxBitrateKbps / 1000) })
+										: t('player.stream_quality_original_hint')}</span
+								>
 							</button>
 						{/each}
 					</div>

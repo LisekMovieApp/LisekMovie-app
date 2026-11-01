@@ -35,7 +35,8 @@ pub async fn create_library(
     root_paths: &[String],
     save_metadata_in_media_folder: bool,
 ) -> Result<Library, DbError> {
-    if LibraryType::from_db_str(library_type).is_none() {
+    // Faza 20: `live_tv` libraries have no folders to scan (see `livetv`).
+    if LibraryType::from_db_str(library_type).is_none() && library_type != crate::livetv::LIVE_TV {
         return Err(DbError::InvalidLibraryType(library_type.to_string()));
     }
 

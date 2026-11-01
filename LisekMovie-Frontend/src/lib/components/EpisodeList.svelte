@@ -33,9 +33,20 @@
 		canDownload: boolean;
 		oninfo: (episode: EpisodeRow) => void;
 		ondownload: (episode: EpisodeRow) => void;
+		/** Faza 20: more "⋯" entries per episode (watch together, the
+		 * administrator's editor). */
+		extra?: (episode: EpisodeRow) => { labelKey: string; onselect: () => void }[];
 	}
 
-	let { episodes = $bindable(), token, now, canDownload, oninfo, ondownload }: Props = $props();
+	let {
+		episodes = $bindable(),
+		token,
+		now,
+		canDownload,
+		oninfo,
+		ondownload,
+		extra = () => []
+	}: Props = $props();
 
 	let busy = $state<string | null>(null);
 	let failed = $state(false);
@@ -171,7 +182,8 @@
 								{ labelKey: 'series.info', onselect: () => oninfo(episode) },
 								...(canDownload
 									? [{ labelKey: 'download.button', onselect: () => ondownload(episode) }]
-									: [])
+									: []),
+								...extra(episode)
 							]}
 						/>
 					</div>
@@ -208,9 +220,14 @@
 					>
 						<Icon name={episode.favorite ? 'heart_filled' : 'heart'} class="size-5" />
 					</button>
-					{#if canDownload}
+					{#if canDownload || extra(episode).length > 0}
 						<MoreMenu
-							entries={[{ labelKey: 'download.button', onselect: () => ondownload(episode) }]}
+							entries={[
+								...(canDownload
+									? [{ labelKey: 'download.button', onselect: () => ondownload(episode) }]
+									: []),
+								...extra(episode)
+							]}
 						/>
 					{/if}
 				</div>

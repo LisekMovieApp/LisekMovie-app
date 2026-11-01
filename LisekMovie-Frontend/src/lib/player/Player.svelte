@@ -57,12 +57,20 @@
 		resetAutoAdvances
 	} from './nextUp';
 	import { loadPreferences, savePreferences, type SubtitleSize } from './preferences';
+	import { qualityLimits, type QualityId } from './quality';
 	import { SeekAccumulator } from './seek';
 	import { ProgressReporter, type MediaSnapshot } from './telemetry';
 	import { fetchTrickplay, preloadSheets, thumbnailAt, type TrickplayManifest } from './trickplay';
 	import NextUp from './NextUp.svelte';
 	import Seekbar from './Seekbar.svelte';
 	import TrackMenu, { type PlaybackStats } from './TrackMenu.svelte';
+	import {
+		DRIFT_TOLERANCE,
+		roomLink,
+		SyncRoom,
+		type RoomMember,
+		type SyncAction
+	} from '$lib/syncplay/room';
 
 	interface Props {
 		id: string;
@@ -83,6 +91,10 @@
 		initialAudio?: number | null;
 		initialSubtitle?: string | null;
 		startAt?: number | null;
+		/** Faza 20 — watching together: the room code, and the room's state
+		 * when the player opened (where to start, playing or paused). */
+		room?: string | null;
+		roomStart?: { playing: boolean; position: number } | null;
 	}
 
 	let {
@@ -95,7 +107,9 @@
 		onnext,
 		initialAudio = null,
 		initialSubtitle = null,
-		startAt: requestedStart = null
+		startAt: requestedStart = null,
+		room = null,
+		roomStart = null
 	}: Props = $props();
 
 	/** Error codes with their own message; anything else is `player.failed`. */
@@ -148,6 +162,8 @@
 	let downmix = $state<DownmixPreference>(prefs.downmix);
 	let compatible = $state(prefs.compatible);
 	let subtitleSize = $state<SubtitleSize>(prefs.subtitleSize);
+	/** Faza 20: picture quality (a preset makes the server scale down). */
+	let quality = $state<QualityId>(prefs.quality);
 
 	// ---- Chrome --------------------------------------------------------------
 	let controls = $state(true);
@@ -227,7 +243,8 @@
 			burn_subtitle: burnIn && subtitle !== '',
 			force_transcode: compatible,
 			downmix,
-			start_position_seconds: position
+			start_position_seconds: position,
+			...qualityLimits(quality)
 		};
 	}
 
@@ -377,6 +394,8 @@
 	function attach(next: PlaybackSession, position: number, swap: boolean, autoplay?: boolean) {
 		const element = video;
 		if (!element) return;
+		// A source swap plays and seeks on its own: not the viewer's doing.
+		syncQuietUntil = Date.now() + 4000;
 		resumePlaying = autoplay ?? (swap ? !element.paused || waiting : true);
 		// Final report for the old session at the switch point, then swap.
 		void reporter?.stop();
@@ -478,14 +497,14 @@
 	/** Applies a choice that needs a new stream; reverts it when the switch fails. */
 	async function reopen(change: () => void) {
 		if (!session) return;
-		const before = { audio, subtitle, burnIn, downmix, compatible };
+		const before = { audio, subtitle, burnIn, downmix, compatible, quality };
 		change();
 		switching = true;
 		switchError = null;
 		const outcome = await open(mediaReady && video ? video.currentTime : startAt);
 		// A newer choice superseded this one ('stale'): keep that one's values.
 		if (outcome === 'failed' && !destroyed) {
-			({ audio, subtitle, burnIn, downmix, compatible } = before);
+			({ audio, subtitle, burnIn, downmix, compatible, quality } = before);
 			switching = false;
 		}
 	}
@@ -541,6 +560,13 @@
 		prefs.compatible = value;
 		savePreferences(prefs);
 		void reopen(() => (compatible = value));
+	}
+
+	function chooseQuality(next: QualityId) {
+		if (next === quality) return;
+		prefs.quality = next;
+		savePreferences(prefs);
+		void reopen(() => (quality = next));
 	}
 
 	function chooseBurnIn(value: boolean) {
@@ -922,6 +948,106 @@
 		if (!video || mediaReady) return;
 		mediaReady = true;
 		if (resumePlaying) play();
+		if (syncPending) {
+			const pending = syncPending;
+			syncPending = null;
+			applyRoomState(pending.playing, pending.position, true);
+		}
+	}
+
+	// ---- Watching together (Faza 20) ------------------------------------------
+
+	let sync: SyncRoom | null = null;
+	let syncMembers = $state<RoomMember[]>([]);
+	let syncConnected = $state(false);
+	let syncError = $state<string | null>(null);
+	let syncCopied = $state(false);
+	let syncPending: { playing: boolean; position: number } | null = null;
+	let syncQuietUntil = 0;
+	/** Events caused by applying someone else's command: not sent back. */
+	const expected = { play: 0, pause: 0, seek: 0 };
+
+	function expect(kind: SyncAction) {
+		expected[kind] = Date.now() + 5000;
+	}
+
+	/** True when this video event came from a remote command (and consumes it). */
+	function fromRemote(kind: SyncAction): boolean {
+		if (expected[kind] > Date.now()) {
+			expected[kind] = 0;
+			return true;
+		}
+		return Date.now() < syncQuietUntil;
+	}
+
+	function broadcast(kind: SyncAction) {
+		if (!sync || !video || !mediaReady || switching || fromRemote(kind)) return;
+		sync.send(kind, video.currentTime);
+	}
+
+	/** Brings this player to the room's state; `force` also for small drift. */
+	function applyRoomState(playing: boolean, position: number, force = false) {
+		if (!video || phase !== 'ready') return;
+		if (!mediaReady) {
+			syncPending = { playing, position };
+			return;
+		}
+		if (Math.abs(video.currentTime - position) > (force ? 0.75 : DRIFT_TOLERANCE)) {
+			expect('seek');
+			seekTo(position);
+		}
+		if (playing && video.paused) {
+			expect('play');
+			play();
+		} else if (!playing && !video.paused) {
+			expect('pause');
+			video.pause();
+		}
+	}
+
+	function remoteCommand(action: SyncAction, position: number, by: string) {
+		if (!video) return;
+		if (action === 'seek') {
+			if (Math.abs(video.currentTime - position) > 0.5) {
+				expect('seek');
+				seekTo(position);
+			}
+			flash('forward', t('syncplay.seeked_by', { name: by }), 1600);
+		} else {
+			applyRoomState(action === 'play', position, true);
+			flash(
+				action === 'play' ? 'play' : 'pause',
+				t(action === 'play' ? 'syncplay.played_by' : 'syncplay.paused_by', { name: by }),
+				1600
+			);
+		}
+	}
+
+	async function copyRoomLink() {
+		if (!room) return;
+		try {
+			await navigator.clipboard.writeText(roomLink(room));
+			syncCopied = true;
+			setTimeout(() => (syncCopied = false), 2000);
+		} catch {
+			// No clipboard (plain HTTP): the code is on screen.
+		}
+	}
+
+	function joinRoom(code: string) {
+		sync = new SyncRoom(code, () => token, {
+			onjoined: (info) => {
+				syncError = null;
+				syncMembers = info.members;
+				applyRoomState(info.playing, info.position, true);
+			},
+			onmembers: (members) => (syncMembers = members),
+			oncommand: remoteCommand,
+			onstate: (playing, position) => applyRoomState(playing, position),
+			onerror: (code) => (syncError = code),
+			onconnection: (connected) => (syncConnected = connected)
+		});
+		sync.connect();
 	}
 
 	function onTimeUpdate() {
@@ -1056,7 +1182,13 @@
 		else {
 			if (initialAudio !== null) audio = initialAudio;
 			if (initialSubtitle !== null) subtitle = initialSubtitle;
-			void open(requestedStart);
+			if (room) {
+				// The room decides where and whether to play; the first play
+				// is not a command for the others.
+				syncQuietUntil = Date.now() + 8000;
+				void open(roomStart?.position ?? requestedStart, true, roomStart?.playing ?? false);
+				joinRoom(room);
+			} else void open(requestedStart);
 		}
 
 		return () => {
@@ -1067,6 +1199,8 @@
 			reporter = null;
 			detach();
 			unwatch();
+			sync?.close();
+			sync = null;
 			clearTimeout(hideTimer);
 			clearTimeout(osdTimer);
 			clearTimeout(resumeTimer);
@@ -1127,10 +1261,12 @@
 		onplay={() => {
 			paused = false;
 			if (mediaReady) reporter?.onPlay();
+			broadcast('play');
 		}}
 		onpause={() => {
 			paused = true;
 			if (mediaReady) reporter?.onPause();
+			if (!ended) broadcast('pause');
 		}}
 		onseeking={() => {
 			waiting = true;
@@ -1139,6 +1275,7 @@
 		onseeked={() => {
 			waiting = false;
 			if (mediaReady) reporter?.onSeeked();
+			broadcast('seek');
 		}}
 		onwaiting={() => {
 			waiting = true;
@@ -1293,6 +1430,31 @@
 					</p>{/if}
 			</div>
 			<div class="ml-auto flex shrink-0 flex-col items-end gap-2 pt-2 text-sm">
+				{#if room}
+					<button
+						type="button"
+						onclick={copyRoomLink}
+						title={syncMembers.map((m) => m.username).join(', ')}
+						aria-label={t('syncplay.members', { count: String(syncMembers.length) })}
+						class="flex items-center gap-2 rounded-full bg-black/60 px-3 py-1.5 ring-1 transition-colors hover:bg-black/80 {syncError
+							? 'text-red-300 ring-red-400/40'
+							: syncConnected
+								? 'text-white ring-gold/50'
+								: 'text-neutral-400 ring-white/20'}"
+					>
+						<Icon name="users" class="size-4.5 {syncConnected ? 'text-gold' : ''}" />
+						<span class="font-semibold tabular-nums">{syncMembers.length}</span>
+						<span class="hidden text-neutral-300 sm:inline"
+							>{syncError
+								? t(`syncplay.errors.${syncError}`)
+								: syncCopied
+									? t('syncplay.link_copied')
+									: syncConnected
+										? t('syncplay.room_code', { code: room })
+										: t('syncplay.connecting')}</span
+						>
+					</button>
+				{/if}
 				{#if switching}
 					<span
 						class="flex items-center gap-2 rounded-full bg-black/60 px-3 py-1.5 text-gold"
@@ -1502,6 +1664,7 @@
 			{downmix}
 			{compatible}
 			{subtitleSize}
+			{quality}
 			busy={switching}
 			{stats}
 			onaudio={chooseAudio}
@@ -1510,6 +1673,7 @@
 			oncompatible={chooseCompatible}
 			onburnin={chooseBurnIn}
 			onsize={chooseSize}
+			onquality={chooseQuality}
 			onclose={closeMenu}
 		/>
 	{/if}

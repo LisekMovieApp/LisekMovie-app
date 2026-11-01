@@ -56,7 +56,8 @@
 		"admin_panel": "Panel administratora",
 		"menu": "Menu",
 		"close_menu": "Zamknij menu",
-		"main": "Nawigacja główna"
+		"main": "Nawigacja główna",
+		"live_tv": "Telewizja na żywo"
 	},
 	"home": {
 		"play": "Odtwórz",
@@ -266,6 +267,73 @@
 			"imvdb": "Darmowy klucz z imvdb.com/developers. Dopasowuje teledyski nazwane „Wykonawca - Utwór”.",
 			"vgmdb": "Ścieżki dźwiękowe i muzyka z gier, pod nadchodzące biblioteki audio.",
 			"audiodb": "Wykonawcy i albumy, pod nadchodzące biblioteki audio. Bez klucza używany jest publiczny klucz testowy."
+		},
+		"editor_heading_movie": "Edytuj metadane filmu",
+		"editor_heading_series": "Edytuj metadane serialu",
+		"editor_heading_episode": "Edytuj metadane odcinka",
+		"editor_episode_of": "{series} · {code}",
+		"editor_series_scope": "Zmiany obejmą wszystkie odcinki serialu ({count}).",
+		"editor_tab_details": "Szczegóły",
+		"editor_tab_artwork": "Grafiki",
+		"editor_field_series_title": "Tytuł serialu",
+		"editor_series_title_hint": "Zmienia nazwę serialu i wszystkich jego odcinków. Tytuły odcinków edytujesz na stronie sezonu (⋯ → Edytuj metadane).",
+		"editor_field_episode_title": "Tytuł odcinka",
+		"editor_field_episode_overview": "Opis odcinka",
+		"editor_field_air_date": "Data emisji",
+		"editor_field_poster": "Plakat",
+		"editor_field_backdrop": "Tło",
+		"editor_field_logo": "Logo",
+		"editor_field_thumb": "Kadr odcinka",
+		"editor_changed": "zmienione",
+		"editor_auto_lock_hint": "Zmienione pola zostaną zablokowane przy zapisie, więc ponowne skanowanie ani odświeżenie od dostawcy ich nie cofnie.",
+		"editor_saved": "Metadane zapisane.",
+		"editor_saved_series": "Zapisano dla {count} odcinków.",
+		"editor_close": "Zamknij",
+		"editor_errors": {
+			"series_title_taken": "Inny serial w tej bibliotece ma już taki tytuł.",
+			"title_empty": "Podaj tytuł.",
+			"invalid_year": "Podaj rok z zakresu 1800–2200.",
+			"invalid_air_date": "Podaj datę w formacie RRRR-MM-DD.",
+			"not_an_episode": "Ta pozycja nie jest odcinkiem serialu.",
+			"artwork_invalid_image": "Ten plik nie jest obsługiwanym obrazem (JPG, PNG, WebP lub GIF).",
+			"artwork_invalid_url": "Podaj link http(s) do obrazu.",
+			"artwork_too_large": "Obraz jest za duży (maks. 25 MB).",
+			"artwork_download_failed": "Nie udało się pobrać obrazu z tego linku.",
+			"artwork_empty": "Plik jest pusty.",
+			"artwork_failed": "Nie udało się zapisać obrazu. Spróbuj ponownie."
+		},
+		"editor_art": {
+			"poster": "Plakat",
+			"backdrop": "Tło",
+			"logo": "Logo (najlepiej przezroczysty PNG)",
+			"thumb": "Kadr odcinka",
+			"saved": "Zapisano",
+			"upload": "Wybierz lub upuść obraz",
+			"empty": "Brak obrazu — kliknij lub upuść plik",
+			"url_placeholder": "…albo wklej link https://",
+			"use_url": "Użyj linku",
+			"hint": "Nowy obraz zapisuje się od razu i zostaje przy kolejnych odświeżeniach.",
+			"series_hint": "Grafiki dotyczą całego serialu i zostają przy kolejnych odświeżeniach."
+		},
+		"library_type_live_tv": "Telewizja na żywo (IPTV)",
+		"livetv": {
+			"m3u_empty": "Podaj link do listy kanałów (M3U).",
+			"m3u_label": "Lista kanałów (M3U)",
+			"xmltv_label": "Przewodnik po programach (XMLTV, opcjonalnie)",
+			"hint": "Link http(s) (dostawca IPTV, ErsatzTV, Tvheadend…) albo ścieżka na serwerze. Kanały i przewodnik odświeżają się co 12 godzin.",
+			"load_failed": "Nie udało się wczytać tego źródła.",
+			"first_refresh": "Pobieranie kanałów i przewodnika…",
+			"counts": "Kanały: {channels} · programy: {programs}",
+			"refreshed": "odświeżono {time}",
+			"last_error": "Ostatnie odświeżenie nie powiodło się: {error}",
+			"edit": "Edytuj linki",
+			"refresh": "Odśwież teraz",
+			"refreshing": "Odświeżanie…",
+			"action_failed": "Nie udało się. Sprawdź linki i spróbuj ponownie.",
+			"m3u_placeholder": "http://192.168.1.10:8409/iptv/channels.m3u",
+			"xmltv_placeholder": "http://192.168.1.10:8409/iptv/xmltv.xml",
+			"m3u_line": "M3U: {url}",
+			"xmltv_line": "XMLTV: {url}"
 		}
 	},
 	"errors": {
@@ -422,7 +490,17 @@
 		"play_now": "Odtwórz teraz",
 		"watch_credits": "Napisy końcowe",
 		"episode_range": "S{season}:O{episode}-O{end}",
-		"ends_at": "Zakończenie o {time}"
+		"ends_at": "Zakończenie o {time}",
+		"stream_quality": "Jakość",
+		"stream_quality_hint": "Niższa jakość sprawia, że serwer zmniejsza wideo — starsze komputery i wolne łącza odtwarzają płynnie.",
+		"stream_quality_original_hint": "najlepsza dla tego urządzenia",
+		"stream_qualities": {
+			"original": "Oryginał",
+			"1080p": "1080p",
+			"720p": "720p",
+			"480p": "480p",
+			"360p": "360p"
+		}
 	},
 	"games": {
 		"title": "Flappy Fox",
@@ -872,7 +950,9 @@
 		"season_not_found": "Ten sezon nie istnieje (już).",
 		"back_to_series": "Wróć do serialu",
 		"episode_count": "Odcinki: {count}",
-		"episodes": "Odcinki"
+		"episodes": "Odcinki",
+		"edit_episode": "Edytuj metadane",
+		"episode_number": "Odcinek {number}"
 	},
 	"search": {
 		"title": "Szukaj",
@@ -1168,6 +1248,64 @@
 			"avatar_empty": "Plik jest pusty.",
 			"invalid_language": "Ten język jest niedostępny.",
 			"operation_failed": "Nie udało się zapisać zmiany. Spróbuj ponownie."
+		}
+	},
+	"livetv": {
+		"title": "Telewizja na żywo",
+		"now": "Teraz",
+		"reload": "Odśwież przewodnik",
+		"groups": "Grupy kanałów",
+		"all_channels": "Wszystkie kanały",
+		"load_failed": "Nie udało się wczytać przewodnika.",
+		"no_channels": "Brak kanałów. Administrator dodaje je w Panel administratora → Biblioteki → Telewizja na żywo.",
+		"watch_channel": "Oglądaj {name}",
+		"no_guide": "Brak informacji o programie",
+		"watch_now": "Oglądaj kanał",
+		"player": "Odtwarzacz telewizji na żywo",
+		"tuning": "Dostrajanie {name}…",
+		"retry_compatible": "Spróbuj ponownie (tryb zgodności)",
+		"back_to_guide": "Wróć do przewodnika",
+		"live": "NA ŻYWO",
+		"previous_channel": "Poprzedni kanał",
+		"next_channel": "Następny kanał",
+		"next_up": "Następnie o {time}: {title}",
+		"channels": "Kanały",
+		"errors": {
+			"live_stream_unavailable": "Ten kanał nie nadaje albo jest nieosiągalny.",
+			"live_capacity_reached": "Za dużo osób ogląda teraz telewizję na żywo. Spróbuj później.",
+			"transcode_unavailable": "Na serwerze brakuje FFmpeg.",
+			"channel_not_found": "Ten kanał już nie istnieje.",
+			"failed": "Nie udało się odtworzyć kanału."
+		}
+	},
+	"syncplay": {
+		"title": "Wspólne oglądanie",
+		"menu_entry": "Oglądaj z innymi",
+		"creating": "Otwieranie pokoju…",
+		"share_hint": "Wyślij ten link (albo kod) osobom, z którymi chcesz oglądać:",
+		"room_code": "Pokój {code}",
+		"link": "Link do pokoju",
+		"copy_link": "Kopiuj link",
+		"link_copied": "Link skopiowany",
+		"how_it_works": "Każdy, kto otworzy link, widzi ten sam moment: odtwarzanie, pauza i przewijanie są wspólne. Każdy widz potrzebuje własnego konta.",
+		"start": "Zacznij oglądać",
+		"joining": "Dołączanie do pokoju…",
+		"code_label": "Kod pokoju",
+		"join": "Dołącz",
+		"members": "Osób w pokoju: {count}",
+		"connecting": "Łączenie…",
+		"played_by": "{name} wznowił(a)",
+		"paused_by": "{name} wstrzymał(a)",
+		"seeked_by": "{name} przewinął(ęła)",
+		"errors": {
+			"room_not_found": "Ten pokój już nie istnieje.",
+			"room_full": "Ten pokój jest pełny.",
+			"unauthorized": "Zaloguj się ponownie, aby dołączyć.",
+			"too_many_rooms": "Na serwerze jest otwartych zbyt wiele pokoi. Spróbuj później.",
+			"create_failed": "Nie udało się otworzyć pokoju. Spróbuj ponownie.",
+			"join_failed": "Nie udało się dołączyć do pokoju. Spróbuj ponownie.",
+			"invalid_code": "Kod pokoju ma sześć liter i cyfr.",
+			"other_title": "W tym pokoju leci inny tytuł."
 		}
 	}
 }

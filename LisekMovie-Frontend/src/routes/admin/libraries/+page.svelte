@@ -46,6 +46,7 @@
 		type ScanWatch
 	} from '$lib/admin/libraries';
 	import AddLibraryModal from '$lib/components/AddLibraryModal.svelte';
+	import LiveTvSourcePanel from '$lib/components/LiveTvSourcePanel.svelte';
 
 	let libraries: Library[] = $state([]);
 	let loading = $state(true);
@@ -236,7 +237,9 @@
 									<span class="rounded-full bg-white/10 px-2 py-0.5 text-xs text-neutral-400">
 										{library.library_type === 'movies'
 											? t('admin.library_type_movies')
-											: t('admin.library_type_tv_shows')}
+											: library.library_type === 'live_tv'
+												? t('admin.library_type_live_tv')
+												: t('admin.library_type_tv_shows')}
 									</span>
 								</div>
 								<p class="mt-1 truncate text-xs text-neutral-500">
@@ -277,6 +280,7 @@
 								>
 									↓
 								</button>
+								{#if library.library_type !== 'live_tv'}
 								<a
 									href={resolve('/admin/libraries/[id]/items', { id: library.id })}
 									class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-gold-dim"
@@ -291,6 +295,7 @@
 								>
 									{isScanning(library.id) ? t('admin.scanning') : t('admin.scan')}
 								</button>
+								{/if}
 								<button
 									type="button"
 									disabled={busyLibraryId === library.id}
@@ -307,6 +312,9 @@
 							</div>
 						</div>
 
+						{#if library.library_type === 'live_tv'}
+							<LiveTvSourcePanel libraryId={library.id} />
+						{/if}
 						{#if scanJobs[library.id] && !isScanFinished(scanJobs[library.id])}
 							{@const job = scanJobs[library.id]}
 							<p class="mt-2 text-sm text-neutral-400" aria-live="polite">

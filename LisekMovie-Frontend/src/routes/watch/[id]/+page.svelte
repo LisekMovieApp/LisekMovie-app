@@ -13,12 +13,44 @@
 	import { fetchMediaDetail, imageUrl, type MediaItem } from '$lib/media/api';
 	import Player from '$lib/player/Player.svelte';
 	import { parseWatchQuery } from '$lib/media/details';
+	import { fetchRoom, normalizeCode } from '$lib/syncplay/room';
+	import { showToast } from '$lib/toast/toast.svelte';
 
 	const id = $derived(page.params.id ?? '');
 	/** `?audio=&sub=&t=` from the detail page (streams, a scene). */
 	const picked = $derived(parseWatchQuery(page.url.searchParams));
 	let token = $state<string | null>(null);
 	let item = $state<MediaItem | null>(null);
+	/** Faza 20: `?room=CODE` — the watch-together room, once confirmed. */
+	const roomCode = $derived(normalizeCode(page.url.searchParams.get('room') ?? ''));
+	let room = $state<{ code: string; playing: boolean; position: number } | null>(null);
+	let roomChecked = $state(false);
+
+	$effect(() => {
+		const code = roomCode;
+		const current = id;
+		room = null;
+		roomChecked = !code;
+		const session = getSessionCookieClientSide();
+		if (!code || !session) return;
+		let alive = true;
+		fetchRoom(session, code)
+			.then((info) => {
+				if (!alive) return;
+				if (info.item_id === current)
+					room = { code: info.code, playing: info.playing, position: info.position };
+				else showToast('warning', t('syncplay.errors.other_title'));
+			})
+			.catch(() => {
+				if (alive) showToast('error', t('syncplay.errors.room_not_found'));
+			})
+			.finally(() => {
+				if (alive) roomChecked = true;
+			});
+		return () => {
+			alive = false;
+		};
+	});
 	let cameFromApp = false;
 
 	afterNavigate(({ from }) => {
@@ -66,8 +98,8 @@
 
 <svelte:head><title>{item?.title ?? t('player.title')} · LisekMovie</title></svelte:head>
 
-{#if token !== null}
-	{#key id}
+{#if token !== null && roomChecked}
+	{#key `${id}:${room?.code ?? ''}`}
 		<Player
 			{id}
 			{token}
@@ -78,7 +110,9 @@
 			{subheading}
 			backdrop={item && token ? imageUrl(item.backdrop_url, token) : null}
 			onexit={exit}
-			onnext={playNext}
+			onnext={room ? undefined : playNext}
+			room={room?.code ?? null}
+			roomStart={room ? { playing: room.playing, position: room.position } : null}
 		/>
 	{/key}
 {:else}

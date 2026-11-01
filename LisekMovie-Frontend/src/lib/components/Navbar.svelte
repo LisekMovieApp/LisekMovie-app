@@ -24,6 +24,7 @@
 	import SearchOverlay from './SearchOverlay.svelte';
 	import { isSearchShortcut } from '$lib/media/search';
 	import { startHeartbeat } from '$lib/users/profile';
+	import { fetchLiveStatus } from '$lib/livetv/api';
 
 	interface Props {
 		username: string;
@@ -34,6 +35,8 @@
 	let { username, isAdmin, avatarUrl = null }: Props = $props();
 
 	let gamesEnabled = $state(false);
+	/** Faza 20: Live TV has channels for this account. */
+	let liveTv = $state(false);
 	let scrolled = $state(false);
 	let drawer = $state(false);
 	let libraries: LibrarySummary[] = $state([]);
@@ -78,6 +81,9 @@
 			href: resolve('/library/[id]', { id: library.id }),
 			label: library.name
 		})),
+		...(liveTv
+			? [{ key: 'live-tv', href: resolve('/live-tv'), label: t('nav.live_tv'), prefix: true }]
+			: []),
 		{ key: 'my-list', href: resolve('/my-list'), label: t('nav.my_list'), prefix: true },
 		...(gamesEnabled
 			? [{ key: 'games', href: resolve('/games'), label: t('nav.games'), prefix: true }]
@@ -138,6 +144,11 @@
 
 		const token = getSessionCookieClientSide();
 		if (token) {
+			fetchLiveStatus(token)
+				.then((status) => {
+					if (active) liveTv = status.available;
+				})
+				.catch(() => {});
 			fetchLibraries(token)
 				.then((fetched) => (libraries = fetched))
 				.catch(() => {

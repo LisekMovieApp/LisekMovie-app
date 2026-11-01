@@ -56,7 +56,8 @@
 		"admin_panel": "Admin Panel",
 		"menu": "Menu",
 		"close_menu": "Close menu",
-		"main": "Main navigation"
+		"main": "Main navigation",
+		"live_tv": "Live TV"
 	},
 	"home": {
 		"play": "Play",
@@ -266,6 +267,73 @@
 			"imvdb": "A free key from imvdb.com/developers. Matches music videos named \"Artist - Song\".",
 			"vgmdb": "Soundtracks and game music, for the coming audio libraries.",
 			"audiodb": "Artists and albums, for the coming audio libraries. Without a key the public test key is used."
+		},
+		"editor_heading_movie": "Edit film metadata",
+		"editor_heading_series": "Edit series metadata",
+		"editor_heading_episode": "Edit episode metadata",
+		"editor_episode_of": "{series} · {code}",
+		"editor_series_scope": "Changes apply to all {count} episodes of the series.",
+		"editor_tab_details": "Details",
+		"editor_tab_artwork": "Artwork",
+		"editor_field_series_title": "Series title",
+		"editor_series_title_hint": "Renames the series and every episode in it. Episode titles are edited on the season page (⋯ → Edit metadata).",
+		"editor_field_episode_title": "Episode title",
+		"editor_field_episode_overview": "Episode overview",
+		"editor_field_air_date": "Air date",
+		"editor_field_poster": "Poster",
+		"editor_field_backdrop": "Backdrop",
+		"editor_field_logo": "Logo",
+		"editor_field_thumb": "Episode still",
+		"editor_changed": "changed",
+		"editor_auto_lock_hint": "Changed fields are locked when you save, so a rescan or a provider refresh does not undo them.",
+		"editor_saved": "Metadata saved.",
+		"editor_saved_series": "Saved for {count} episodes.",
+		"editor_close": "Close",
+		"editor_errors": {
+			"series_title_taken": "Another series in this library already has this title.",
+			"title_empty": "Enter a title.",
+			"invalid_year": "Enter a year between 1800 and 2200.",
+			"invalid_air_date": "Enter the date as YYYY-MM-DD.",
+			"not_an_episode": "This item is not an episode of a series.",
+			"artwork_invalid_image": "This file is not a supported picture (JPG, PNG, WebP or GIF).",
+			"artwork_invalid_url": "Enter an http(s) link to a picture.",
+			"artwork_too_large": "The picture is too large (max 25 MB).",
+			"artwork_download_failed": "The picture could not be downloaded from that link.",
+			"artwork_empty": "The file is empty.",
+			"artwork_failed": "The picture could not be saved. Try again."
+		},
+		"editor_art": {
+			"poster": "Poster",
+			"backdrop": "Backdrop",
+			"logo": "Logo (transparent PNG works best)",
+			"thumb": "Episode still",
+			"saved": "Saved",
+			"upload": "Choose or drop a picture",
+			"empty": "No picture — click or drop a file",
+			"url_placeholder": "…or paste a link https://",
+			"use_url": "Use link",
+			"hint": "A new picture is saved immediately and kept on future refreshes.",
+			"series_hint": "Pictures apply to the whole series and are kept on future refreshes."
+		},
+		"library_type_live_tv": "Live TV (IPTV)",
+		"livetv": {
+			"m3u_empty": "Enter the channel list (M3U) link.",
+			"m3u_label": "Channel list (M3U)",
+			"xmltv_label": "Programme guide (XMLTV, optional)",
+			"hint": "An http(s) link (IPTV provider, ErsatzTV, Tvheadend…) or a path on the server. Channels and the guide are refreshed every 12 hours.",
+			"load_failed": "Could not load this source.",
+			"first_refresh": "Downloading channels and the guide…",
+			"counts": "{channels} channels · {programs} programmes",
+			"refreshed": "refreshed {time}",
+			"last_error": "Last refresh failed: {error}",
+			"edit": "Edit links",
+			"refresh": "Refresh now",
+			"refreshing": "Refreshing…",
+			"action_failed": "That did not work. Check the links and try again.",
+			"m3u_placeholder": "http://192.168.1.10:8409/iptv/channels.m3u",
+			"xmltv_placeholder": "http://192.168.1.10:8409/iptv/xmltv.xml",
+			"m3u_line": "M3U: {url}",
+			"xmltv_line": "XMLTV: {url}"
 		}
 	},
 	"errors": {
@@ -422,7 +490,17 @@
 		"play_now": "Play now",
 		"watch_credits": "Watch credits",
 		"episode_range": "S{season}:E{episode}-E{end}",
-		"ends_at": "Ends at {time}"
+		"ends_at": "Ends at {time}",
+		"stream_quality": "Quality",
+		"stream_quality_hint": "A lower quality makes the server scale the video down, so older computers and slow connections play smoothly.",
+		"stream_quality_original_hint": "best for this device",
+		"stream_qualities": {
+			"original": "Original",
+			"1080p": "1080p",
+			"720p": "720p",
+			"480p": "480p",
+			"360p": "360p"
+		}
 	},
 	"games": {
 		"title": "Flappy Fox",
@@ -872,7 +950,9 @@
 		"season_not_found": "This season doesn't exist (anymore).",
 		"back_to_series": "Back to the series",
 		"episode_count": "Episodes: {count}",
-		"episodes": "Episodes"
+		"episodes": "Episodes",
+		"edit_episode": "Edit metadata",
+		"episode_number": "Episode {number}"
 	},
 	"search": {
 		"title": "Search",
@@ -1168,6 +1248,64 @@
 			"avatar_empty": "The file is empty.",
 			"invalid_language": "This language is not available.",
 			"operation_failed": "Could not save the change. Try again."
+		}
+	},
+	"livetv": {
+		"title": "Live TV",
+		"now": "Now",
+		"reload": "Reload the guide",
+		"groups": "Channel groups",
+		"all_channels": "All channels",
+		"load_failed": "The guide could not be loaded.",
+		"no_channels": "No channels yet. An administrator adds them in Admin → Libraries → Live TV.",
+		"watch_channel": "Watch {name}",
+		"no_guide": "No programme information",
+		"watch_now": "Watch the channel",
+		"player": "Live TV player",
+		"tuning": "Tuning in {name}…",
+		"retry_compatible": "Try again (compatible)",
+		"back_to_guide": "Back to the guide",
+		"live": "LIVE",
+		"previous_channel": "Previous channel",
+		"next_channel": "Next channel",
+		"next_up": "Next at {time}: {title}",
+		"channels": "Channels",
+		"errors": {
+			"live_stream_unavailable": "This channel is not broadcasting or cannot be reached.",
+			"live_capacity_reached": "Too many live channels are being watched right now. Try again later.",
+			"transcode_unavailable": "FFmpeg is not available on the server.",
+			"channel_not_found": "This channel does not exist any more.",
+			"failed": "The channel could not be played."
+		}
+	},
+	"syncplay": {
+		"title": "Watch together",
+		"menu_entry": "Watch with others",
+		"creating": "Opening a room…",
+		"share_hint": "Send this link (or the code) to the people you want to watch with:",
+		"room_code": "Room {code}",
+		"link": "Room link",
+		"copy_link": "Copy link",
+		"link_copied": "Link copied",
+		"how_it_works": "Everyone who opens the link sees the same moment: play, pause and seeking are shared. Each viewer needs their own account.",
+		"start": "Start watching",
+		"joining": "Joining the room…",
+		"code_label": "Room code",
+		"join": "Join",
+		"members": "{count} people in the room",
+		"connecting": "Connecting…",
+		"played_by": "{name} resumed",
+		"paused_by": "{name} paused",
+		"seeked_by": "{name} jumped",
+		"errors": {
+			"room_not_found": "This room does not exist any more.",
+			"room_full": "This room is full.",
+			"unauthorized": "Sign in again to join.",
+			"too_many_rooms": "Too many rooms are open on the server. Try again later.",
+			"create_failed": "The room could not be opened. Try again.",
+			"join_failed": "Could not join the room. Try again.",
+			"invalid_code": "A room code has six letters and digits.",
+			"other_title": "This room plays another title."
 		}
 	}
 }

@@ -554,6 +554,12 @@ pub async fn apply_match(
     } else {
         None
     };
+    // Faza 20: pictures an administrator replaced by hand stay (the item's
+    // own locks, and those of its series).
+    let locked = lisek_db::editor::effective_locked_fields(pool, item_id)
+        .await
+        .unwrap_or_default();
+    let is_locked = |name: &str| locked.iter().any(|l| l == name);
     let mut fields = matched.fields.clone();
     let mut still_url = None;
     // Only an answer from the provider decides about the still; without one
@@ -584,7 +590,7 @@ pub async fn apply_match(
             }
         };
     // `episode_known` implies an episode (a placement).
-    if episode_known {
+    if episode_known && !is_locked("thumb") {
         sync_episode_still(http, config_dir, item_id, previous_still, still_url.as_deref()).await;
     }
     if matches!(target, EnrichTarget::Movie { .. }) {
@@ -604,6 +610,10 @@ pub async fn apply_match(
     ];
     for (url, filename, fallback_dest, counts) in images {
         let Some(url) = url else { continue };
+        if is_locked(image_kind(filename)) {
+            tracing::debug!(%item_id, image = filename, "replaced by an administrator; kept");
+            continue;
+        }
         let media_dest = if is_series {
             series_folder_destination(file_path, filename, save_in_media_folder)
         } else {

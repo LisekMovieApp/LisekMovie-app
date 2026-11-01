@@ -27,8 +27,8 @@ use crate::auth::{AdminUser, SessionUser};
 use crate::openapi::ApiDoc;
 use crate::state::SharedState;
 use crate::{
-    admin, auth, browser_notifications, collections, details, download, games, hardware, identify, logging, media,
-    notifications, people, playback, profile, scan_jobs, search, series, setup, stats, telemetry, trickplay, users,
+    admin, auth, browser_notifications, collections, details, download, editor, games, hardware, identify, livetv, logging, media,
+    notifications, people, playback, profile, scan_jobs, search, series, setup, stats, syncplay, telemetry, trickplay, users,
 };
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -65,6 +65,10 @@ fn public() -> OpenApiRouter<SharedState> {
         // Authenticates with its first WebSocket frame: browsers cannot set
         // headers on a WebSocket handshake.
         .routes(routes!(browser_notifications::socket))
+        // Faza 20: watch together; the session comes in the first frame.
+        .routes(routes!(syncplay::socket))
+        // Faza 20: live TV segments, authorized by the ticket in the path.
+        .routes(routes!(livetv::stream))
         // An admin session or the bots' read-only `X-Lisek-Stats-Key`
         // (checked by the handler's `StatsReader`).
         .routes(routes!(stats::summary))
@@ -125,6 +129,14 @@ fn user() -> OpenApiRouter<SharedState> {
         .routes(routes!(games::list))
         .routes(routes!(games::save))
         .routes(routes!(games::leaderboard))
+        .routes(routes!(syncplay::create_room))
+        .routes(routes!(syncplay::get_room))
+        .routes(routes!(livetv::status))
+        .routes(routes!(livetv::channels))
+        .routes(routes!(livetv::guide))
+        .routes(routes!(livetv::logo))
+        .routes(routes!(livetv::play))
+        .routes(routes!(livetv::stop))
 }
 
 fn admin() -> OpenApiRouter<SharedState> {
@@ -146,7 +158,8 @@ fn admin() -> OpenApiRouter<SharedState> {
             admin::set_provider_order
         ))
         .routes(routes!(admin::list_fallback_items))
-        .routes(routes!(admin::get_media_item, admin::update_media_item))
+        .routes(routes!(editor::get_item, editor::update_item))
+        .routes(routes!(editor::set_artwork))
         .routes(routes!(admin::migrate_fallback_item))
         .routes(routes!(scan_jobs::scan_library))
         .routes(routes!(scan_jobs::list))
@@ -172,6 +185,9 @@ fn admin() -> OpenApiRouter<SharedState> {
         .routes(routes!(logging::list))
         .routes(routes!(logging::day))
         .routes(routes!(logging::raw))
+        .routes(routes!(livetv::admin_sources))
+        .routes(routes!(livetv::admin_set_source))
+        .routes(routes!(livetv::admin_refresh))
 }
 
 /// Puts extractor `E` in front of every route of `group` as a route layer:

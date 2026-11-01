@@ -286,6 +286,8 @@ pub async fn list_libraries(
         libraries
             .into_iter()
             .filter(|library| auth.access.allows_library(library.id))
+            // Live TV has its own tab (`/api/livetv`), not a poster grid.
+            .filter(|library| library.library_type != lisek_db::livetv::LIVE_TV)
             .map(Into::into)
             .collect(),
     ))
@@ -906,7 +908,10 @@ async fn read_media_folder_image(
     filename: &str,
 ) -> Option<Vec<u8>> {
     let pool = state.pool()?;
-    let (file_path, reset_at) = match lisek_db::get_media_item_artwork_source(&pool, item_id).await {
+    // Faza 20: a manual replacement of this kind also makes older
+    // media-folder files of it stale.
+    let kind = filename.split('.').next().unwrap_or(filename);
+    let (file_path, reset_at) = match lisek_db::editor::artwork_source(&pool, item_id, kind).await {
         Ok(Some(source)) => source,
         Ok(None) => {
             tracing::debug!(%item_id, "no media_items row (or no file_path) for this id");

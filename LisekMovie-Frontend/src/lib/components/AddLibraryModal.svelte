@@ -33,6 +33,10 @@
 	// and `CreateLibraryRequest`'s serde default) — most self-hosters
 	// expect provider images written directly next to their media.
 	let saveMetadataInMediaFolder = $state(true);
+	/** Faza 20: a Live TV library's channel list and guide. */
+	let m3uUrl = $state('');
+	let xmltvUrl = $state('');
+	const isLiveTv = $derived(libraryType === 'live_tv');
 	let saving = $state(false);
 	let errorKey = $state<string | null>(null);
 
@@ -55,7 +59,11 @@
 			errorKey = 'admin.name_empty';
 			return;
 		}
-		if (trimmedPaths.length === 0) {
+		if (isLiveTv && !m3uUrl.trim()) {
+			errorKey = 'admin.livetv.m3u_empty';
+			return;
+		}
+		if (!isLiveTv && trimmedPaths.length === 0) {
 			errorKey = 'admin.root_path_empty';
 			return;
 		}
@@ -70,8 +78,9 @@
 				token,
 				trimmedName,
 				libraryType,
-				trimmedPaths,
-				saveMetadataInMediaFolder
+				isLiveTv ? [] : trimmedPaths,
+				saveMetadataInMediaFolder,
+				isLiveTv ? { m3u_url: m3uUrl.trim(), xmltv_url: xmltvUrl.trim() || null } : null
 			);
 			onCreated(library);
 			onClose();
@@ -127,9 +136,31 @@
 				>
 					<option value="movies">{t('admin.library_type_movies')}</option>
 					<option value="tv_shows">{t('admin.library_type_tv_shows')}</option>
+					<option value="live_tv">{t('admin.library_type_live_tv')}</option>
 				</select>
 			</label>
 
+			{#if isLiveTv}
+				<label class="flex flex-col gap-1 text-sm text-neutral-300">
+					{t('admin.livetv.m3u_label')}
+					<input
+						type="text"
+						bind:value={m3uUrl}
+						placeholder={t('admin.livetv.m3u_placeholder')}
+						class="rounded-md border border-neutral-700 bg-black px-3 py-2 text-neutral-100 focus:border-gold"
+					/>
+				</label>
+				<label class="flex flex-col gap-1 text-sm text-neutral-300">
+					{t('admin.livetv.xmltv_label')}
+					<input
+						type="text"
+						bind:value={xmltvUrl}
+						placeholder={t('admin.livetv.xmltv_placeholder')}
+						class="rounded-md border border-neutral-700 bg-black px-3 py-2 text-neutral-100 focus:border-gold"
+					/>
+				</label>
+				<p class="text-xs text-neutral-500">{t('admin.livetv.hint')}</p>
+			{:else}
 			<div class="flex flex-col gap-1 text-sm text-neutral-300">
 				<span>{t('admin.root_paths_label')}</span>
 				<p class="text-xs text-neutral-500">{t('admin.root_paths_hint')}</p>
@@ -164,8 +195,9 @@
 					+ {t('admin.add_path')}
 				</button>
 			</div>
+			{/if}
 
-			<label class="flex items-start gap-2 text-sm text-neutral-300">
+			<label class="flex items-start gap-2 text-sm text-neutral-300" hidden={isLiveTv}>
 				<input
 					type="checkbox"
 					bind:checked={saveMetadataInMediaFolder}

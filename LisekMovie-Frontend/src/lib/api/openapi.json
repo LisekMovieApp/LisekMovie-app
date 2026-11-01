@@ -629,6 +629,146 @@
         ]
       }
     },
+    "/api/admin/livetv": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Every Live TV library with its source and the last refresh.",
+        "operationId": "admin_sources",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LiveTvSource"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/livetv/{library_id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Changes a Live TV library's links and refreshes it.",
+        "operationId": "admin_set_source",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSource"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveTvSource"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/livetv/{library_id}/refresh": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Downloads the channel list and guide again now.",
+        "operationId": "admin_refresh",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveTvSource"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/admin/logs": {
       "get": {
         "tags": [
@@ -839,8 +979,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "One item's full editable shape, for the metadata editor to load when\nit opens.",
-        "operationId": "get_media_item",
+        "operationId": "get_item",
         "parameters": [
           {
             "name": "item_id",
@@ -858,13 +997,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MediaItemDetail"
+                  "$ref": "#/components/schemas/EditorItem"
                 }
               }
             }
-          },
-          "400": {
-            "description": ""
           },
           "401": {
             "description": ""
@@ -873,9 +1009,6 @@
             "description": ""
           },
           "404": {
-            "description": ""
-          },
-          "500": {
             "description": ""
           },
           "503": {
@@ -892,8 +1025,8 @@
         "tags": [
           "admin"
         ],
-        "summary": "The metadata editor's save action — see `lisek_db::update_media_item`'s\nown doc comment for why this is the one write in the whole admin\nsurface that's never gated on `locked_fields` (an admin's own edit\nalways applies) and the one place `locked_fields` itself, plus\n`metadata_locked`/`forced_provider`, actually get written.",
-        "operationId": "update_media_item",
+        "summary": "The metadata editor's save. Never gated on `locked_fields` — an\nadministrator's own edit always applies; the locks only protect it\nfrom automatic rescans and refreshes afterwards.",
+        "operationId": "update_item",
         "parameters": [
           {
             "name": "item_id",
@@ -920,7 +1053,9 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateMediaItemResponse"
+                }
               }
             }
           },
@@ -936,11 +1071,86 @@
           "404": {
             "description": ""
           },
-          "500": {
-            "description": ""
+          "409": {
+            "description": "series_title_taken"
           },
           "503": {
             "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/media/{item_id}/artwork/{kind}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Replaces one picture. Poster, backdrop and logo of an episode belong to\nits series (every episode gets them); `thumb` is an episode's still.",
+        "operationId": "set_artwork",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "poster, backdrop, logo or thumb",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "JSON {url}, or the raw picture (image/*)",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtworkUrl"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtworkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "413": {
+            "description": ""
+          },
+          "502": {
+            "description": "artwork_download_failed"
           }
         },
         "security": [
@@ -3310,6 +3520,305 @@
         ]
       }
     },
+    "/api/livetv/channels": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Every channel with what is on now and next.",
+        "operationId": "channels",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChannelResponse"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/livetv/channels/{channel_id}/logo": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "A channel's logo, fetched once and kept in `<config>/livetv/logos`.",
+        "operationId": "logo",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Image"
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/livetv/channels/{channel_id}/play": {
+      "post": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Starts watching a channel. Answers once the first segment is ready.",
+        "operationId": "play",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlayRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "429": {
+            "description": "live_capacity_reached"
+          },
+          "502": {
+            "description": "live_stream_unavailable"
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/livetv/guide": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "The programme guide: every channel with its programmes in a window.",
+        "operationId": "guide",
+        "parameters": [
+          {
+            "name": "start",
+            "in": "path",
+            "description": "Window start (RFC 3339); default: half an hour ago.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "hours",
+            "in": "path",
+            "description": "Window length in hours (1–48); default 6.",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuideResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/livetv/sessions/{session_id}": {
+      "delete": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Stops a live stream (leaving the player).",
+        "operationId": "stop",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/livetv/status": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Whether Live TV is there for this account (the main menu's tab).",
+        "operationId": "status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveTvStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/livetv/stream/{session_id}/{ticket}/{file}": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "A live playlist or segment. The ticket in the path authorizes it.",
+        "operationId": "stream",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "ticket",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "file",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HLS playlist or MPEG-TS segment"
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/logs/client": {
       "post": {
         "tags": [
@@ -5234,6 +5743,109 @@
         }
       }
     },
+    "/api/syncplay/rooms": {
+      "post": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Opens a room for a film or an episode.",
+        "operationId": "create_room",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRoom"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedRoom"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "429": {
+            "description": "too_many_rooms"
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/syncplay/rooms/{code}": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "A room's item, members and state (for the join link).",
+        "operationId": "get_room",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoomInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/syncplay/socket": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "operationId": "socket",
+        "responses": {
+          "101": {
+            "description": "WebSocket. First frame: JSON {token, code}. Server sends joined (room, members, state), then members, command {action: play|pause|seek, position, by} and state {playing, position} every 10 s. Client sends {type: play|pause|seek, position} or {type: state}. Errors: {type: error, code: room_not_found|room_full|unauthorized}."
+          },
+          "503": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/telemetry/playback-progress": {
       "post": {
         "operationId": "playback_progress",
@@ -5501,6 +6113,40 @@
         ],
         "description": "One account in the admin user list."
       },
+      "ArtworkResponse": {
+        "type": "object",
+        "required": [
+          "kind",
+          "url",
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "integer",
+            "description": "Items that got the new picture (a series counts every episode).",
+            "minimum": 0
+          },
+          "kind": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "description": "The image URL with a cache-buster."
+          }
+        }
+      },
+      "ArtworkUrl": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "An `http(s)` link to the picture."
+          }
+        }
+      },
       "AudioOption": {
         "type": "object",
         "required": [
@@ -5704,6 +6350,45 @@
             "type": "string"
           }
         }
+      },
+      "ChannelResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/LiveChannel"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "logo_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "`/api/livetv/channels/{id}/logo`, or null."
+              },
+              "next": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LiveProgram"
+                  }
+                ]
+              },
+              "now": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/LiveProgram"
+                  }
+                ]
+              }
+            }
+          }
+        ]
       },
       "ChapterResponse": {
         "type": "object",
@@ -5973,6 +6658,13 @@
           "library_type": {
             "type": "string"
           },
+          "m3u_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Faza 20, `live_tv` only: the M3U channel list (http(s) or a path on\nthe server) and the optional XMLTV guide. `root_paths` stays empty."
+          },
           "name": {
             "type": "string"
           },
@@ -5984,6 +6676,29 @@
           },
           "save_metadata_in_media_folder": {
             "type": "boolean"
+          },
+          "xmltv_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CreateRoom": {
+        "type": "object",
+        "required": [
+          "item_id"
+        ],
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "position": {
+            "type": "number",
+            "format": "double",
+            "description": "Where the room starts (seconds); 0 when omitted."
           }
         }
       },
@@ -6010,6 +6725,27 @@
           },
           "username": {
             "type": "string"
+          }
+        }
+      },
+      "CreatedRoom": {
+        "type": "object",
+        "required": [
+          "code",
+          "item_id",
+          "link"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "item_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "link": {
+            "type": "string",
+            "description": "Path to share: opens the player in this room."
           }
         }
       },
@@ -6412,6 +7148,15 @@
           "pro_logic_ii"
         ]
       },
+      "EditScope": {
+        "type": "string",
+        "description": "What a save edits.",
+        "enum": [
+          "item",
+          "series",
+          "episode"
+        ]
+      },
       "EditUser": {
         "type": "object",
         "required": [
@@ -6434,6 +7179,30 @@
             "type": "string"
           }
         }
+      },
+      "EditorItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/MediaItemDetail"
+          },
+          {
+            "$ref": "#/components/schemas/EpisodeContext"
+          },
+          {
+            "type": "object",
+            "required": [
+              "version"
+            ],
+            "properties": {
+              "version": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Changes whenever the item is saved: a cache-buster for previews."
+              }
+            }
+          }
+        ],
+        "description": "One item as the editor loads it: the item's own fields, its series and\nepisode side, and a version for the artwork previews."
       },
       "EncoderTest": {
         "type": "object",
@@ -6542,6 +7311,50 @@
           },
           "url": {
             "type": "string"
+          }
+        }
+      },
+      "EpisodeContext": {
+        "type": "object",
+        "description": "The series and episode side of an item, for the editor.",
+        "properties": {
+          "episode_air_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "episode_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "episode_overview": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "episode_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "series_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "series_title": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -6921,6 +7734,62 @@
           "vendor": {
             "type": "string",
             "description": "`nvidia`, `intel`, `amd` or `other`."
+          }
+        }
+      },
+      "GuideChannel": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/LiveChannel"
+          },
+          {
+            "type": "object",
+            "required": [
+              "programs"
+            ],
+            "properties": {
+              "logo_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "programs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/LiveProgram"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "GuideResponse": {
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "now",
+          "channels"
+        ],
+        "properties": {
+          "channels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuideChannel"
+            }
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "now": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -7557,6 +8426,159 @@
           }
         }
       },
+      "LiveChannel": {
+        "type": "object",
+        "required": [
+          "id",
+          "library_id",
+          "name",
+          "has_logo"
+        ],
+        "properties": {
+          "group_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "has_logo": {
+            "type": "boolean",
+            "description": "Whether a logo exists (served by `/api/livetv/channels/{id}/logo`)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "library_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "number": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "LiveProgram": {
+        "type": "object",
+        "required": [
+          "id",
+          "channel_id",
+          "starts_at",
+          "ends_at",
+          "title"
+        ],
+        "properties": {
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "channel_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "subtitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "LiveTvSource": {
+        "type": "object",
+        "required": [
+          "library_id",
+          "library_name",
+          "m3u_url",
+          "channel_count",
+          "program_count"
+        ],
+        "properties": {
+          "channel_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "library_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "library_name": {
+            "type": "string"
+          },
+          "m3u_url": {
+            "type": "string"
+          },
+          "program_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "refreshed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "xmltv_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "LiveTvStatus": {
+        "type": "object",
+        "required": [
+          "available",
+          "channel_count"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether this account has any channel to watch."
+          },
+          "channel_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
       "LogDayResponse": {
         "type": "object",
         "required": [
@@ -7992,6 +9014,22 @@
           }
         }
       },
+      "Member": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "username"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
       "MigrateFallbackResponse": {
         "type": "object",
         "required": [
@@ -8236,6 +9274,45 @@
           "role": {
             "type": "string",
             "description": "`\"Actor\"`, `\"Director\"` or `\"Writer\"`: what they are best known\nfor here."
+          }
+        }
+      },
+      "PlayRequest": {
+        "type": "object",
+        "properties": {
+          "transcode": {
+            "type": "boolean",
+            "description": "Re-encode the video to H.264 (for streams the browser cannot decode)."
+          }
+        }
+      },
+      "PlayResponse": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "stream_url",
+          "channel_id",
+          "name",
+          "transcoding"
+        ],
+        "properties": {
+          "channel_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream_url": {
+            "type": "string",
+            "description": "Live HLS playlist (no headers needed)."
+          },
+          "transcoding": {
+            "type": "boolean"
           }
         }
       },
@@ -8910,6 +9987,42 @@
           }
         }
       },
+      "RoomInfo": {
+        "type": "object",
+        "required": [
+          "code",
+          "item_id",
+          "title",
+          "members",
+          "playing",
+          "position"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "item_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Member"
+            }
+          },
+          "playing": {
+            "type": "boolean"
+          },
+          "position": {
+            "type": "number",
+            "format": "double"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
       "SafetyConfig": {
         "type": "object",
         "required": [
@@ -9512,6 +10625,25 @@
         "properties": {
           "api_key": {
             "type": "string"
+          }
+        }
+      },
+      "SetSource": {
+        "type": "object",
+        "required": [
+          "m3u_url"
+        ],
+        "properties": {
+          "m3u_url": {
+            "type": "string",
+            "description": "http(s) link to the M3U playlist, or an absolute path on the server."
+          },
+          "xmltv_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "XMLTV guide (optional; `.xml` or `.xml.gz`)."
           }
         }
       },
@@ -10418,11 +11550,6 @@
       },
       "UpdateMediaItemRequest": {
         "type": "object",
-        "required": [
-          "title",
-          "metadata_locked",
-          "locked_fields"
-        ],
         "properties": {
           "age_rating": {
             "type": [
@@ -10430,7 +11557,26 @@
               "null"
             ],
             "format": "int32",
-            "description": "Faza 6: the administrator's own age rating (minimum viewer age,\n0–21) for parental controls; `null` or absent leaves the\nprovider's rating in charge."
+            "description": "The administrator's own age rating (0–21); null: the provider's."
+          },
+          "episode_air_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`YYYY-MM-DD`."
+          },
+          "episode_overview": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "episode_title": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "forced_provider": {
             "type": [
@@ -10442,7 +11588,8 @@
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "Fields protected from rescans and provider refreshes (`title`,\n`original_title`, `year`, `overview`, `poster`, `backdrop`, `logo`;\nfor an episode `episode_title`, `episode_overview`, `thumb`). Fields\nthis save changes are added automatically."
           },
           "metadata_locked": {
             "type": "boolean"
@@ -10459,8 +11606,15 @@
               "null"
             ]
           },
+          "scope": {
+            "$ref": "#/components/schemas/EditScope"
+          },
           "title": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Film or series title (required for `item` on a film, and `series`)."
           },
           "year": {
             "type": [
@@ -10468,6 +11622,32 @@
               "null"
             ],
             "format": "int32"
+          }
+        }
+      },
+      "UpdateMediaItemResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "updated",
+          "auto_locked"
+        ],
+        "properties": {
+          "auto_locked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Fields locked automatically because this save changed them."
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "updated": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Items written (a series counts every episode).",
+            "minimum": 0
           }
         }
       },
