@@ -280,11 +280,11 @@ pub async fn identify(
     } else {
         MediaKind::Series
     };
-    let api_key = provider_registry::enabled_provider_keys(&pool, &state.secrets)
-        .await?
-        .into_iter()
+    let enabled = provider_registry::enabled_provider_keys(&pool, &state.secrets).await?;
+    let api_key = enabled
+        .iter()
         .find(|(key, _)| *key == req.provider)
-        .map(|(_, api_key)| api_key)
+        .map(|(_, api_key)| api_key.clone())
         .ok_or(error(StatusCode::BAD_REQUEST, "provider_not_configured"))?;
     let provider = provider_registry::build_provider(&req.provider, &api_key)
         .ok_or(error(StatusCode::BAD_REQUEST, "provider_not_configured"))?;
@@ -341,6 +341,23 @@ pub async fn identify(
             title: title.clone(),
         },
     };
+    // Faza 24: the other plugins fill the gaps by ids only — TMDB's cast
+    // and crew for an IMDb or TheTVDB pick too.
+    let matched = crate::metadata_enrichment::complete_by_ids(
+        &enabled,
+        &target,
+        &req.provider,
+        matched,
+        &std::collections::BTreeMap::new(),
+        &chain,
+        &language,
+    )
+    .await;
+    // Faza 24: the old match's cast and crew (and directors typed for it)
+    // go before the new ones are written; people left without a title are
+    // swept by `prune_collections` below.
+    let removed = lisek_db::people::reset_credits(&pool, &items).await?;
+    tracing::info!(%item_id, removed, "fix match: previous cast and crew removed");
     let config = config_dir();
     let http = reqwest::Client::new();
     let mut image_saved = false;

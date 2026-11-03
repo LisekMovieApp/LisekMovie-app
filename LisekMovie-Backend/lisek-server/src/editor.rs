@@ -266,6 +266,9 @@ async fn save_identity(
     match wanted {
         Some(ids) if ids != before => {
             lisek_db::identity::set_provider_ids(pool, &scope, ids).await?;
+            // Faza 24: another production — the old cast and crew go first.
+            let removed = lisek_db::people::reset_credits(pool, &scope).await?;
+            tracing::info!(%item_id, removed, "ids changed: previous cast and crew removed");
             tracing::info!(%item_id, ?before, after = ?ids, items = scope.len(), "provider ids changed; fetching metadata again");
             let summary = crate::refetch::refetch(state, pool, &scope).await?;
             Ok(Some(summary))

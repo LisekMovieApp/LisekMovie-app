@@ -18,7 +18,8 @@ export type Person = Omit<components['schemas']['PersonResponse'], 'filmography'
 /** The detail page's cast row: directors, writers, then the cast. */
 export async function fetchItemPeople(token: string, itemId: string): Promise<Credit[]> {
 	const url = `/api/media/${encodeURIComponent(itemId)}/people`;
-	const response = await fetch(url, { headers: buildAuthHeader(token) });
+	// Faza 24: never a cached answer — after Fix match the cast is new.
+	const response = await fetch(url, { headers: buildAuthHeader(token), cache: 'no-store' });
 	if (!response.ok) throw new Error(`GET ${url} failed with status ${response.status}`);
 	return ((await response.json()) as { items: Credit[] }).items;
 }

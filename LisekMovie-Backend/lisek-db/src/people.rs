@@ -154,6 +154,31 @@ pub async fn replace_credits(
     Ok(people)
 }
 
+/// Faza 24: forgets the cast and crew of `items` before they are matched
+/// to another production (Fix match, changed ids): every `media_people`
+/// row goes, and so do directors typed in the metadata editor (they
+/// belonged to the old match) with their lock. The new match writes its
+/// own credits afterwards; people left without any title are removed by
+/// [`prune_orphans`]. Returns how many credits were removed.
+pub async fn reset_credits(pool: &PgPool, items: &[Uuid]) -> Result<u64, DbError> {
+    let mut tx = pool.begin().await?;
+    let removed = sqlx::query("DELETE FROM media_people WHERE media_item_id = ANY($1)")
+        .bind(items)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    sqlx::query(
+        "UPDATE media_items SET metadata = metadata - 'manual_directors', \
+             locked_fields = array_remove(locked_fields, 'directors'), updated_at = now() \
+         WHERE id = ANY($1) AND (metadata ? 'manual_directors' OR 'directors' = ANY(locked_fields))",
+    )
+    .bind(items)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(removed)
+}
+
 /// Records the profile photo now on disk (`None`: no photo).
 pub async fn set_profile_url(
     pool: &PgPool,

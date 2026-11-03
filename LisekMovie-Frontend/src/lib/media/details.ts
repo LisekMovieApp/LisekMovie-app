@@ -13,7 +13,8 @@ export type Chapter = components['schemas']['ChapterResponse'];
 
 export async function fetchItemDetails(token: string, itemId: string): Promise<ItemDetails> {
 	const url = `/api/media/${encodeURIComponent(itemId)}/details`;
-	const response = await fetch(url, { headers: buildAuthHeader(token) });
+	// Faza 24: directors and writers change with Fix match: never cached.
+	const response = await fetch(url, { headers: buildAuthHeader(token), cache: 'no-store' });
 	if (!response.ok) throw new Error(`GET ${url} failed with status ${response.status}`);
 	return (await response.json()) as ItemDetails;
 }

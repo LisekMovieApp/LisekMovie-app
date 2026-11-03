@@ -63,7 +63,9 @@ describe('people', () => {
 		const credits = await fetchItemPeople('tok', 'm1');
 		expect(credits.map((c) => c.person_id)).toEqual(['p1']);
 		expect(fetchMock.mock.calls[0][1]).toMatchObject({
-			headers: { Authorization: expect.stringContaining('tok') }
+			headers: { Authorization: expect.stringContaining('tok') },
+			// Faza 24: a cast changed by Fix match is never served from cache.
+			cache: 'no-store'
 		});
 		await expect(fetchPerson('tok', 'missing')).rejects.toBeInstanceOf(MediaNotFoundError);
 	});

@@ -339,6 +339,38 @@ pub fn fill_title(primary: &mut ProviderMatch, other: &ProviderMatch, source: &s
     true
 }
 
+/// Faza 24: the only plugin whose cast and crew LisekMovie stores (people
+/// are keyed by TMDB person ids).
+pub const PEOPLE_SOURCE: &str = "tmdb";
+
+/// The plugin the match's `people` came from: the one that filled them
+/// in the cascade, else the match's own plugin.
+pub fn people_source<'a>(matched: &'a ProviderMatch, primary_key: &'a str) -> &'a str {
+    matched
+        .fields
+        .get("filled_from")
+        .and_then(|f| f.get("people"))
+        .and_then(Value::as_str)
+        .unwrap_or(primary_key)
+}
+
+/// Whether the match carries cast and crew the server can store.
+pub fn has_usable_people(matched: &ProviderMatch, primary_key: &str) -> bool {
+    matched.people.is_some() && people_source(matched, primary_key) == PEOPLE_SOURCE
+}
+
+/// Faza 24: the match's own plugin has no storable cast (TheTVDB, IMDb …
+/// credit people by their own ids): `other`'s from TMDB (the same
+/// production) replace them. Returns whether they did.
+pub fn take_people(merged: &mut ProviderMatch, other: &ProviderMatch, source: &str, primary_key: &str) -> bool {
+    if source != PEOPLE_SOURCE || other.people.is_none() || has_usable_people(merged, primary_key) {
+        return false;
+    }
+    merged.people = other.people.clone();
+    note(&mut merged.fields, "filled_from", "people", source);
+    true
+}
+
 /// Faza 22: the ids an administrator set are the only ones kept: every
 /// `<kind>_id` the plugins sent is replaced by `stored`.
 pub fn enforce_ids(matched: &mut ProviderMatch, stored: &std::collections::BTreeMap<String, String>) {
@@ -649,6 +681,32 @@ mod tests {
         let filled = fill_from(&mut primary, &other, "anilist");
         assert_eq!(filled, vec!["original_title", "sort_title"]);
         assert_eq!(primary.fields["sort_title"], "Matrix, The");
+    }
+
+    #[test]
+    fn cast_and_crew_come_from_tmdb_even_when_another_plugin_matched() {
+        use lisek_plugin_api::{PersonRole, ProviderPerson};
+        let mut tvdb = matched(json!({"tvdb_id": 1, "overview": "x"}));
+        tvdb.people = Some(vec![ProviderPerson {
+            provider_id: "tvdb-7".into(),
+            name: "Someone".into(),
+            role: PersonRole::Actor,
+            character: None,
+            order: 0,
+            profile_url: None,
+        }]);
+        assert!(!has_usable_people(&tvdb, "tvdb"));
+        let mut tmdb = matched(json!({"tmdb_id": 2}));
+        tmdb.people = Some(Vec::new());
+        assert!(!take_people(&mut tvdb, &tmdb, "omdb", "tvdb"));
+        assert!(take_people(&mut tvdb, &tmdb, "tmdb", "tvdb"));
+        assert_eq!(people_source(&tvdb, "tvdb"), "tmdb");
+        assert!(has_usable_people(&tvdb, "tvdb"));
+        assert_eq!(tvdb.people.as_deref().map(<[_]>::len), Some(0));
+        assert!(!take_people(&mut tvdb, &tmdb, "tmdb", "tvdb"), "taken once");
+        let mut own = matched(json!({}));
+        own.people = Some(Vec::new());
+        assert!(has_usable_people(&own, "tmdb"));
     }
 
     #[test]

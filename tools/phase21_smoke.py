@@ -74,7 +74,12 @@ def start_mock_metadata():
                         "imdb_id": "tt1111111", "original_language": "en",
                         "original_title": "The New Adventures of Robin Hood", "tagline": "", "runtime": 0,
                         "production_companies": [], "release_dates": {"results": []},
-                        "credits": {"cast": [], "crew": []}, "keywords": {"keywords": []},
+                        # Faza 24: the wrong film's cast and director.
+                        "credits": {"cast": [{"id": 9101, "name": "Matthew Porretta", "character": "Robin Hood",
+                                              "order": 0, "profile_path": None}],
+                                    "crew": [{"id": 9102, "name": "Robin Director", "job": "Director",
+                                              "profile_path": None}]},
+                        "keywords": {"keywords": []},
                     })
                 if path == f"/movie/{TMDB_ID}":
                     # Faza 22: no Polish title (TMDB then sends the original).
@@ -85,7 +90,11 @@ def start_mock_metadata():
                         "belongs_to_collection": None, "genres": [] if polish else [{"id": 18, "name": "Drama"}],
                         "imdb_id": IMDB_ID, "original_language": "fr", "original_title": "La Cascade",
                         "tagline": "", "runtime": 0, "production_companies": [],
-                        "release_dates": {"results": []}, "credits": {"cast": [], "crew": []},
+                        "release_dates": {"results": []},
+                        "credits": {"cast": [{"id": 9201, "name": "Kaskada Star", "character": "Woda",
+                                              "order": 0, "profile_path": None}],
+                                    "crew": [{"id": 9202, "name": "Kaskada Director", "job": "Director",
+                                              "profile_path": None}]},
                         "keywords": {"keywords": []},
                     })
                 return self.reply({"status_message": "not found"}, status=404)

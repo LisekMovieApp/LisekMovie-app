@@ -287,6 +287,12 @@ pub async fn delete_library(
         .map_err(map_db_error)?;
 
     tracing::info!(%library_id, admin = %auth.user.username, "library deleted");
+    // Faza 24: its items' credits went with them; people credited nowhere
+    // else (and collections left empty) go now, not at the next scan.
+    let config_dir = crate::state::config_dir();
+    tokio::spawn(async move {
+        crate::metadata_enrichment::prune_collections(&pool, &config_dir).await;
+    });
 
     Ok(Json(json!({ "ok": true })))
 }

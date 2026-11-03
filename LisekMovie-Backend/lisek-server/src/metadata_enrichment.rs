@@ -229,7 +229,7 @@ async fn find_complete(
     let (primary_key, mut merged) = found?;
     if cascade {
         for (provider_key, api_key) in rest {
-            if !wants_more(&merged, first_language) {
+            if !wants_more(&merged, first_language, &primary_key, providers) {
                 break;
             }
             let Some(other) = try_provider(provider_key, api_key, target, first_language).await
@@ -242,11 +242,19 @@ async fn find_complete(
     Some((primary_key, merged))
 }
 
-/// Whether the match still lacks a key field (synopsis, poster, genres)
-/// or a title in the first metadata language.
-fn wants_more(merged: &ProviderMatch, first_language: &str) -> bool {
+/// Whether the match still lacks a key field (synopsis, poster, genres),
+/// a title in the first metadata language, or (Faza 24) a cast the server
+/// can store while TMDB is enabled.
+fn wants_more(
+    merged: &ProviderMatch,
+    first_language: &str,
+    primary_key: &str,
+    providers: &[(String, String)],
+) -> bool {
     !metadata_cascade::missing_key_fields(merged).is_empty()
         || metadata_cascade::needs_local_title(merged, first_language)
+        || (!metadata_cascade::has_usable_people(merged, primary_key)
+            && providers.iter().any(|(k, _)| k == metadata_cascade::PEOPLE_SOURCE))
 }
 
 /// One more plugin's match folded into `merged`: its gaps filled
@@ -282,6 +290,9 @@ async fn fold_in(
     let mut filled = metadata_cascade::fill_from(merged, &other, provider_key);
     if metadata_cascade::fill_title(merged, &other, provider_key, first_language) {
         filled.push("title");
+    }
+    if !filled.contains(&"people") && metadata_cascade::take_people(merged, &other, provider_key, primary_key) {
+        filled.push("people");
     }
     if !filled.is_empty() {
         tracing::info!(
@@ -368,25 +379,41 @@ async fn find_by_ids(
     }
     let (primary_key, mut merged) = found?;
     if cascade {
-        for (provider_key, api_key) in providers {
-            if *provider_key == primary_key {
-                continue;
-            }
-            if !wants_more(&merged, first_language) {
-                break;
-            }
-            let Some(other) =
-                lookup_known(provider_key, api_key, kind, stored, Some(&merged), first_language).await
-            else {
-                continue;
-            };
-            fold_in(&mut merged, &primary_key, provider_key, api_key, kind, other, chain, first_language, target).await;
-        }
+        merged = complete_by_ids(providers, target, &primary_key, merged, stored, chain, first_language).await;
     }
     if ids_locked {
         metadata_cascade::enforce_ids(&mut merged, stored);
     }
     Some((primary_key, merged))
+}
+
+/// The cascade of a match found by id ([`find_by_ids`], Fix match): the
+/// other plugins fill its gaps by their ids only, never by a title search.
+pub(crate) async fn complete_by_ids(
+    providers: &[(String, String)],
+    target: &EnrichTarget,
+    primary_key: &str,
+    mut merged: ProviderMatch,
+    stored: &BTreeMap<String, String>,
+    chain: &[String],
+    first_language: &str,
+) -> ProviderMatch {
+    let kind = kind_of(target);
+    for (provider_key, api_key) in providers {
+        if provider_key == primary_key {
+            continue;
+        }
+        if !wants_more(&merged, first_language, primary_key, providers) {
+            break;
+        }
+        let Some(other) =
+            lookup_known(provider_key, api_key, kind, stored, Some(&merged), first_language).await
+        else {
+            continue;
+        };
+        fold_in(&mut merged, primary_key, provider_key, api_key, kind, other, chain, first_language, target).await;
+    }
+    merged
 }
 
 /// Where a provider match's poster/backdrop should be written inside the
@@ -1012,7 +1039,9 @@ pub async fn apply_match(
         sync_collection(cache, pool, http, config_dir, item_id, provider_key, &matched.fields)
             .await;
     }
-    sync_people(cache, pool, http, config_dir, item_id, provider_key, matched.people.as_deref())
+    // Faza 24: the cast's own plugin (TMDB may have filled it in the cascade).
+    let people_source = metadata_cascade::people_source(matched, provider_key);
+    sync_people(cache, pool, http, config_dir, item_id, people_source, matched.people.as_deref())
         .await;
 
     let mut used_fallback = false;
@@ -1354,9 +1383,15 @@ async fn sync_people(
 /// Deletes people no title credits any more, with their photos, plus photo
 /// folders no person owns.
 pub async fn prune_people(pool: &PgPool, config_dir: &Path) {
-    if let Err(err) = lisek_db::people::prune_orphans(pool).await {
-        tracing::warn!(%err, "failed to remove uncredited people");
-        return;
+    match lisek_db::people::prune_orphans(pool).await {
+        Ok(removed) if !removed.is_empty() => {
+            tracing::info!(removed = removed.len(), "people no title credits any more removed");
+        }
+        Ok(_) => {}
+        Err(err) => {
+            tracing::warn!(%err, "failed to remove uncredited people");
+            return;
+        }
     }
     let Ok(ids) = lisek_db::people::all_ids(pool).await else {
         return;

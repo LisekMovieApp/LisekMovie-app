@@ -340,3 +340,75 @@ async fn a_person_page_respects_restrictions_and_folds_series_episodes() {
 
     db.drop().await;
 }
+
+#[tokio::test]
+async fn fix_match_reset_leaves_no_credits_and_orphans_are_swept() {
+    let Some(db) = TestDb::create().await else {
+        return;
+    };
+    let pool = &db.pool;
+    let films = library(pool, "Filmy", "movies").await;
+    let panther = movie(pool, films, "Rozowa Pantera", 1963).await;
+    let other = movie(pool, films, "Shot in the Dark", 1964).await;
+    // The wrong match (Robin Hood) gave the film its cast; one actor also
+    // plays in another film of the library.
+    people::replace_credits(
+        pool,
+        panther,
+        &[
+            credit(10, "Matthew Porretta", "Actor", Some("Robin"), 0),
+            credit(11, "Shared Actor", "Actor", None, 1),
+            credit(12, "Wrong Director", "Director", None, 0),
+        ],
+    )
+    .await
+    .unwrap();
+    people::replace_credits(pool, other, &[credit(11, "Shared Actor", "Actor", None, 0)])
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE media_items SET metadata = metadata || '{\"manual_directors\": [\"Wrong Director\"]}', \
+         locked_fields = ARRAY['directors', 'title'] WHERE id = $1",
+    )
+    .bind(panther)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    assert_eq!(people::reset_credits(pool, &[panther]).await.unwrap(), 3);
+    assert!(people::item_credits(pool, panther, 50).await.unwrap().is_empty());
+    let (manual, locked): (Option<serde_json::Value>, Vec<String>) = sqlx::query_as(
+        "SELECT metadata->'manual_directors', locked_fields FROM media_items WHERE id = $1",
+    )
+    .bind(panther)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(manual, None, "directors typed for the wrong film go too");
+    assert_eq!(locked, vec!["title".to_string()]);
+    // The other film keeps its credit.
+    assert_eq!(people::item_credits(pool, other, 50).await.unwrap().len(), 1);
+
+    // The new match: its own cast only.
+    people::replace_credits(pool, panther, &[credit(20, "Peter Sellers", "Actor", Some("Clouseau"), 0)])
+        .await
+        .unwrap();
+    let names: Vec<String> = people::item_credits(pool, panther, 50)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|c| c.name)
+        .collect();
+    assert_eq!(names, vec!["Peter Sellers".to_string()]);
+
+    // Garbage collection: people credited nowhere go, the shared actor stays.
+    let mut removed = people::prune_orphans(pool).await.unwrap();
+    removed.sort();
+    assert_eq!(removed.len(), 2);
+    let left: Vec<String> = sqlx::query_scalar("SELECT name FROM people ORDER BY name")
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    assert_eq!(left, vec!["Peter Sellers".to_string(), "Shared Actor".to_string()]);
+    db.drop().await;
+}
