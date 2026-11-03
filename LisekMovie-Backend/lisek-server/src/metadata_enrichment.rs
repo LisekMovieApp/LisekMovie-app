@@ -30,7 +30,7 @@
 //! it never aborts the rest of the scan, since one bad provider or one
 //! unmatched title shouldn't cost the admin every other item's data.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -41,7 +41,7 @@ use lisek_metadata::image_cache::{
 };
 use lisek_metadata::layout;
 use lisek_plugin_api::{
-    MediaKind, MovieQuery, ProviderEpisode, ProviderMatch, ProviderPerson, SeriesQuery,
+    DirectId, MediaKind, MovieQuery, ProviderEpisode, ProviderMatch, ProviderPerson, SeriesQuery,
 };
 use uuid::Uuid;
 
@@ -160,7 +160,11 @@ pub(crate) async fn localize(
             Some(at) => (&resolved[..at], &resolved[at + 1..]),
             None => (&resolved[..], &[]),
         };
-    let wants_lower = metadata_cascade::needs_language(&base) && !lower.is_empty();
+    // Faza 22: a title the plugin left untranslated (the original) counts
+    // as missing too.
+    let mut untranslated = metadata_cascade::untranslated_title(&base, fetched_in);
+    let wants_lower =
+        (metadata_cascade::needs_language(&base) || untranslated) && !lower.is_empty();
     if let (Some(id), true) = (
         metadata_cascade::own_id(&base, provider_key),
         !higher.is_empty() || wants_lower,
@@ -176,13 +180,16 @@ pub(crate) async fn localize(
             }
         }
         for code in lower {
-            if !metadata_cascade::needs_language(&base) {
+            if !metadata_cascade::needs_language(&base) && !untranslated {
                 break;
             }
             match provider.lookup(kind, &id, code).await {
                 Ok(Some(other)) => {
                     if metadata_cascade::fill_text(&mut base, &other, code) {
                         tracing::debug!(provider = provider_key, language = %code, "text filled from the next metadata language");
+                    }
+                    if untranslated && metadata_cascade::replace_untranslated_title(&mut base, &other, code) {
+                        untranslated = false;
                     }
                 }
                 Ok(None) => {}
@@ -222,38 +229,162 @@ async fn find_complete(
     let (primary_key, mut merged) = found?;
     if cascade {
         for (provider_key, api_key) in rest {
-            let missing = metadata_cascade::missing_key_fields(&merged);
-            if missing.is_empty() {
+            if !wants_more(&merged, first_language) {
                 break;
             }
             let Some(other) = try_provider(provider_key, api_key, target, first_language).await
             else {
                 continue;
             };
-            if !metadata_cascade::consistent(&merged.fields, &other.fields) {
-                tracing::info!(
-                    primary = %primary_key,
-                    provider = %provider_key,
-                    ?target,
-                    "another plugin matched a different title (ids or year differ) — not used to fill gaps"
-                );
-                continue;
-            }
-            let other = if missing.contains(&"overview") {
-                localize(provider_key, api_key, kind, other, first_language, chain).await
-            } else {
-                other
-            };
-            let filled = metadata_cascade::fill_from(&mut merged, &other, provider_key);
-            if !filled.is_empty() {
-                tracing::info!(
-                    primary = %primary_key,
-                    provider = %provider_key,
-                    ?filled,
-                    "metadata gaps filled from the next plugin"
-                );
+            fold_in(&mut merged, &primary_key, provider_key, api_key, kind, other, chain, first_language, target).await;
+        }
+    }
+    Some((primary_key, merged))
+}
+
+/// Whether the match still lacks a key field (synopsis, poster, genres)
+/// or a title in the first metadata language.
+fn wants_more(merged: &ProviderMatch, first_language: &str) -> bool {
+    !metadata_cascade::missing_key_fields(merged).is_empty()
+        || metadata_cascade::needs_local_title(merged, first_language)
+}
+
+/// One more plugin's match folded into `merged`: its gaps filled
+/// ([`metadata_cascade::fill_from`]), and a translated title when `merged`
+/// has none ([`metadata_cascade::fill_title`]) — only when `other` is the
+/// same production ([`metadata_cascade::consistent`]).
+#[allow(clippy::too_many_arguments)]
+async fn fold_in(
+    merged: &mut ProviderMatch,
+    primary_key: &str,
+    provider_key: &str,
+    api_key: &str,
+    kind: MediaKind,
+    other: ProviderMatch,
+    chain: &[String],
+    first_language: &str,
+    target: &EnrichTarget,
+) {
+    if !metadata_cascade::consistent(&merged.fields, &other.fields) {
+        tracing::info!(
+            primary = %primary_key,
+            provider = %provider_key,
+            ?target,
+            "another plugin matched a different title (ids or year differ) — not used to fill gaps"
+        );
+        return;
+    }
+    let other = if metadata_cascade::is_missing(merged, "overview") {
+        localize(provider_key, api_key, kind, other, first_language, chain).await
+    } else {
+        other
+    };
+    let mut filled = metadata_cascade::fill_from(merged, &other, provider_key);
+    if metadata_cascade::fill_title(merged, &other, provider_key, first_language) {
+        filled.push("title");
+    }
+    if !filled.is_empty() {
+        tracing::info!(
+            primary = %primary_key,
+            provider = %provider_key,
+            ?filled,
+            "metadata gaps filled from the next plugin"
+        );
+    }
+}
+
+/// Faza 22: a plugin's match for a production known by id, never by a
+/// title search: the plugin's own stored id, the one another plugin
+/// reported for it (TMDB knows the TheTVDB and IMDb ids), else the IMDb id
+/// mapped by the plugin (TMDB, TheTVDB, OMDb can).
+async fn lookup_known(
+    provider_key: &str,
+    api_key: &str,
+    kind: MediaKind,
+    stored: &BTreeMap<String, String>,
+    merged: Option<&ProviderMatch>,
+    language: &str,
+) -> Option<ProviderMatch> {
+    let provider = provider_registry::build_provider(provider_key, api_key)?;
+    let own = stored
+        .get(provider_key)
+        .cloned()
+        .or_else(|| merged.and_then(|m| metadata_cascade::own_id(m, provider_key)));
+    let id = match own {
+        Some(id) => id,
+        None => {
+            let imdb = stored
+                .get("imdb")
+                .cloned()
+                .or_else(|| merged.and_then(|m| metadata_cascade::own_id(m, "imdb")))?;
+            match provider.lookup_by_id(kind, &DirectId::Imdb(imdb), language).await {
+                Ok(Some(candidate)) => candidate.provider_id,
+                Ok(None) => return None,
+                Err(err) => {
+                    tracing::warn!(provider = provider_key, %err, "lookup by IMDb id failed");
+                    return None;
+                }
             }
         }
+    };
+    match provider.lookup(kind, &id, language).await {
+        Ok(Some(matched)) => Some(matched),
+        Ok(None) => {
+            tracing::warn!(provider = provider_key, id, "the plugin no longer knows this id");
+            None
+        }
+        Err(err) => {
+            tracing::warn!(provider = provider_key, id, %err, "metadata lookup by id failed");
+            None
+        }
+    }
+}
+
+/// Faza 22: the match of an item that already has ids. The first plugin
+/// (`pinned`, the one that matched last first) that knows its id is the
+/// base, the others fill gaps by their ids — no plugin searches by title.
+/// With `ids_locked`, the stored ids are kept exactly.
+#[allow(clippy::too_many_arguments)]
+async fn find_by_ids(
+    providers: &[(String, String)],
+    target: &EnrichTarget,
+    pinned: &[String],
+    stored: &BTreeMap<String, String>,
+    ids_locked: bool,
+    chain: &[String],
+    first_language: &str,
+    cascade: bool,
+) -> Option<Found> {
+    let kind = kind_of(target);
+    let api_of = |key: &str| providers.iter().find(|(k, _)| k == key).map(|(_, api)| api.as_str());
+    let mut found = None;
+    for key in pinned {
+        let Some(api_key) = api_of(key) else { continue };
+        if let Some(matched) = lookup_known(key, api_key, kind, stored, None, first_language).await {
+            let matched = localize(key, api_key, kind, matched, first_language, chain).await;
+            found = Some((key.clone(), matched));
+            break;
+        }
+    }
+    let (primary_key, mut merged) = found?;
+    if cascade {
+        for (provider_key, api_key) in providers {
+            if *provider_key == primary_key {
+                continue;
+            }
+            if !wants_more(&merged, first_language) {
+                break;
+            }
+            let Some(other) =
+                lookup_known(provider_key, api_key, kind, stored, Some(&merged), first_language).await
+            else {
+                continue;
+            };
+            fold_in(&mut merged, &primary_key, provider_key, api_key, kind, other, chain, first_language, target).await;
+        }
+    }
+    if ids_locked {
+        metadata_cascade::enforce_ids(&mut merged, stored);
     }
     Some((primary_key, merged))
 }
@@ -530,8 +661,9 @@ async fn remove_legacy_season_artwork(series_dir: &Path, episode_files: &[String
 /// callers pass targets grouped by series (`persist_scan_results` and
 /// `list_unlocked_items_for_refresh` both sort that way) — so memory stays
 /// bounded by one show's artwork.
-/// `(target, forced_provider)` — a forced provider changes the answer.
-type LookupKey = (EnrichTarget, Option<String>);
+/// `(target, forced_provider, stored ids)` — a forced provider or other ids
+/// change the answer.
+type LookupKey = (EnrichTarget, Option<String>, Vec<(String, String)>);
 /// `(provider_key, match)`.
 type Found = (String, ProviderMatch);
 
@@ -671,18 +803,66 @@ pub async fn enrich_item_cached(
 
     let chain = cache.language_chain(pool, primary_language).await;
     let first_language = metadata_cascade::first_language(&chain, primary_language);
-    let memo_key = (target.clone(), forced_provider.map(str::to_owned));
+
+    // Faza 22: an item matched before is asked for by its ids only; an
+    // item an administrator edited without ids is not searched by its
+    // (possibly renamed) title at all.
+    let identity = match lisek_db::identity::stored_identity(pool, item_id).await {
+        Ok(identity) => identity,
+        Err(err) => {
+            tracing::warn!(%item_id, %err, "cannot read the item's stored ids; skipping enrichment");
+            return EnrichOutcome::default();
+        }
+    };
+    let pinned = pinned_providers(providers, &identity);
+    if pinned.is_empty() && !identity.ids.is_empty() && identity.ids_locked {
+        tracing::info!(
+            %item_id,
+            ids = ?identity.ids,
+            "the item's locked ids belong to no enabled plugin — not searching by title"
+        );
+        return EnrichOutcome::default();
+    }
+    if pinned.is_empty() && identity.edited {
+        tracing::info!(
+            %item_id,
+            ?target,
+            "the item was edited by hand and has no plugin id — not searching by its title"
+        );
+        return EnrichOutcome::default();
+    }
+
+    let memo_key = (
+        target.clone(),
+        forced_provider.map(str::to_owned),
+        identity.ids.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Vec<_>>(),
+    );
     let found = match cache.lookups.get(&memo_key) {
         Some(found) => found.clone(),
         None => {
-            let found = find_complete(
-                providers,
-                target,
-                &chain,
-                &first_language,
-                forced_provider.is_none(),
-            )
-            .await;
+            let found = if pinned.is_empty() {
+                find_complete(providers, target, &chain, &first_language, forced_provider.is_none()).await
+            } else {
+                let found = find_by_ids(
+                    providers,
+                    target,
+                    &pinned,
+                    &identity.ids,
+                    identity.ids_locked,
+                    &chain,
+                    &first_language,
+                    forced_provider.is_none(),
+                )
+                .await;
+                if found.is_none() {
+                    tracing::warn!(
+                        %item_id,
+                        ids = ?identity.ids,
+                        "no plugin answered for the stored ids — the item keeps its metadata"
+                    );
+                }
+                found
+            };
             if matches!(target, EnrichTarget::Series { .. }) {
                 cache.lookups.insert(memo_key, found.clone());
             }
@@ -713,6 +893,34 @@ pub async fn enrich_item_cached(
         &matched,
     )
     .await
+}
+
+/// Faza 22: the enabled plugins that know one of the item's stored ids:
+/// the plugin of the last match first, then the administrator's order.
+fn pinned_providers(
+    providers: &[(String, String)],
+    identity: &lisek_db::identity::StoredIdentity,
+) -> Vec<String> {
+    let mut pinned: Vec<String> = Vec::new();
+    if let Some(last) = &identity.provider
+        && identity.ids.contains_key(last)
+        && providers.iter().any(|(k, _)| k == last)
+    {
+        pinned.push(last.clone());
+    }
+    for (key, _) in providers {
+        if identity.ids.contains_key(key) && !pinned.contains(key) {
+            pinned.push(key.clone());
+        }
+    }
+    // OMDb answers for IMDb ids too.
+    if identity.ids.contains_key("imdb")
+        && providers.iter().any(|(k, _)| k == "omdb")
+        && !pinned.iter().any(|k| k == "omdb")
+    {
+        pinned.push("omdb".to_owned());
+    }
+    pinned
 }
 
 /// Saves one provider match onto an item: its fields (`provider_data`),
@@ -1211,6 +1419,25 @@ pub struct EnrichOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stored_ids_pin_the_plugins_that_know_them() {
+        use lisek_db::identity::StoredIdentity;
+        let providers: Vec<(String, String)> =
+            ["tvdb", "imdb", "tmdb", "omdb"].iter().map(|k| (k.to_string(), String::new())).collect();
+        let identity = StoredIdentity {
+            provider: Some("tmdb".into()),
+            ids: BTreeMap::from([("tmdb".into(), "936".into()), ("imdb".into(), "tt0057413".into())]),
+            edited: true,
+            ids_locked: true,
+        };
+        // The last match first, then the order; OMDb answers for IMDb ids.
+        assert_eq!(pinned_providers(&providers, &identity), vec!["tmdb", "imdb", "omdb"]);
+        let none = StoredIdentity { edited: true, ..StoredIdentity::default() };
+        assert!(pinned_providers(&providers, &none).is_empty());
+        let other = StoredIdentity { ids: BTreeMap::from([("anidb".into(), "1".into())]), ..StoredIdentity::default() };
+        assert!(pinned_providers(&providers, &other).is_empty(), "only enabled plugins");
+    }
 
     #[test]
     fn collection_field_tells_unknown_from_none() {

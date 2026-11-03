@@ -1215,6 +1215,55 @@
         ]
       }
     },
+    "/api/admin/media/{item_id}/refresh": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Fetches an item's metadata again now (a series: every episode), by its\nstored ids when it has them.",
+        "operationId": "refresh_item",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefetchSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/admin/media/{item_id}/seasons/{season}": {
       "get": {
         "tags": [
@@ -7513,9 +7562,27 @@
           {
             "type": "object",
             "required": [
-              "version"
+              "version",
+              "provider_ids"
             ],
             "properties": {
+              "provider": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The plugin of the last match."
+              },
+              "provider_ids": {
+                "type": "object",
+                "description": "Faza 22: the ids the item is matched with, by kind (`tmdb` →\n`\"603\"`, `imdb` → `\"tt0133093\"`).",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
+              },
               "version": {
                 "type": "integer",
                 "format": "int64",
@@ -10331,6 +10398,26 @@
           }
         }
       },
+      "RefetchSummary": {
+        "type": "object",
+        "description": "What one refetch did.",
+        "required": [
+          "items",
+          "matched"
+        ],
+        "properties": {
+          "items": {
+            "type": "integer",
+            "description": "Items asked for (a series counts every episode).",
+            "minimum": 0
+          },
+          "matched": {
+            "type": "integer",
+            "description": "Items a plugin answered for.",
+            "minimum": 0
+          }
+        }
+      },
       "ResetPassword": {
         "type": "object",
         "properties": {
@@ -11300,6 +11387,15 @@
             "type": "string",
             "format": "uuid"
           },
+          "source_height": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Faza 23: the file's picture height (FFprobe), so the player offers\nonly qualities below it (no upscaling). `None`: unknown (live TV).",
+            "minimum": 0
+          },
           "stream_url": {
             "type": "string",
             "description": "The file (direct play) or the HLS master playlist."
@@ -12107,6 +12203,19 @@
               "null"
             ]
           },
+          "provider_ids": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Faza 22: every id the item should have, by kind (`tmdb`, `tvdb`,\n`imdb`, `anidb`, `anilist`, `mal`, `omdb`, `imvdb`); a kind left out\nis removed. For an episode the ids of its series. Omitted: unchanged.\nChanged ids are locked and the metadata is fetched again by them.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
           "rating": {
             "type": [
               "number",
@@ -12151,6 +12260,17 @@
           },
           "ok": {
             "type": "boolean"
+          },
+          "refetched": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RefetchSummary",
+                "description": "Faza 22: the ids changed and the metadata was fetched again."
+              }
+            ]
           },
           "updated": {
             "type": "integer",

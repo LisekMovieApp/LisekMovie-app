@@ -19,6 +19,13 @@
   Faza 21: the score (0-10, stars on the pages) and the directors, for a
   film or series and for each episode on its own. Seasons have their own
   editor (`SeasonEditorModal`).
+
+  Faza 22: "External ids" (film / series): the ids the item is matched
+  with at TMDB, TheTVDB, IMDb …, editable. Scans ask the plugins by these
+  ids only, never by the (possibly renamed) title. Saving changed ids
+  fetches the metadata again by them; any other change locks the ids
+  ("provider_ids" in the active fields) so a scan cannot re-identify the
+  item. "Fetch again" refreshes the metadata now.
 -->
 <script lang="ts">
 	import { t } from '$lib/i18n';
@@ -28,7 +35,12 @@
 		fetchMediaItem,
 		parseNames,
 		parseRating,
+		refreshMetadata,
+		sameIds,
 		updateMediaItem,
+		validProviderId,
+		ID_KINDS,
+		ID_KIND_NAMES,
 		type ArtworkKind,
 		type EditScope,
 		type MediaItemDetail,
@@ -38,6 +50,7 @@
 	import { AGE_LIMITS } from '$lib/users/restrictions';
 	import { showToast } from '$lib/toast/toast.svelte';
 	import ArtworkEditor from './ArtworkEditor.svelte';
+	import Icon from './Icon.svelte';
 
 	const SHARED_FIELDS = [
 		'title',
@@ -94,6 +107,11 @@
 	/** Pictures replaced in this editor (locked by the server). */
 	let replaced = $state<string[]>([]);
 	let artChanged = false;
+	/** Faza 22: the external ids, one row per kind. */
+	let ids = $state<{ kind: string; value: string }[]>([]);
+	let initialIds = $state<Record<string, string>>({});
+	let addKind = $state('');
+	let refreshing = $state(false);
 
 	let saving = $state(false);
 	let errorKey = $state<string | null>(null);
@@ -103,7 +121,9 @@
 	);
 	const episodeMode = $derived(scope === 'episode');
 	const lockable = $derived<string[]>(
-		episodeMode ? [...EPISODE_FIELDS, 'thumb'] : [...SHARED_FIELDS, ...SHARED_ART]
+		episodeMode
+			? [...EPISODE_FIELDS, 'thumb']
+			: [...SHARED_FIELDS, ...SHARED_ART, 'provider_ids']
 	);
 	const artKinds = $derived<ArtworkKind[]>(episodeMode ? ['thumb'] : SHARED_ART);
 
@@ -126,8 +146,20 @@
 	const changed = $derived(
 		lockable.filter((field) => field in current && current[field] !== initial[field])
 	);
+	const idRecord = $derived<Record<string, string>>(
+		Object.fromEntries(ids.map((row) => [row.kind, row.value]))
+	);
+	const idsChanged = $derived(!sameIds(idRecord, initialIds));
+	/** Any change locks the ids (when the item has some, or gets new ones). */
+	const idsAutoLocked = $derived(
+		(changed.length > 0 || replaced.length > 0 || idsChanged) &&
+			(Object.keys(initialIds).length > 0 || idsChanged)
+	);
+	const autoLocked = (field: string) =>
+		changed.includes(field) || (field === 'provider_ids' && idsAutoLocked);
 	const isLocked = (field: string) =>
-		locked.includes(field) || changed.includes(field) || replaced.includes(field);
+		locked.includes(field) || autoLocked(field) || replaced.includes(field);
+	const addableKinds = $derived(ID_KINDS.filter((kind) => !ids.some((row) => row.kind === kind)));
 
 	const forcedProviderOptions = $derived.by(() => {
 		const options = providers.filter((p) => p.enabled && p.is_configured);
@@ -187,6 +219,16 @@
 					? String(detail.age_rating)
 					: '';
 			locked = [...detail.locked_fields];
+			const stored = detail.provider_ids ?? {};
+			const order = (kind: string) => {
+				const at = (ID_KINDS as readonly string[]).indexOf(kind);
+				return at < 0 ? ID_KINDS.length : at;
+			};
+			ids = Object.keys(stored)
+				.sort((a, b) => order(a) - order(b))
+				.map((kind) => ({ kind, value: stored[kind] }));
+			initialIds = { ...stored };
+			replaced = [];
 			initial = snapshot();
 		} catch {
 			loadFailed = true;
@@ -208,8 +250,37 @@
 
 	function lockedForSave(): string[] {
 		return lockable.filter(
-			(field) => locked.includes(field) || replaced.includes(field) || changed.includes(field)
+			(field) => locked.includes(field) || replaced.includes(field) || autoLocked(field)
 		);
+	}
+
+	function addId() {
+		if (!addKind || ids.some((row) => row.kind === addKind)) return;
+		ids = [...ids, { kind: addKind, value: '' }];
+		addKind = '';
+	}
+
+	async function fetchAgain() {
+		const token = getSessionCookieClientSide();
+		if (!token || refreshing) return;
+		refreshing = true;
+		errorKey = null;
+		try {
+			const result = await refreshMetadata(token, itemId);
+			showToast(
+				result.matched > 0 ? 'success' : 'warning',
+				t('admin.editor_ids.refetched', {
+					matched: String(result.matched),
+					items: String(result.items)
+				})
+			);
+			artChanged = true;
+			await load();
+		} catch (error) {
+			errorKey = editorErrorKey(error);
+		} finally {
+			refreshing = false;
+		}
 	}
 
 	async function handleSave(event: SubmitEvent) {
@@ -245,6 +316,10 @@
 			}
 			const trimmedYear = String(year ?? '').trim();
 			const parsedYear = trimmedYear === '' ? null : Number(trimmedYear);
+			if (ids.some((row) => row.value.trim() !== '' && !validProviderId(row.kind, row.value))) {
+				errorKey = 'admin.editor_errors.invalid_provider_id';
+				return;
+			}
 			payload = {
 				scope,
 				title: trimmedTitle,
@@ -257,7 +332,8 @@
 				locked_fields: lockedForSave(),
 				age_rating: ageRating === '' ? null : Number(ageRating),
 				rating: score,
-				directors: parseNames(directors)
+				directors: parseNames(directors),
+				...(idsChanged ? { provider_ids: idRecord } : {})
 			};
 		}
 
@@ -271,6 +347,15 @@
 					? t('admin.editor_saved_series', { count: String(result.updated) })
 					: t('admin.editor_saved')
 			);
+			if (result.refetched) {
+				showToast(
+					result.refetched.matched > 0 ? 'success' : 'warning',
+					t('admin.editor_ids.refetched', {
+						matched: String(result.refetched.matched),
+						items: String(result.refetched.items)
+					})
+				);
+			}
 			onSaved();
 			onClose();
 		} catch (error) {
@@ -304,6 +389,83 @@
 	const tabClass =
 		'border-b-2 px-3 py-2 text-sm font-medium transition-colors aria-selected:border-gold aria-selected:text-white';
 </script>
+
+{#snippet externalIds()}
+	<fieldset class="rounded-md border border-white/10 p-3">
+		<legend class="px-1 text-sm font-semibold text-neutral-200">{t('admin.editor_ids.title')}</legend>
+		<p class="text-xs text-neutral-400">{t('admin.editor_ids.hint')}</p>
+		{#if ids.length === 0}
+			<p class="mt-2 text-xs text-neutral-500">{t('admin.editor_ids.none')}</p>
+		{/if}
+		<div class="mt-2 flex flex-col gap-2">
+			{#each ids as row (row.kind)}
+				<div class="flex items-center gap-2">
+					<label class="flex min-w-0 flex-1 items-center gap-2 text-sm text-neutral-300">
+						<span class="w-28 shrink-0">{ID_KIND_NAMES[row.kind] ?? row.kind}</span>
+						<input
+							type="text"
+							bind:value={row.value}
+							maxlength="64"
+							spellcheck="false"
+							placeholder={t(
+								row.kind === 'imdb' || row.kind === 'omdb'
+									? 'admin.editor_ids.placeholder_imdb'
+									: 'admin.editor_ids.placeholder_number'
+							)}
+							aria-invalid={row.value.trim() !== '' && !validProviderId(row.kind, row.value)}
+							class="min-w-0 flex-1 font-mono text-sm aria-[invalid=true]:border-red-500 {input}"
+						/>
+					</label>
+					<button
+						type="button"
+						aria-label={t('admin.editor_ids.remove', {
+							service: ID_KIND_NAMES[row.kind] ?? row.kind
+						})}
+						onclick={() => (ids = ids.filter((other) => other.kind !== row.kind))}
+						class="grid size-9 shrink-0 place-items-center rounded-md border border-neutral-700 text-neutral-300 hover:border-red-400 hover:text-red-300"
+					>
+						<Icon name="trash" class="size-4" />
+					</button>
+				</div>
+			{/each}
+		</div>
+		<div class="mt-3 flex flex-wrap items-center gap-2">
+			{#if addableKinds.length > 0}
+				<select
+					bind:value={addKind}
+					aria-label={t('admin.editor_ids.add_label')}
+					class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-black px-2 py-1.5 text-sm text-neutral-100 focus:border-gold"
+				>
+					<option value="">{t('admin.editor_ids.add_placeholder')}</option>
+					{#each addableKinds as kind (kind)}
+						<option value={kind}>{ID_KIND_NAMES[kind]}</option>
+					{/each}
+				</select>
+				<button
+					type="button"
+					disabled={!addKind}
+					onclick={addId}
+					class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-200 hover:border-gold-dim disabled:opacity-50"
+				>
+					{t('admin.editor_ids.add')}
+				</button>
+			{/if}
+			<button
+				type="button"
+				disabled={refreshing || saving || changed.length > 0 || idsChanged}
+				title={changed.length > 0 || idsChanged ? t('admin.editor_ids.refresh_save_first') : undefined}
+				onclick={fetchAgain}
+				class="ml-auto flex items-center gap-1.5 rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-200 hover:border-gold-dim disabled:opacity-50"
+			>
+				<Icon name="refresh" class="size-4" />
+				{refreshing ? t('admin.editor_ids.refreshing') : t('admin.editor_ids.refresh')}
+			</button>
+		</div>
+		{#if idsChanged}
+			<p class="mt-2 text-xs text-gold">{t('admin.editor_ids.changed_hint')}</p>
+		{/if}
+	</fieldset>
+{/snippet}
 
 {#snippet scoreAndPeople(level: 'item' | 'episode')}
 	<div class="grid gap-3 sm:grid-cols-[8rem_1fr]">
@@ -454,6 +616,7 @@
 							<textarea bind:value={overview} rows="4" class="resize-y {input}"></textarea>
 						</label>
 						{@render scoreAndPeople('item')}
+						{@render externalIds()}
 
 						<div class="grid gap-3 sm:grid-cols-2">
 							<label class="flex flex-col gap-1 text-sm text-neutral-300">
@@ -499,12 +662,12 @@
 									<input
 										type="checkbox"
 										checked={!isLocked(field)}
-										disabled={changed.includes(field)}
+										disabled={autoLocked(field)}
 										onchange={() => toggleActive(field)}
 										class="size-4 rounded border-neutral-600 bg-black accent-gold"
 									/>
 									{t(`admin.editor_field_${field}`)}
-									{#if changed.includes(field) || replaced.includes(field)}<span
+									{#if autoLocked(field) || replaced.includes(field)}<span
 											class="rounded-full bg-gold/15 px-1.5 text-[0.65rem] text-gold"
 											>{t('admin.editor_changed')}</span
 										>{/if}

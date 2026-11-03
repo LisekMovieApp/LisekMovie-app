@@ -22,6 +22,10 @@ IMDB_ID = "tt7654321"
 TMDB_ID = 7654321
 OMDB_POSTER = b"\xff\xd8\xff\xe0OMDB-POSTER-KASKADA"
 ENGLISH = "A waterfall nobody had ever seen."
+# Faza 22: another film the mock finds for a renamed title, and every
+# title search the TMDB mock received.
+ROBIN_ID = 1111
+SEARCHES = []
 
 
 def start_mock_metadata():
@@ -50,16 +54,33 @@ def start_mock_metadata():
             if path.startswith("/tmdb"):
                 path = path[len("/tmdb"):]
                 if path == "/search/movie":
+                    SEARCHES.append(query.get("query", ""))
                     found = "kaskada" in query.get("query", "").lower()
                     results = [{"id": TMDB_ID, "title": "Kaskada", "release_date": "2021-03-01",
                                 "overview": "" if polish else ENGLISH, "poster_path": None,
                                 "backdrop_path": None}] if found else []
+                    if "nowe przygody" in query.get("query", "").lower():
+                        results = [{"id": ROBIN_ID, "title": "The New Adventures of Robin Hood",
+                                    "release_date": "1997-01-01", "overview": "Robin Hood", "poster_path": None,
+                                    "backdrop_path": None}]
                     return self.reply({"page": 1, "results": results, "total_results": len(results)})
-                if path == f"/movie/{TMDB_ID}/images":
+                if path in (f"/movie/{TMDB_ID}/images", f"/movie/{ROBIN_ID}/images"):
                     return self.reply({"posters": [], "backdrops": [], "logos": []})
-                if path == f"/movie/{TMDB_ID}":
+                if path == f"/movie/{ROBIN_ID}":
                     return self.reply({
-                        "id": TMDB_ID, "title": "Kaskada", "release_date": "2021-03-01",
+                        "id": ROBIN_ID, "title": "The New Adventures of Robin Hood", "release_date": "1997-01-01",
+                        "overview": "Robin Hood", "poster_path": None, "backdrop_path": None,
+                        "belongs_to_collection": None, "genres": [{"id": 12, "name": "Adventure"}],
+                        "imdb_id": "tt1111111", "original_language": "en",
+                        "original_title": "The New Adventures of Robin Hood", "tagline": "", "runtime": 0,
+                        "production_companies": [], "release_dates": {"results": []},
+                        "credits": {"cast": [], "crew": []}, "keywords": {"keywords": []},
+                    })
+                if path == f"/movie/{TMDB_ID}":
+                    # Faza 22: no Polish title (TMDB then sends the original).
+                    return self.reply({
+                        "id": TMDB_ID, "title": "La Cascade" if polish else "The Cascade",
+                        "release_date": "2021-03-01",
                         "overview": "" if polish else ENGLISH, "poster_path": None, "backdrop_path": None,
                         "belongs_to_collection": None, "genres": [] if polish else [{"id": 18, "name": "Drama"}],
                         "imdb_id": IMDB_ID, "original_language": "fr", "original_title": "La Cascade",

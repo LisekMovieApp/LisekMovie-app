@@ -3,7 +3,7 @@
 
   Session lifecycle: `POST /api/media/{id}/playback` starts a session (the
   server picks direct play, remux or transcode for this browser). Changing
-  the audio track, the stereo mix, compatible playback or burnt-in
+  the audio track, the stereo mix, the picture quality or burnt-in
   subtitles needs a different stream, so the player asks for a new
   session at the current position while the old one keeps playing
   ("make before break"), freezes the last frame as the poster and swaps
@@ -56,7 +56,12 @@
 		recordAutoAdvance,
 		resetAutoAdvances
 	} from './nextUp';
-	import { loadPreferences, savePreferences, type SubtitleSize } from './preferences';
+	import {
+		loadPreferences,
+		savePreferences,
+		type SubtitleBackground,
+		type SubtitleSize
+	} from './preferences';
 	import { qualityLimits, type QualityId } from './quality';
 	import { SeekAccumulator } from './seek';
 	import { ProgressReporter, type MediaSnapshot } from './telemetry';
@@ -160,8 +165,10 @@
 	let subtitle = $state('');
 	let burnIn = $state(false);
 	let downmix = $state<DownmixPreference>(prefs.downmix);
-	let compatible = $state(prefs.compatible);
+	/** Faza 23: only the one-off retry after a playback error; not remembered. */
+	let compatible = $state(false);
 	let subtitleSize = $state<SubtitleSize>(prefs.subtitleSize);
+	let subtitleBackground = $state<SubtitleBackground>(prefs.subtitleBackground);
 	/** Faza 20: picture quality (a preset makes the server scale down). */
 	let quality = $state<QualityId>(prefs.quality);
 
@@ -481,11 +488,7 @@
 
 	/** `compatibleMode`: retry as the server's safest stream (H.264/AAC transcode). */
 	function retry(compatibleMode = false) {
-		if (compatibleMode) {
-			compatible = true;
-			prefs.compatible = true;
-			savePreferences(prefs);
-		}
+		if (compatibleMode) compatible = true;
 		phase = 'loading';
 		errorCode = null;
 		const position = video && mediaReady ? video.currentTime : startAt;
@@ -556,12 +559,6 @@
 		if (mode !== downmix) void reopen(() => (downmix = mode));
 	}
 
-	function chooseCompatible(value: boolean) {
-		prefs.compatible = value;
-		savePreferences(prefs);
-		void reopen(() => (compatible = value));
-	}
-
 	function chooseQuality(next: QualityId) {
 		if (next === quality) return;
 		prefs.quality = next;
@@ -577,6 +574,12 @@
 	function chooseSize(size: SubtitleSize) {
 		subtitleSize = size;
 		prefs.subtitleSize = size;
+		savePreferences(prefs);
+	}
+
+	function chooseBackground(value: SubtitleBackground) {
+		subtitleBackground = value;
+		prefs.subtitleBackground = value;
 		savePreferences(prefs);
 	}
 
@@ -1317,7 +1320,10 @@
 			aria-live="off"
 		>
 			{#each lines as line, i (i)}
-				<p class="rounded-sm bg-black/25 px-[0.35em] whitespace-pre-wrap">
+				<p
+					class="rounded-sm px-[0.35em] whitespace-pre-wrap"
+					style:background-color={`rgb(0 0 0 / ${subtitleBackground}%)`}
+				>
 					{#each line as segment, j (j)}<span
 							class:italic={segment.italic}
 							class:font-extrabold={segment.bold}
@@ -1662,17 +1668,17 @@
 			{subtitle}
 			{burnIn}
 			{downmix}
-			{compatible}
 			{subtitleSize}
+			{subtitleBackground}
 			{quality}
 			busy={switching}
 			{stats}
 			onaudio={chooseAudio}
 			onsubtitle={chooseSubtitle}
 			ondownmix={chooseDownmix}
-			oncompatible={chooseCompatible}
 			onburnin={chooseBurnIn}
 			onsize={chooseSize}
+			onbackground={chooseBackground}
 			onquality={chooseQuality}
 			onclose={closeMenu}
 		/>

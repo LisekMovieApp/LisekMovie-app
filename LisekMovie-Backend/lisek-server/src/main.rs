@@ -33,6 +33,7 @@ mod browser_notifications;
 mod openapi;
 mod metadata_cascade;
 mod metadata_enrichment;
+mod refetch;
 mod provider_registry;
 mod rate_limit;
 mod routes;

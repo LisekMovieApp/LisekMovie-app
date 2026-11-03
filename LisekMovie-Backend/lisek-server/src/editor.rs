@@ -17,6 +17,7 @@
 //! refreshes, and older media-folder files of that kind are ignored from
 //! now on (`lisek_db::editor::artwork_source`).
 
+use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::path::{Path as FsPath, PathBuf};
 use std::time::Duration;
@@ -86,6 +87,11 @@ pub struct EditorItem {
     pub episode: EpisodeContext,
     /// Changes whenever the item is saved: a cache-buster for previews.
     pub version: i64,
+    /// Faza 22: the ids the item is matched with, by kind (`tmdb` →
+    /// `"603"`, `imdb` → `"tt0133093"`).
+    pub provider_ids: BTreeMap<String, String>,
+    /// The plugin of the last match.
+    pub provider: Option<String>,
 }
 
 #[utoipa::path(get,path="/api/admin/media/{item_id}",tag="admin",params(("item_id"=Uuid,Path)),responses((status=200,body=EditorItem),(status=401),(status=403),(status=404),(status=503)),security(("lisek_auth"=[])))]
@@ -98,7 +104,8 @@ pub async fn get_item(
     let item = lisek_db::get_media_item_detail(&pool, item_id).await?.ok_or_else(not_found)?;
     let episode = db::episode_context(&pool, item_id).await?;
     let version = db::item_version(&pool, item_id).await?.unwrap_or(0);
-    Ok(Json(EditorItem { item, episode, version }))
+    let identity = lisek_db::identity::stored_identity(&pool, item_id).await?;
+    Ok(Json(EditorItem { item, episode, version, provider_ids: identity.ids, provider: identity.provider }))
 }
 
 /// What a save edits.
@@ -152,6 +159,12 @@ pub struct UpdateMediaItemRequest {
     pub episode_overview: Option<String>,
     /// `YYYY-MM-DD`.
     pub episode_air_date: Option<String>,
+    /// Faza 22: every id the item should have, by kind (`tmdb`, `tvdb`,
+    /// `imdb`, `anidb`, `anilist`, `mal`, `omdb`, `imvdb`); a kind left out
+    /// is removed. For an episode the ids of its series. Omitted: unchanged.
+    /// Changed ids are locked and the metadata is fetched again by them.
+    #[serde(default)]
+    pub provider_ids: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -161,6 +174,9 @@ pub struct UpdateMediaItemResponse {
     pub updated: u64,
     /// Fields locked automatically because this save changed them.
     pub auto_locked: Vec<String>,
+    /// Faza 22: the ids changed and the metadata was fetched again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refetched: Option<crate::refetch::RefetchSummary>,
 }
 
 fn clean(value: Option<&str>) -> Option<&str> {
@@ -216,6 +232,69 @@ fn changed_shared(
     changed
 }
 
+/// Faza 22: ids as typed, validated and trimmed (`None`: a bad one).
+fn clean_ids(ids: &BTreeMap<String, String>) -> Option<BTreeMap<String, String>> {
+    let mut out = BTreeMap::new();
+    for (kind, id) in ids {
+        let kind = kind.trim().to_ascii_lowercase();
+        let id = id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        let id = if kind == "imdb" || kind == "omdb" { id.to_ascii_lowercase() } else { id.to_owned() };
+        if !lisek_db::identity::ID_KINDS.contains(&kind.as_str()) || !lisek_db::identity::valid_id(&kind, &id) {
+            return None;
+        }
+        out.insert(kind, id);
+    }
+    Some(out)
+}
+
+/// Faza 22: after a save — writes changed ids to the item (a series: every
+/// episode), locks them and fetches the metadata again by them; or, when
+/// only other fields changed, locks the ids so a scan cannot re-identify
+/// the item. Returns the refetch summary when the ids changed.
+async fn save_identity(
+    state: &SharedState,
+    pool: &lisek_db::PgPool,
+    item_id: Uuid,
+    wanted: Option<&BTreeMap<String, String>>,
+    before: &BTreeMap<String, String>,
+    anything_changed: bool,
+) -> Result<Option<crate::refetch::RefetchSummary>, EditorError> {
+    let scope = lisek_db::identity::identity_scope(pool, item_id).await?;
+    match wanted {
+        Some(ids) if ids != before => {
+            lisek_db::identity::set_provider_ids(pool, &scope, ids).await?;
+            tracing::info!(%item_id, ?before, after = ?ids, items = scope.len(), "provider ids changed; fetching metadata again");
+            let summary = crate::refetch::refetch(state, pool, &scope).await?;
+            Ok(Some(summary))
+        }
+        _ => {
+            if anything_changed && !before.is_empty() {
+                lisek_db::identity::lock_provider_ids(pool, &scope).await?;
+            }
+            Ok(None)
+        }
+    }
+}
+
+/// Fetches an item's metadata again now (a series: every episode), by its
+/// stored ids when it has them.
+#[utoipa::path(post,path="/api/admin/media/{item_id}/refresh",tag="admin",params(("item_id"=Uuid,Path)),responses((status=200,body=crate::refetch::RefetchSummary),(status=401),(status=403),(status=404),(status=503)),security(("lisek_auth"=[])))]
+pub async fn refresh_item(
+    AdminUser(auth): AdminUser,
+    State(state): State<SharedState>,
+    Path(item_id): Path<Uuid>,
+) -> Result<Json<crate::refetch::RefetchSummary>, EditorError> {
+    let pool = pool(&state)?;
+    lisek_db::get_media_item_detail(&pool, item_id).await?.ok_or_else(not_found)?;
+    let scope = lisek_db::identity::identity_scope(&pool, item_id).await?;
+    let summary = crate::refetch::refetch(&state, &pool, &scope).await?;
+    tracing::info!(%item_id, ?summary, admin = %auth.user.username, "metadata fetched again");
+    Ok(Json(summary))
+}
+
 /// The metadata editor's save. Never gated on `locked_fields` — an
 /// administrator's own edit always applies; the locks only protect it
 /// from automatic rescans and refreshes afterwards.
@@ -229,6 +308,11 @@ pub async fn update_item(
     let pool = pool(&state)?;
     let detail = lisek_db::get_media_item_detail(&pool, item_id).await?.ok_or_else(not_found)?;
     let is_episode = detail.item_type == "episode";
+    let wanted_ids = match &req.provider_ids {
+        Some(ids) => Some(clean_ids(ids).ok_or_else(|| bad("invalid_provider_id"))?),
+        None => None,
+    };
+    let ids_before = lisek_db::identity::stored_identity(&pool, item_id).await?.ids;
     let scope = match (req.scope, is_episode) {
         (EditScope::Item, true) => EditScope::Episode,
         (EditScope::Series | EditScope::Episode, false) => return Err(bad("not_an_episode")),
@@ -277,7 +361,9 @@ pub async fn update_item(
         )
         .await?;
         tracing::info!(%item_id, admin = %auth.user.username, ?auto_locked, "episode metadata updated");
-        return Ok(Json(UpdateMediaItemResponse { ok: true, updated: 1, auto_locked }));
+        let refetched =
+            save_identity(&state, &pool, item_id, wanted_ids.as_ref(), &ids_before, !auto_locked.is_empty()).await?;
+        return Ok(Json(UpdateMediaItemResponse { ok: true, updated: 1, auto_locked, refetched }));
     }
 
     let title = req.title.as_deref().map(str::trim).unwrap_or_default();
@@ -317,6 +403,11 @@ pub async fn update_item(
     if context.directors != directors {
         auto_locked.push("directors".to_string());
     }
+    // Faza 22: any change locks the ids the item is matched with.
+    let ids_changed = wanted_ids.as_ref().is_some_and(|ids| *ids != ids_before);
+    if (!auto_locked.is_empty() || ids_changed) && (!ids_before.is_empty() || ids_changed) {
+        auto_locked.push(lisek_db::identity::PROVIDER_IDS_LOCK.to_string());
+    }
     let mut locks = req.locked_fields.clone();
     locks.extend(auto_locked.iter().cloned());
     let fields = db::SharedFields {
@@ -338,7 +429,8 @@ pub async fn update_item(
         1
     };
     tracing::info!(%item_id, ?scope, updated, admin = %auth.user.username, ?auto_locked, "media metadata updated");
-    Ok(Json(UpdateMediaItemResponse { ok: true, updated, auto_locked }))
+    let refetched = save_identity(&state, &pool, item_id, wanted_ids.as_ref(), &ids_before, false).await?;
+    Ok(Json(UpdateMediaItemResponse { ok: true, updated, auto_locked, refetched }))
 }
 
 // ---- Artwork -----------------------------------------------------------------
@@ -569,6 +661,8 @@ pub async fn set_artwork(
     // this moment no longer counts, the one written below does.
     let at = chrono::Utc::now().timestamp_millis();
     db::record_artwork_override(&pool, &ids, kind.name(), at).await?;
+    // Faza 22: a replaced picture also keeps the item's identity.
+    lisek_db::identity::lock_provider_ids(&pool, &lisek_db::identity::identity_scope(&pool, item_id).await?).await?;
     let config = crate::state::config_dir();
     let mut written = 0usize;
     for (n, id) in ids.iter().enumerate() {
@@ -649,8 +743,11 @@ pub async fn update_season(
         &db::SeasonFields { name, overview, air_year: req.air_year, locked_fields: &locks },
     )
     .await?;
+    if !auto_locked.is_empty() {
+        lisek_db::identity::lock_provider_ids(&pool, &lisek_db::identity::identity_scope(&pool, item_id).await?).await?;
+    }
     tracing::info!(series = %before.series_id, season, admin = %auth.user.username, ?auto_locked, "season metadata updated");
-    Ok(Json(UpdateMediaItemResponse { ok: true, updated: 1, auto_locked }))
+    Ok(Json(UpdateMediaItemResponse { ok: true, updated: 1, auto_locked, refetched: None }))
 }
 
 /// Replaces a season's poster (raw picture or JSON `{url}`).
@@ -675,6 +772,7 @@ pub async fn set_season_poster(
     let cache = layout::season_poster_cache_path(&crate::state::config_dir(), &detail.series_id.to_string(), season);
     let at = chrono::Utc::now().timestamp_millis();
     db::record_season_poster(&pool, detail.series_id, season, at).await?;
+    lisek_db::identity::lock_provider_ids(&pool, &lisek_db::identity::identity_scope(&pool, item_id).await?).await?;
     store_image(&picture, media_dest.as_deref(), &cache).await.map_err(|e| {
         tracing::error!(error = %e, season, "saving a season poster failed");
         EditorError(StatusCode::INTERNAL_SERVER_ERROR, "artwork_save_failed")

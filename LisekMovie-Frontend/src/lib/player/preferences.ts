@@ -1,6 +1,8 @@
 /**
  * The viewer's player choices that should outlive one video: volume,
- * stereo mix, compatible playback, subtitle language and size. Kept per
+ * stereo mix, subtitle language, size and background, picture quality.
+ * Faza 23: compatible playback is no longer remembered (the quality
+ * presets replace it; it stays a one-off retry after an error). Kept per
  * browser in `localStorage`; a private window or blocked storage just
  * means defaults.
  */
@@ -8,15 +10,18 @@ import type { DownmixPreference } from '$lib/playback/api';
 import { isQualityId, type QualityId } from './quality';
 
 export type SubtitleSize = 'small' | 'medium' | 'large';
+/** Faza 23: opacity of the black box behind subtitles, in percent. */
+export type SubtitleBackground = 0 | 25 | 50 | 75 | 100;
+export const SUBTITLE_BACKGROUNDS: readonly SubtitleBackground[] = [0, 25, 50, 75, 100];
 
 export interface PlayerPreferences {
 	volume: number;
 	muted: boolean;
 	downmix: DownmixPreference;
-	compatible: boolean;
 	/** Language of the last subtitle picked; `''` = subtitles off; `null` = server default. */
 	subtitleLanguage: string | null;
 	subtitleSize: SubtitleSize;
+	subtitleBackground: SubtitleBackground;
 	/** Faza 20: picture quality picked in the player. */
 	quality: QualityId;
 }
@@ -27,9 +32,9 @@ export const DEFAULT_PREFERENCES: PlayerPreferences = {
 	volume: 1,
 	muted: false,
 	downmix: 'auto',
-	compatible: false,
 	subtitleLanguage: null,
 	subtitleSize: 'medium',
+	subtitleBackground: 25,
 	quality: 'original'
 };
 
@@ -53,7 +58,6 @@ export function parsePreferences(raw: string | null): PlayerPreferences {
 		downmix: DOWNMIX.includes(data.downmix as DownmixPreference)
 			? (data.downmix as DownmixPreference)
 			: 'auto',
-		compatible: data.compatible === true,
 		subtitleLanguage:
 			typeof data.subtitleLanguage === 'string' && data.subtitleLanguage.length <= 16
 				? data.subtitleLanguage
@@ -61,6 +65,9 @@ export function parsePreferences(raw: string | null): PlayerPreferences {
 		subtitleSize: SIZES.includes(data.subtitleSize as SubtitleSize)
 			? (data.subtitleSize as SubtitleSize)
 			: 'medium',
+		subtitleBackground: SUBTITLE_BACKGROUNDS.includes(data.subtitleBackground as SubtitleBackground)
+			? (data.subtitleBackground as SubtitleBackground)
+			: 25,
 		quality: isQualityId(data.quality) ? data.quality : 'original'
 	};
 }

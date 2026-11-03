@@ -1,6 +1,9 @@
 <!--
   The player's side panel: audio and subtitles side by side (the VOD
-  layout), or playback settings with technical details. Choices are
+  layout), or playback settings with technical details. Faza 23: the
+  picture quality lives in the settings (only qualities below the file's
+  own height are offered), next to the subtitle size and the opacity of
+  the box behind subtitles; compatible playback is no longer a setting. Choices are
   reported up; the player decides whether they switch in place or start
   a new session. Works with a remote: it is a navigation scope, opens on
   the selected option and Back closes it (handled by the player).
@@ -22,8 +25,8 @@
 	import { navGroup, navScope } from '$lib/spatial/spatial';
 	import type { DownmixPreference, PlaybackSession } from '$lib/playback/api';
 	import { audioTrackLabel, subtitleTrackLabel } from './labels';
-	import type { SubtitleSize } from './preferences';
-	import { QUALITIES, type QualityId } from './quality';
+	import { SUBTITLE_BACKGROUNDS, type SubtitleBackground, type SubtitleSize } from './preferences';
+	import { availableQualities, effectiveQuality, type QualityId } from './quality';
 
 	interface Props {
 		view: 'tracks' | 'settings';
@@ -32,8 +35,9 @@
 		subtitle: string;
 		burnIn: boolean;
 		downmix: DownmixPreference;
-		compatible: boolean;
 		subtitleSize: SubtitleSize;
+		/** Faza 23: opacity of the box behind subtitles (%). */
+		subtitleBackground: SubtitleBackground;
 		/** Faza 20: picture quality. */
 		quality: QualityId;
 		busy: boolean;
@@ -41,9 +45,9 @@
 		onaudio: (index: number) => void;
 		onsubtitle: (id: string) => void;
 		ondownmix: (mode: DownmixPreference) => void;
-		oncompatible: (value: boolean) => void;
 		onburnin: (value: boolean) => void;
 		onsize: (size: SubtitleSize) => void;
+		onbackground: (value: SubtitleBackground) => void;
 		onquality: (quality: QualityId) => void;
 		onclose: () => void;
 	}
@@ -55,17 +59,17 @@
 		subtitle,
 		burnIn,
 		downmix,
-		compatible,
 		subtitleSize,
+		subtitleBackground,
 		quality,
 		busy,
 		stats,
 		onaudio,
 		onsubtitle,
 		ondownmix,
-		oncompatible,
 		onburnin,
 		onsize,
+		onbackground,
 		onquality,
 		onclose
 	}: Props = $props();
@@ -74,6 +78,8 @@
 	const SIZES: SubtitleSize[] = ['small', 'medium', 'large'];
 
 	const locale = $derived(getLocale());
+	const qualities = $derived(availableQualities(session.source_height));
+	const chosenQuality = $derived(effectiveQuality(quality, session.source_height));
 	const reduced =
 		typeof window !== 'undefined' &&
 		window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -211,20 +217,23 @@
 						{/each}
 					</div>
 				</section>
-				<section use:navGroup class="md:col-span-2">
+			</div>
+		{:else}
+			<div class="grid gap-5">
+				<section use:navGroup>
 					<h3 class={heading}>{t('player.stream_quality')}</h3>
-					<p class="mb-2 px-3 text-xs text-neutral-500">{t('player.stream_quality_hint')}</p>
 					<div
 						role="radiogroup"
 						aria-label={t('player.stream_quality')}
-						class="grid grid-cols-2 gap-1 sm:grid-cols-3 md:grid-cols-5"
+						class="grid grid-cols-2 gap-1 px-3 sm:grid-cols-4"
 					>
-						{#each QUALITIES as option (option.id)}
-							{@const on = quality === option.id}
+						{#each qualities as option (option.id)}
+							{@const on = chosenQuality === option.id}
 							<button
 								type="button"
 								role="radio"
 								aria-checked={on}
+								data-nav-default={on ? '' : undefined}
 								class="flex flex-col items-start rounded-lg px-3 py-2 text-left ring-1 transition-colors focus-visible:bg-white/15 {on
 									? 'bg-white/10 text-white ring-gold'
 									: 'ring-white/10 hover:bg-white/10'}"
@@ -242,9 +251,7 @@
 						{/each}
 					</div>
 				</section>
-			</div>
-		{:else}
-			<div class="grid gap-5">
+
 				<section use:navGroup>
 					<h3 class={heading}>{t('player.downmix')}</h3>
 					<p class="mb-2 px-3 text-xs text-neutral-500">{t('player.downmix_hint')}</p>
@@ -255,7 +262,6 @@
 								role="radio"
 								aria-checked={downmix === mode}
 								class={option}
-								data-nav-default={downmix === mode ? '' : undefined}
 								onclick={() => ondownmix(mode)}
 							>
 								{@render check(downmix === mode)}
@@ -292,8 +298,42 @@
 					</div>
 				</section>
 
+				<section use:navGroup>
+					<h3 class={heading}>{t('player.subtitle_background')}</h3>
+					<div
+						role="radiogroup"
+						aria-label={t('player.subtitle_background')}
+						class="grid grid-cols-5 gap-2 px-3"
+					>
+						{#each SUBTITLE_BACKGROUNDS as value (value)}
+							{@const on = subtitleBackground === value}
+							<button
+								type="button"
+								role="radio"
+								aria-checked={on}
+								aria-label={t('player.subtitle_background_value', { value: String(value) })}
+								class="flex flex-col items-center gap-1 rounded-lg py-2 text-xs ring-1 transition-colors focus-visible:bg-white/15 {on
+									? 'text-white ring-gold'
+									: 'ring-white/20 hover:bg-white/10'}"
+								onclick={() => onbackground(value)}
+							>
+								<span
+									aria-hidden="true"
+									class="rounded-sm bg-neutral-500 bg-[repeating-linear-gradient(45deg,rgb(255_255_255/0.25)_0_4px,transparent_4px_8px)] p-1"
+								>
+									<span
+										class="block rounded-[2px] px-1.5 text-sm font-semibold text-white [text-shadow:0_0_3px_rgb(0_0_0/0.9)]"
+										style:background-color={`rgb(0 0 0 / ${value}%)`}
+										>{t('player.subtitle_sample')}</span
+									>
+								</span>
+								<span class="tabular-nums">{t('player.percent', { value: String(value) })}</span>
+							</button>
+						{/each}
+					</div>
+				</section>
+
 				<section use:navGroup class="grid">
-					{@render toggle(t('player.compatible'), compatible, oncompatible)}
 					{@render toggle(t('player.burn_in'), burnIn, onburnin)}
 				</section>
 

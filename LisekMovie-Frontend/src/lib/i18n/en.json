@@ -302,7 +302,8 @@
 			"artwork_empty": "The file is empty.",
 			"artwork_failed": "The picture could not be saved. Try again.",
 			"invalid_rating": "The rating must be a number from 0 to 10.",
-			"invalid_input": "A value is too long or not valid."
+			"invalid_input": "A value is too long or not valid.",
+			"invalid_provider_id": "An id does not look right (IMDb: tt followed by digits; TMDB, TheTVDB, aniDB, AniList: a number)."
 		},
 		"editor_art": {
 			"poster": "Poster",
@@ -384,6 +385,23 @@
 			"lang_zh": "Chinese",
 			"lang_original": "Original language (country of production)",
 			"lang_any": "Any other"
+		},
+		"editor_field_provider_ids": "External ids",
+		"editor_ids": {
+			"title": "External ids",
+			"hint": "The ids this title is matched with. Scans ask the plugins by these ids only, never by the title, so a renamed title stays itself. Changed ids are saved, locked and the metadata is fetched again from them.",
+			"none": "No ids yet — the next scan searches by the file name.",
+			"placeholder_imdb": "e.g. tt0133093",
+			"placeholder_number": "e.g. 603",
+			"remove": "Remove the {service} id",
+			"add_label": "Add an id",
+			"add_placeholder": "Add an id…",
+			"add": "Add",
+			"refresh": "Fetch again",
+			"refreshing": "Fetching…",
+			"refresh_save_first": "Save your changes first.",
+			"refetched": "Metadata fetched again: {matched} of {items} matched.",
+			"changed_hint": "The ids changed: saving fetches the metadata again from them."
 		}
 	},
 	"errors": {
@@ -422,7 +440,6 @@
 		"user": "User",
 		"plays": "Plays",
 		"minutes": "Minutes watched",
-		"compatible": "Use compatible playback (720p)",
 		"safety": "Playback limits",
 		"safety_hint": "These limits apply to conversion of the source video. Direct playback remains available.",
 		"safety_enabled": "Protect the server from demanding conversions",
@@ -542,15 +559,19 @@
 		"episode_range": "S{season}:E{episode}-E{end}",
 		"ends_at": "Ends at {time}",
 		"stream_quality": "Quality",
-		"stream_quality_hint": "A lower quality makes the server scale the video down, so older computers and slow connections play smoothly.",
 		"stream_quality_original_hint": "best for this device",
 		"stream_qualities": {
 			"original": "Original",
+			"1440p": "1440p",
 			"1080p": "1080p",
 			"720p": "720p",
 			"480p": "480p",
-			"360p": "360p"
-		}
+			"360p": "360p",
+			"144p": "144p"
+		},
+		"subtitle_background": "Subtitle background",
+		"subtitle_background_value": "Background {value}%",
+		"percent": "{value}%"
 	},
 	"games": {
 		"title": "Flappy Fox",

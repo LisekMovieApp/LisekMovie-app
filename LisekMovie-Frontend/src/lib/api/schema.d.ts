@@ -402,6 +402,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/media/{item_id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fetches an item's metadata again now (a series: every episode), by its
+         *     stored ids when it has them.
+         */
+        post: operations["refresh_item"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/media/{item_id}/seasons/{season}": {
         parameters: {
             query?: never;
@@ -2597,6 +2617,15 @@ export interface components {
          *     episode side, and a version for the artwork previews.
          */
         EditorItem: components["schemas"]["MediaItemDetail"] & components["schemas"]["EpisodeContext"] & {
+            /** @description The plugin of the last match. */
+            provider?: string | null;
+            /**
+             * @description Faza 22: the ids the item is matched with, by kind (`tmdb` →
+             *     `"603"`, `imdb` → `"tt0133093"`).
+             */
+            provider_ids: {
+                [key: string]: string;
+            };
             /**
              * Format: int64
              * @description Changes whenever the item is saved: a cache-buster for previews.
@@ -3760,6 +3789,13 @@ export interface components {
             library_type: string;
             name: string;
         };
+        /** @description What one refetch did. */
+        RefetchSummary: {
+            /** @description Items asked for (a series counts every episode). */
+            items: number;
+            /** @description Items a plugin answered for. */
+            matched: number;
+        };
         ResetPassword: {
             password?: string | null;
         };
@@ -4113,6 +4149,12 @@ export interface components {
             selected_subtitle?: string | null;
             /** Format: uuid */
             session_id: string;
+            /**
+             * Format: int32
+             * @description Faza 23: the file's picture height (FFprobe), so the player offers
+             *     only qualities below it (no upscaling). `None`: unknown (live TV).
+             */
+            source_height?: number | null;
             /** @description The file (direct play) or the HLS master playlist. */
             stream_url: string;
             subtitle_delivery?: null | components["schemas"]["SubtitleDelivery"];
@@ -4413,6 +4455,15 @@ export interface components {
             original_title?: string | null;
             overview?: string | null;
             /**
+             * @description Faza 22: every id the item should have, by kind (`tmdb`, `tvdb`,
+             *     `imdb`, `anidb`, `anilist`, `mal`, `omdb`, `imvdb`); a kind left out
+             *     is removed. For an episode the ids of its series. Omitted: unchanged.
+             *     Changed ids are locked and the metadata is fetched again by them.
+             */
+            provider_ids?: {
+                [key: string]: string;
+            } | null;
+            /**
              * Format: double
              * @description Faza 21: 0–10 (detail page stars); null clears it; omitted: unchanged.
              */
@@ -4427,6 +4478,7 @@ export interface components {
             /** @description Fields locked automatically because this save changed them. */
             auto_locked: string[];
             ok: boolean;
+            refetched?: null | components["schemas"]["RefetchSummary"];
             /**
              * Format: int64
              * @description Items written (a series counts every episode).
@@ -5648,6 +5700,51 @@ export interface operations {
                 content?: never;
             };
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    refresh_item: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefetchSummary"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

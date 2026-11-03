@@ -42,6 +42,8 @@ pub const CASCADE_FIELDS: &[&str] = &[
     "rating",
     "runtime_minutes",
     "original_title",
+    // Faza 22: a title for sorting ("Matrix, The"), when a plugin has one.
+    "sort_title",
     "original_language",
     "studios",
     "tags",
@@ -270,6 +272,86 @@ pub fn fill_text(base: &mut ProviderMatch, other: &ProviderMatch, language: &str
         }
     }
     any
+}
+
+/// Faza 22: the match's title is not in `language` — the plugin fell back
+/// to the production's own title (TMDB does for a missing translation):
+/// it is the original title and the original language is another one.
+pub fn untranslated_title(matched: &ProviderMatch, language: &str) -> bool {
+    let (Some(title), Some(original)) = (
+        matched.fields.get("title").and_then(Value::as_str),
+        matched.fields.get("original_title").and_then(Value::as_str),
+    ) else {
+        return false;
+    };
+    let Some(original_language) = original_language(matched) else {
+        return false;
+    };
+    let wanted = language.split('-').next().unwrap_or(language);
+    original_language != wanted && title.trim() == original.trim() && !title.trim().is_empty()
+}
+
+/// A translated title from `other`: non-empty and not the original title.
+fn translated_title(other: &ProviderMatch, original: Option<&str>) -> Option<Value> {
+    let title = other.fields.get("title").and_then(Value::as_str)?.trim();
+    if title.is_empty() || original.is_some_and(|o| o.trim() == title) {
+        return None;
+    }
+    Some(Value::String(title.to_owned()))
+}
+
+/// Faza 22, language chain: `base`'s title fell back to the original
+/// ([`untranslated_title`]); `other` (the same title fetched in `language`)
+/// has a translated one, which replaces it. Returns whether it did.
+pub fn replace_untranslated_title(base: &mut ProviderMatch, other: &ProviderMatch, language: &str) -> bool {
+    let original = base.fields.get("original_title").and_then(Value::as_str).map(str::to_owned);
+    let Some(title) = translated_title(other, original.as_deref()) else {
+        return false;
+    };
+    set_field(&mut base.fields, "title", title);
+    note(&mut base.fields, "language_from", "title", language);
+    true
+}
+
+/// Faza 22: whether `matched` lacks a title in `language`: it sends a
+/// title that is empty or only the untranslated original.
+pub fn needs_local_title(matched: &ProviderMatch, language: &str) -> bool {
+    matched.fields.get("title").is_some_and(|t| blank(Some(t))) || untranslated_title(matched, language)
+}
+
+/// Faza 22, provider cascade: when `primary` has no title in `language`
+/// ([`needs_local_title`]), a translated one from `other` (another plugin,
+/// the same production) takes its place. Returns whether it did.
+pub fn fill_title(primary: &mut ProviderMatch, other: &ProviderMatch, source: &str, language: &str) -> bool {
+    if !needs_local_title(primary, language) {
+        return false;
+    }
+    let original = primary
+        .fields
+        .get("original_title")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let Some(title) = translated_title(other, original.as_deref()) else {
+        return false;
+    };
+    set_field(&mut primary.fields, "title", title);
+    note(&mut primary.fields, "filled_from", "title", source);
+    true
+}
+
+/// Faza 22: the ids an administrator set are the only ones kept: every
+/// `<kind>_id` the plugins sent is replaced by `stored`.
+pub fn enforce_ids(matched: &mut ProviderMatch, stored: &std::collections::BTreeMap<String, String>) {
+    if !matched.fields.is_object() {
+        matched.fields = Value::Object(Map::new());
+    }
+    let object = matched.fields.as_object_mut().expect("object");
+    for kind in lisek_db::identity::ID_KINDS {
+        object.remove(&format!("{kind}_id"));
+    }
+    for (kind, id) in stored {
+        object.insert(format!("{kind}_id"), lisek_db::identity::id_value(kind, id));
+    }
 }
 
 /// The last resort of `any`: an empty title becomes the original title.
@@ -528,6 +610,55 @@ mod tests {
         assert_eq!(primary.seasons[0].name.as_deref(), Some("Season 1"));
         assert_eq!(primary.seasons[0].overview.as_deref(), Some("Walter..."));
         assert!(missing_key_fields(&primary).is_empty());
+    }
+
+    #[test]
+    fn a_title_that_fell_back_to_the_original_is_not_a_local_one() {
+        let tmdb = matched(json!({
+            "title": "Sen to Chihiro no Kamikakushi", "original_title": "Sen to Chihiro no Kamikakushi",
+            "original_language": "ja"
+        }));
+        assert!(untranslated_title(&tmdb, "pl"));
+        assert!(!untranslated_title(&tmdb, "ja"));
+        assert!(needs_local_title(&tmdb, "pl-PL"));
+        assert!(!needs_local_title(&matched(json!({"overview": "x"})), "pl"), "no title sent: the scanner's stays");
+        assert!(needs_local_title(&matched(json!({"title": ""})), "pl"));
+
+        // The next language has a translation.
+        let mut base = tmdb.clone();
+        assert!(!replace_untranslated_title(&mut base, &tmdb, "en"));
+        let english = matched(json!({"title": "Spirited Away"}));
+        assert!(replace_untranslated_title(&mut base, &english, "en"));
+        assert_eq!(base.fields["title"], "Spirited Away");
+        assert_eq!(base.fields["language_from"]["title"], "en");
+
+        // Another plugin has a Polish one.
+        let mut primary = tmdb.clone();
+        let tvdb = matched(json!({"title": "Spirited Away: W krainie bogów"}));
+        assert!(fill_title(&mut primary, &tvdb, "tvdb", "pl"));
+        assert_eq!(primary.fields["title"], "Spirited Away: W krainie bogów");
+        assert_eq!(primary.fields["filled_from"]["title"], "tvdb");
+        assert!(!fill_title(&mut primary, &english, "omdb", "pl"), "a local title is kept");
+    }
+
+    #[test]
+    fn sort_title_and_original_title_come_from_the_next_plugin() {
+        let mut primary = matched(json!({"title": "Matrix", "overview": "x", "genres": ["Sci-Fi"]}));
+        primary.poster_url = Some("p".into());
+        let other = matched(json!({"original_title": "The Matrix", "sort_title": "Matrix, The"}));
+        let filled = fill_from(&mut primary, &other, "anilist");
+        assert_eq!(filled, vec!["original_title", "sort_title"]);
+        assert_eq!(primary.fields["sort_title"], "Matrix, The");
+    }
+
+    #[test]
+    fn stored_ids_replace_the_ones_a_plugin_sent() {
+        let mut m = matched(json!({"tmdb_id": 999, "imdb_id": "tt9999999", "tvdb_id": 1, "overview": "x"}));
+        let stored = std::collections::BTreeMap::from([("tmdb".to_owned(), "603".to_owned())]);
+        enforce_ids(&mut m, &stored);
+        assert_eq!(m.fields["tmdb_id"], 603);
+        assert!(m.fields.get("imdb_id").is_none() && m.fields.get("tvdb_id").is_none());
+        assert_eq!(m.fields["overview"], "x");
     }
 
     #[test]

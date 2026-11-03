@@ -396,6 +396,11 @@ pub async fn identify(
         }
     }
     metadata_enrichment::prune_collections(&pool, &config).await;
+    // Faza 22: the administrator picked this production: later scans ask
+    // for it by these ids only and keep them.
+    if let Err(err) = lisek_db::identity::lock_provider_ids(&pool, &items).await {
+        tracing::warn!(%item_id, %err, "fix match: cannot lock the ids");
+    }
 
     if unsaved > 0 {
         tracing::error!(%item_id, provider = req.provider, unsaved, "fix match: provider data not saved");

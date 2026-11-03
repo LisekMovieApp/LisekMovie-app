@@ -83,6 +83,54 @@ describe('MediaItemEditorModal', () => {
 		expect(onSaved).toHaveBeenCalled();
 	});
 
+	it('changes the ids of a film and locks them with any edit (Faza 22)', async () => {
+		fetchMediaItem.mockResolvedValue({
+			...episode,
+			id: 'm1',
+			item_type: 'movie',
+			title: 'Różowa Pantera',
+			season: null,
+			episode: null,
+			series_id: null,
+			series_title: null,
+			provider_ids: { tmdb: '936', imdb: 'tt0057413' },
+			provider: 'tmdb'
+		});
+		updateMediaItem.mockResolvedValue({
+			ok: true,
+			updated: 1,
+			auto_locked: ['provider_ids'],
+			refetched: { items: 1, matched: 1 }
+		});
+		render(MediaItemEditorModal, {
+			itemId: 'm1',
+			providers: [],
+			onClose: vi.fn(),
+			onSaved: vi.fn()
+		});
+		await wait();
+		const tmdb = screen.getByRole('textbox', { name: 'TMDB' }) as HTMLInputElement;
+		expect(tmdb.value).toBe('936');
+		const idsLock = screen.getByRole('checkbox', { name: /External ids/ }) as HTMLInputElement;
+		expect(idsLock.checked).toBe(true);
+		// Renamed: the ids are locked automatically.
+		await fireEvent.input(screen.getByRole('textbox', { name: 'Title' }), {
+			target: { value: 'Nowe Przygody Różowej Pantery' }
+		});
+		expect(idsLock.checked).toBe(false);
+		await fireEvent.click(screen.getByRole('button', { name: 'Remove the IMDb id' }));
+		await fireEvent.input(tmdb, { target: { value: 'abc' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		await wait();
+		expect(updateMediaItem).not.toHaveBeenCalled();
+		await fireEvent.input(tmdb, { target: { value: '12345' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+		await wait();
+		const [, , payload] = updateMediaItem.mock.calls[0];
+		expect(payload.provider_ids).toEqual({ tmdb: '12345' });
+		expect(payload.locked_fields).toEqual(['title', 'provider_ids']);
+	});
+
 	it('edits an episode score and directors (Faza 21)', async () => {
 		fetchMediaItem.mockResolvedValue({
 			...episode,

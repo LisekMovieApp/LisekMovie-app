@@ -117,6 +117,14 @@ describe('preferences and labels', () => {
 		});
 	});
 
+	it('keeps the subtitle background and forgets compatible playback (Faza 23)', () => {
+		expect(parsePreferences(null).subtitleBackground).toBe(25);
+		expect(parsePreferences('{"subtitleBackground":75}').subtitleBackground).toBe(75);
+		expect(parsePreferences('{"subtitleBackground":0}').subtitleBackground).toBe(0);
+		expect(parsePreferences('{"subtitleBackground":33}').subtitleBackground).toBe(25);
+		expect(parsePreferences('{"compatible":true}')).not.toHaveProperty('compatible');
+	});
+
 	it('names tracks in the viewer language', () => {
 		expect(languageName('pol', 'pl')).toBe('Polski');
 		expect(languageName('ger', 'en')).toBe('German');

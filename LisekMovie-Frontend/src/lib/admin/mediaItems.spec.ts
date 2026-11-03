@@ -11,7 +11,11 @@ import {
 	updateSeason,
 	setSeasonPoster,
 	parseNames,
-	parseRating
+	parseRating,
+	normalizeIds,
+	refreshMetadata,
+	sameIds,
+	validProviderId
 } from './mediaItems';
 import { AdminApiError } from './api';
 
@@ -227,5 +231,32 @@ describe('score and directors fields (Faza 21)', () => {
 			'Anna Kamera'
 		]);
 		expect(parseNames('')).toEqual([]);
+	});
+});
+
+describe('external ids (Faza 22)', () => {
+	it('checks ids per service', () => {
+		expect(validProviderId('imdb', 'tt0133093')).toBe(true);
+		expect(validProviderId('imdb', '0133093')).toBe(false);
+		expect(validProviderId('tmdb', ' 603 ')).toBe(true);
+		expect(validProviderId('tmdb', '0')).toBe(false);
+		expect(validProviderId('tvdb', '12a')).toBe(false);
+		expect(validProviderId('netflix', '1')).toBe(false);
+	});
+
+	it('compares ids the way the server stores them', () => {
+		expect(normalizeIds({ tmdb: ' 603 ', imdb: 'TT0133093', tvdb: ' ' })).toEqual({
+			imdb: 'tt0133093',
+			tmdb: '603'
+		});
+		expect(sameIds({ tmdb: '603', imdb: 'tt1' }, { imdb: 'TT1', tmdb: '603 ' })).toBe(true);
+		expect(sameIds({ tmdb: '603' }, { tmdb: '604' })).toBe(false);
+	});
+
+	it('fetches an item again', async () => {
+		const fetchMock = stubFetch({ ok: true, json: () => Promise.resolve({ items: 3, matched: 3 }) });
+		expect(await refreshMetadata('tok', 'ep-1')).toEqual({ items: 3, matched: 3 });
+		expect(fetchMock.mock.calls[0][0]).toBe('/api/admin/media/ep-1/refresh');
+		expect(fetchMock.mock.calls[0][1].method).toBe('POST');
 	});
 });

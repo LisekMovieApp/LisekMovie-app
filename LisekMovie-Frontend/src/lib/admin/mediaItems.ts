@@ -60,6 +60,10 @@ export interface MediaItemDetail {
 	episode_directors?: string[];
 	/** Cache-buster for artwork previews. */
 	version?: number;
+	/** Faza 22: the ids the item is matched with, by kind (`tmdb` → `603`). */
+	provider_ids?: Record<string, string>;
+	/** The plugin of the last match. */
+	provider?: string | null;
 }
 
 /** What a save edits: a film itself, a whole series, or one episode. */
@@ -89,6 +93,17 @@ export interface UpdateMediaItemPayload {
 	directors?: string[];
 	episode_rating?: number | null;
 	episode_directors?: string[];
+	/** Faza 22: every id the item should have (a kind left out is removed);
+	 * omitted: unchanged. Changed ids are locked and fetched again. */
+	provider_ids?: Record<string, string>;
+}
+
+/** Faza 22: what fetching an item's metadata again did. */
+export interface RefetchSummary {
+	/** Items asked for (a series counts every episode). */
+	items: number;
+	/** Items a plugin answered for. */
+	matched: number;
 }
 
 export interface UpdateMediaItemResult {
@@ -96,6 +111,64 @@ export interface UpdateMediaItemResult {
 	updated: number;
 	/** Fields the server locked because this save changed them. */
 	auto_locked: string[];
+	/** Faza 22: the ids changed and the metadata was fetched again. */
+	refetched?: RefetchSummary;
+}
+
+/** Faza 22: id kinds the editor offers, with the services' own names. */
+export const ID_KINDS = [
+	'tmdb',
+	'tvdb',
+	'imdb',
+	'anidb',
+	'anilist',
+	'mal',
+	'omdb',
+	'imvdb'
+] as const;
+export const ID_KIND_NAMES: Record<string, string> = {
+	tmdb: 'TMDB',
+	tvdb: 'TheTVDB',
+	imdb: 'IMDb',
+	anidb: 'aniDB',
+	anilist: 'AniList',
+	mal: 'MyAnimeList',
+	omdb: 'OMDb',
+	imvdb: 'IMVDb'
+};
+const NUMERIC_KINDS = new Set(['tmdb', 'tvdb', 'anidb', 'anilist', 'mal']);
+
+/** Whether `id` looks like an id of `kind` (the server checks it again). */
+export function validProviderId(kind: string, id: string): boolean {
+	const value = id.trim();
+	if (kind === 'imdb' || kind === 'omdb') return /^tt\d{3,10}$/i.test(value);
+	if (NUMERIC_KINDS.has(kind)) return /^\d{1,12}$/.test(value) && Number(value) > 0;
+	if (kind === 'imvdb') return /^[A-Za-z0-9._-]{1,64}$/.test(value);
+	return false;
+}
+
+/** Ids as the server compares them: trimmed, empty ones left out. */
+export function normalizeIds(ids: Record<string, string>): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const kind of Object.keys(ids).sort()) {
+		const value = ids[kind].trim();
+		if (value) out[kind] = kind === 'imdb' || kind === 'omdb' ? value.toLowerCase() : value;
+	}
+	return out;
+}
+
+export function sameIds(a: Record<string, string>, b: Record<string, string>): boolean {
+	return JSON.stringify(normalizeIds(a)) === JSON.stringify(normalizeIds(b));
+}
+
+/** Faza 22: fetches an item's metadata again now (a series: every episode). */
+export async function refreshMetadata(token: string, itemId: string): Promise<RefetchSummary> {
+	const response = await fetch(`/api/admin/media/${encodeURIComponent(itemId)}/refresh`, {
+		method: 'POST',
+		headers: buildAuthHeader(token)
+	});
+	await assertOk(response);
+	return (await response.json()) as RefetchSummary;
 }
 
 /** One item currently flagged `metadata_fallback` — the fallback warning
@@ -262,6 +335,7 @@ export function editorErrorKey(error: unknown, fallback = 'admin.editor_save_fai
 		'invalid_year',
 		'invalid_rating',
 		'invalid_input',
+		'invalid_provider_id',
 		'invalid_air_date',
 		'not_an_episode',
 		'artwork_invalid_image',

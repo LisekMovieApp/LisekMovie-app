@@ -164,6 +164,7 @@ fn admin() -> OpenApiRouter<SharedState> {
         ))
         .routes(routes!(editor::get_item, editor::update_item))
         .routes(routes!(editor::set_artwork))
+        .routes(routes!(editor::refresh_item))
         .routes(routes!(editor::get_season, editor::update_season))
         .routes(routes!(editor::set_season_poster))
         .routes(routes!(admin::migrate_fallback_item))

@@ -29,6 +29,8 @@ pub const SERIES_LEVEL_FIELDS: &[&str] = &[
     "logo",
     "rating",
     "directors",
+    // Faza 22: the ids the item is matched with (`identity::PROVIDER_IDS_LOCK`).
+    "provider_ids",
 ];
 /// Lock names of one episode's own fields.
 pub const EPISODE_LEVEL_FIELDS: &[&str] = &[

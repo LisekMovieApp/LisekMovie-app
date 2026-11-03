@@ -1,7 +1,8 @@
 <!--
   "Informacje" about one episode (Faza 10): its still, title, runtime,
   score, end time and synopsis, and the same Wideo / Dźwięk / Napisy picks
-  as a film page — "Play" starts the episode right away with them. A
+  as a film page — "Play" starts the episode right away with them. Faza 23:
+  the episode's scenes (chapters) too — the only place a series shows them. A
   spatial-navigation scope while open; Escape, Back or a click outside
   closes it.
 -->
@@ -22,6 +23,7 @@
 	import { loadPreferences } from '$lib/player/preferences';
 	import { navScope } from '$lib/spatial/spatial';
 	import Icon from './Icon.svelte';
+	import ScenesRow from './ScenesRow.svelte';
 	import StreamPicker from './StreamPicker.svelte';
 
 	interface Props {
@@ -172,6 +174,18 @@
 				</a>
 				<!-- eslint-enable svelte/no-navigation-without-resolve -->
 			</div>
+
+			{#if details && details.chapters.length > 0}
+				<div class="-mx-5 md:-mx-6">
+					<ScenesRow
+						chapters={details.chapters}
+						{token}
+						hrefFor={(seconds) =>
+							resolve('/watch/[id]', { id: episode.id }) +
+							watchQuery({ audio, subtitle, start: seconds })}
+					/>
+				</div>
+			{/if}
 		</div>
 	</div>
 </div>

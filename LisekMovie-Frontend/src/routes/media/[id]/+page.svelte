@@ -578,7 +578,9 @@
 
 		<div class="mt-10">
 			<CastRow {credits} {token} />
-			{#if details}
+			<!-- Faza 23: scenes belong to one file — a film's page, or an
+			     episode's "Informacje" (EpisodeInfoModal); never a series. -->
+			{#if details && item.item_type !== 'series'}
 				<ScenesRow chapters={details.chapters} {token} hrefFor={(seconds) => watchHref(seconds)} />
 			{/if}
 		</div>

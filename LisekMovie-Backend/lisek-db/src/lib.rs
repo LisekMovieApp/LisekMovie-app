@@ -27,6 +27,7 @@ pub mod collections;
 pub mod editor;
 pub mod episodes;
 pub mod games;
+pub mod identity;
 pub mod livetv;
 pub mod notifications;
 pub mod people;

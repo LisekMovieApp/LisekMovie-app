@@ -253,6 +253,9 @@ pub struct StartResponse {
     pub selected_audio_stream_index: Option<i32>,
     pub selected_subtitle: Option<String>,
     pub subtitle_delivery: Option<SubtitleDelivery>,
+    /// Faza 23: the file's picture height (FFprobe), so the player offers
+    /// only qualities below it (no upscaling). `None`: unknown (live TV).
+    pub source_height: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -510,6 +513,11 @@ pub async fn start(auth: AuthUser, State(state): State<SharedState>, Path(item_i
         selected_audio_stream_index: plan.audio.as_ref().map(|a| a.stream_index),
         selected_subtitle: plan.subtitle.as_ref().map(|s| s.track.id()),
         subtitle_delivery: plan.subtitle.as_ref().map(|s| s.delivery),
+        source_height: probe
+            .streams
+            .iter()
+            .filter(|s| s.kind == StreamKind::Video)
+            .find_map(|s| s.height.and_then(|h| u32::try_from(h).ok()).filter(|h| *h > 0)),
     };
     if plan.method == PlayMethod::DirectPlay {
         return Ok(Json(response));
@@ -644,6 +652,7 @@ async fn direct_play_without_probe(
         selected_audio_stream_index: None,
         selected_subtitle: None,
         subtitle_delivery: None,
+        source_height: None,
     }))
 }
 

@@ -1,11 +1,46 @@
 import { describe, expect, it } from 'vitest';
-import { isQualityId, qualityLimits, QUALITIES } from './quality';
+import {
+	availableQualities,
+	effectiveQuality,
+	isQualityId,
+	qualityLimits,
+	QUALITIES
+} from './quality';
 import { parsePreferences } from './preferences';
 
 describe('picture quality (Faza 20)', () => {
-	it('offers the original and four presets, largest first', () => {
-		expect(QUALITIES.map((q) => q.id)).toEqual(['original', '1080p', '720p', '480p', '360p']);
-		expect(QUALITIES.map((q) => q.maxBitrateKbps)).toEqual([null, 8000, 4000, 2000, 1000]);
+	it('offers the original and six presets, largest first', () => {
+		expect(QUALITIES.map((q) => q.id)).toEqual([
+			'original',
+			'1440p',
+			'1080p',
+			'720p',
+			'480p',
+			'360p',
+			'144p'
+		]);
+		expect(QUALITIES.map((q) => q.maxBitrateKbps)).toEqual([
+			null,
+			16000,
+			8000,
+			4000,
+			2000,
+			1000,
+			300
+		]);
+	});
+
+	it('never offers a preset as large as the source (Faza 23)', () => {
+		const ids = (height: number | null) => availableQualities(height).map((q) => q.id);
+		expect(ids(2160)).toEqual(['original', '1440p', '1080p', '720p', '480p', '360p', '144p']);
+		expect(ids(1080)).toEqual(['original', '720p', '480p', '360p', '144p']);
+		expect(ids(800)).toEqual(['original', '720p', '480p', '360p', '144p']);
+		expect(ids(360)).toEqual(['original', '144p']);
+		expect(ids(144)).toEqual(['original']);
+		expect(ids(null)).toHaveLength(QUALITIES.length);
+		expect(effectiveQuality('720p', 1080)).toBe('720p');
+		expect(effectiveQuality('720p', 576)).toBe('original');
+		expect(effectiveQuality('1080p', 1080)).toBe('original');
 	});
 
 	it('turns a preset into the start request limits', () => {

@@ -302,7 +302,8 @@
 			"artwork_empty": "Plik jest pusty.",
 			"artwork_failed": "Nie udało się zapisać obrazu. Spróbuj ponownie.",
 			"invalid_rating": "Ocena musi być liczbą od 0 do 10.",
-			"invalid_input": "Któraś wartość jest za długa lub nieprawidłowa."
+			"invalid_input": "Któraś wartość jest za długa lub nieprawidłowa.",
+			"invalid_provider_id": "Któreś ID wygląda niepoprawnie (IMDb: tt i cyfry; TMDB, TheTVDB, aniDB, AniList: liczba)."
 		},
 		"editor_art": {
 			"poster": "Plakat",
@@ -384,6 +385,23 @@
 			"lang_zh": "Chiński",
 			"lang_original": "Język oryginalny (kraj produkcji)",
 			"lang_any": "Dowolny inny"
+		},
+		"editor_field_provider_ids": "Identyfikatory zewnętrzne",
+		"editor_ids": {
+			"title": "Identyfikatory zewnętrzne",
+			"hint": "Identyfikatory, z którymi powiązany jest ten tytuł. Skaner pyta wtyczki wyłącznie po tych ID, nigdy po tytule — zmieniony ręcznie tytuł zostaje sobą. Zmienione ID są zapisywane, blokowane, a metadane pobierane z nich od nowa.",
+			"none": "Brak ID — następne skanowanie wyszuka po nazwie pliku.",
+			"placeholder_imdb": "np. tt0133093",
+			"placeholder_number": "np. 603",
+			"remove": "Usuń ID {service}",
+			"add_label": "Dodaj ID",
+			"add_placeholder": "Dodaj ID…",
+			"add": "Dodaj",
+			"refresh": "Pobierz ponownie",
+			"refreshing": "Pobieranie…",
+			"refresh_save_first": "Najpierw zapisz zmiany.",
+			"refetched": "Metadane pobrane ponownie: dopasowano {matched} z {items}.",
+			"changed_hint": "ID się zmieniły: zapis pobierze z nich metadane od nowa."
 		}
 	},
 	"errors": {
@@ -422,7 +440,6 @@
 		"user": "Użytkownik",
 		"plays": "Odtworzenia",
 		"minutes": "Obejrzane minuty",
-		"compatible": "Użyj zgodnego odtwarzania (720p)",
 		"safety": "Limity odtwarzania",
 		"safety_hint": "Limity dotyczą konwersji pliku źródłowego. Odtwarzanie bezpośrednie pozostaje dostępne.",
 		"safety_enabled": "Chroń serwer przed wymagającymi konwersjami",
@@ -542,15 +559,19 @@
 		"episode_range": "S{season}:O{episode}-O{end}",
 		"ends_at": "Zakończenie o {time}",
 		"stream_quality": "Jakość",
-		"stream_quality_hint": "Niższa jakość sprawia, że serwer zmniejsza wideo — starsze komputery i wolne łącza odtwarzają płynnie.",
 		"stream_quality_original_hint": "najlepsza dla tego urządzenia",
 		"stream_qualities": {
 			"original": "Oryginał",
+			"1440p": "1440p",
 			"1080p": "1080p",
 			"720p": "720p",
 			"480p": "480p",
-			"360p": "360p"
-		}
+			"360p": "360p",
+			"144p": "144p"
+		},
+		"subtitle_background": "Tło napisów",
+		"subtitle_background_value": "Tło {value}%",
+		"percent": "{value}%"
 	},
 	"games": {
 		"title": "Flappy Fox",
