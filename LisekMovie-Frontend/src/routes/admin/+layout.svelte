@@ -51,6 +51,7 @@
         { href: '/admin/users', labelKey: 'admin.tab_users' },
 		{ href: '/admin/plugins', labelKey: 'admin.tab_plugins' },
 		{ href: '/admin/stats', labelKey: 'player.stats' },
+		{ href: '/admin/api', labelKey: 'admin.tab_api' },
         { href: '/admin/playback', labelKey: 'admin.tab_hardware' },
 		{ href: '/admin/trickplay', labelKey: 'trickplay_admin.tab' },
         { href: '/admin/notifications', labelKey: 'notifications.title' },

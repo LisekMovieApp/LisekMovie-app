@@ -429,34 +429,6 @@ pub async fn date_time(
     Ok(label)
 }
 
-/// The stored hash of the bots' read-only key, if one was created.
-pub async fn api_key(pool: &PgPool) -> Result<Option<(String, DateTime<Utc>)>, DbError> {
-    Ok(
-        sqlx::query_as("SELECT key_hash, created_at FROM stats_api_key WHERE id")
-            .fetch_optional(pool)
-            .await?,
-    )
-}
-
-/// Replaces the bots' key (only its hash is stored).
-pub async fn set_api_key(pool: &PgPool, key_hash: &str) -> Result<DateTime<Utc>, DbError> {
-    let (at,): (DateTime<Utc>,) = sqlx::query_as(
-        "INSERT INTO stats_api_key (id, key_hash) VALUES (true, $1) \
-         ON CONFLICT (id) DO UPDATE SET key_hash = $1, created_at = now() RETURNING created_at",
-    )
-    .bind(key_hash)
-    .fetch_one(pool)
-    .await?;
-    Ok(at)
-}
-
-pub async fn delete_api_key(pool: &PgPool) -> Result<(), DbError> {
-    sqlx::query("DELETE FROM stats_api_key")
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

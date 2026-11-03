@@ -23,6 +23,7 @@ mod providers;
 mod scan;
 
 pub mod access;
+pub mod api_keys;
 pub mod collections;
 pub mod editor;
 pub mod episodes;

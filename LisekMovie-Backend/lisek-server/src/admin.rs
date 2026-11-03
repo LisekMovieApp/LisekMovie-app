@@ -236,7 +236,9 @@ pub async fn create_library(
     } else {
         None
     };
-    if !live_tv && req.root_paths.is_empty() {
+    // Faza 25: folders are stored normalized (absolute, no trailing slash).
+    let root_paths = if live_tv { Vec::new() } else { clean_roots(&req.root_paths)? };
+    if !live_tv && root_paths.is_empty() {
         return Err(AdminError::InvalidInput(
             "at least one root path is required".to_string(),
         ));
@@ -247,7 +249,7 @@ pub async fn create_library(
         &pool,
         name,
         &req.library_type,
-        if live_tv { &[] } else { &req.root_paths },
+        &root_paths,
         req.save_metadata_in_media_folder,
     )
     .await
@@ -272,6 +274,124 @@ pub async fn create_library(
     );
 
     Ok(Json(library.into()))
+}
+
+/// Faza 25: what the "Edytuj" modal sends. Fields left out stay as they are.
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct UpdateLibraryRequest {
+    pub name: Option<String>,
+    /// Every folder the library should scan (absolute paths). Items inside
+    /// a removed folder leave the library (the files stay on disk).
+    pub root_paths: Option<Vec<String>>,
+    pub save_metadata_in_media_folder: Option<bool>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct UpdateLibraryResponse {
+    pub library: LibraryResponse,
+    /// Items that left the library with a removed folder.
+    pub removed_items: u64,
+    /// Folders the server cannot see right now (not mounted yet, a typo):
+    /// saved anyway, scanned once they exist.
+    pub missing_paths: Vec<String>,
+}
+
+/// Most folders one library may have.
+const MAX_ROOT_PATHS: usize = 32;
+
+/// Folders as typed: normalized, without duplicates. `Err` names the
+/// first unusable one.
+fn clean_roots(paths: &[String]) -> Result<Vec<String>, AdminError> {
+    let mut out: Vec<String> = Vec::new();
+    for path in paths {
+        if path.trim().is_empty() {
+            continue;
+        }
+        let root = lisek_db::normalize_root(path).ok_or_else(|| {
+            AdminError::InvalidInput(format!("not an absolute folder path: {}", path.trim()))
+        })?;
+        if !out.contains(&root) {
+            out.push(root);
+        }
+    }
+    if out.len() > MAX_ROOT_PATHS {
+        return Err(AdminError::InvalidInput(format!("at most {MAX_ROOT_PATHS} folders")));
+    }
+    Ok(out)
+}
+
+/// Renames a library and changes its folders ("Edytuj" on the libraries
+/// tab). A live TV library only has a name here; its sources have their
+/// own panel.
+#[utoipa::path(put,path="/api/admin/libraries/{library_id}",tag="admin",params(("library_id"=uuid::Uuid,Path)),request_body=UpdateLibraryRequest,responses((status=200,body=UpdateLibraryResponse),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]
+pub async fn update_library(
+    AdminUser(auth): AdminUser,
+    State(state): State<SharedState>,
+    Path(library_id): Path<Uuid>,
+    Json(req): Json<UpdateLibraryRequest>,
+) -> Result<Json<UpdateLibraryResponse>, AdminError> {
+    let pool = state.pool().ok_or(AdminError::ServerNotReady)?;
+    let current = lisek_db::get_library(&pool, library_id)
+        .await
+        .map_err(map_db_error)?
+        .ok_or(AdminError::LibraryNotFound)?;
+    let name = match &req.name {
+        Some(name) => name.trim().to_owned(),
+        None => current.name.clone(),
+    };
+    if name.is_empty() || name.chars().count() > 200 {
+        return Err(AdminError::InvalidInput("name cannot be empty".to_string()));
+    }
+    let live_tv = current.library_type == lisek_db::livetv::LIVE_TV;
+    let roots = match (&req.root_paths, live_tv) {
+        (Some(_), true) => {
+            return Err(AdminError::InvalidInput("a live TV library has no folders".to_string()));
+        }
+        (Some(paths), false) => clean_roots(paths)?,
+        (None, _) => current.root_paths.clone(),
+    };
+    if !live_tv && roots.is_empty() {
+        return Err(AdminError::InvalidInput("at least one root path is required".to_string()));
+    }
+    let save = req
+        .save_metadata_in_media_folder
+        .unwrap_or(current.save_metadata_in_media_folder);
+    let updated = lisek_db::update_library(&pool, library_id, &name, &roots, save)
+        .await
+        .map_err(map_db_error)?
+        .ok_or(AdminError::LibraryNotFound)?;
+    let missing_paths = {
+        let roots = roots.clone();
+        tokio::task::spawn_blocking(move || {
+            roots
+                .into_iter()
+                .filter(|r| !std::path::Path::new(r).is_dir())
+                .collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_default()
+    };
+    tracing::info!(
+        %library_id,
+        name,
+        roots = ?roots,
+        removed_items = updated.removed_items,
+        missing = ?missing_paths,
+        admin = %auth.user.username,
+        "library updated"
+    );
+    if updated.removed_items > 0 {
+        let config_dir = crate::state::config_dir();
+        let pool = pool.clone();
+        tokio::spawn(async move {
+            crate::metadata_enrichment::prune_collections(&pool, &config_dir).await;
+        });
+    }
+    Ok(Json(UpdateLibraryResponse {
+        library: updated.library.into(),
+        removed_items: updated.removed_items,
+        missing_paths,
+    }))
 }
 
 #[utoipa::path(delete,path="/api/admin/libraries/{library_id}",tag="admin",params(("library_id"=uuid::Uuid,Path)),responses((status=200,body=Value),(status=400),(status=401),(status=403),(status=404),(status=500),(status=503)),security(("lisek_auth"=[])))]

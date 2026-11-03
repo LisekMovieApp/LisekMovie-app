@@ -110,6 +110,140 @@ pub async fn delete_library(pool: &PgPool, library_id: Uuid) -> Result<(), DbErr
     Ok(())
 }
 
+/// Faza 25: a library folder as stored: trimmed, without a trailing
+/// separator (except a bare root such as `/` or `D:\`). `None` for an
+/// empty or relative path, or one with a NUL byte.
+pub fn normalize_root(path: &str) -> Option<String> {
+    let path = path.trim();
+    if path.is_empty() || path.contains('\0') || path.len() > 4096 {
+        return None;
+    }
+    let bytes = path.as_bytes();
+    let windows_drive = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/');
+    let absolute = path.starts_with('/') || path.starts_with("\\\\") || windows_drive;
+    if !absolute {
+        return None;
+    }
+    let minimum = if windows_drive { 3 } else { 1 };
+    let mut out = path.to_owned();
+    while out.len() > minimum && (out.ends_with('/') || out.ends_with('\\')) {
+        out.pop();
+    }
+    Some(out)
+}
+
+/// Whether `file` lies inside the folder `root` (both as stored).
+pub fn path_under(file: &str, root: &str) -> bool {
+    if root.ends_with('/') || root.ends_with('\\') {
+        return file.starts_with(root);
+    }
+    file.strip_prefix(root)
+        .is_some_and(|rest| rest.starts_with('/') || rest.starts_with('\\'))
+}
+
+/// What an edit of a library did.
+#[derive(Debug, Clone)]
+pub struct LibraryUpdate {
+    pub library: Library,
+    /// Items removed because their folder is no longer one of the
+    /// library's (the files themselves are untouched).
+    pub removed_items: u64,
+}
+
+/// Faza 25: renames a library and replaces its folders and its
+/// "save artwork next to the media" choice. Items inside a folder that was
+/// removed (and inside no folder the library keeps) leave the library —
+/// only their database rows; the files stay on disk. `None`: no such
+/// library.
+pub async fn update_library(
+    pool: &PgPool,
+    library_id: Uuid,
+    name: &str,
+    root_paths: &[String],
+    save_metadata_in_media_folder: bool,
+) -> Result<Option<LibraryUpdate>, DbError> {
+    let mut tx = pool.begin().await?;
+    let before: Option<(Vec<String>,)> =
+        sqlx::query_as("SELECT root_paths FROM libraries WHERE id = $1 FOR UPDATE")
+            .bind(library_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some((old_roots,)) = before else {
+        return Ok(None);
+    };
+    let row = sqlx::query_as::<_, LibraryRow>(
+        r#"
+        UPDATE libraries SET name = $2, root_paths = $3, save_metadata_in_media_folder = $4
+        WHERE id = $1
+        RETURNING id, name, library_type, sort_order, root_paths, save_metadata_in_media_folder, created_at
+        "#,
+    )
+    .bind(library_id)
+    .bind(name)
+    .bind(root_paths)
+    .bind(save_metadata_in_media_folder)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    let removed_roots: Vec<&String> = old_roots.iter().filter(|r| !root_paths.contains(r)).collect();
+    let mut removed_items = 0;
+    if !removed_roots.is_empty() {
+        let items: Vec<(Uuid, String)> =
+            sqlx::query_as("SELECT id, file_path FROM media_items WHERE library_id = $1")
+                .bind(library_id)
+                .fetch_all(&mut *tx)
+                .await?;
+        let gone: Vec<Uuid> = items
+            .into_iter()
+            .filter(|(_, file)| {
+                removed_roots.iter().any(|root| path_under(file, root))
+                    && !root_paths.iter().any(|root| path_under(file, root))
+            })
+            .map(|(id, _)| id)
+            .collect();
+        if !gone.is_empty() {
+            removed_items = sqlx::query("DELETE FROM media_items WHERE id = ANY($1)")
+                .bind(&gone)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+        }
+    }
+    tx.commit().await?;
+    Ok(Some(LibraryUpdate {
+        library: library_from_row(row),
+        removed_items,
+    }))
+}
+
+#[cfg(test)]
+mod root_tests {
+    use super::*;
+
+    #[test]
+    fn folders_are_absolute_and_lose_their_trailing_separator() {
+        assert_eq!(normalize_root(" /mnt/dysk2/Filmy/ ").as_deref(), Some("/mnt/dysk2/Filmy"));
+        assert_eq!(normalize_root("/").as_deref(), Some("/"));
+        assert_eq!(normalize_root("D:\\Filmy\\").as_deref(), Some("D:\\Filmy"));
+        assert_eq!(normalize_root("D:\\").as_deref(), Some("D:\\"));
+        assert_eq!(normalize_root("\\\\nas\\filmy").as_deref(), Some("\\\\nas\\filmy"));
+        assert_eq!(normalize_root("Filmy"), None);
+        assert_eq!(normalize_root("  "), None);
+    }
+
+    #[test]
+    fn a_file_is_inside_a_folder_only_at_a_separator() {
+        assert!(path_under("/mnt/a/Film.mkv", "/mnt/a"));
+        assert!(path_under("/mnt/a/x/y.mkv", "/mnt/a"));
+        assert!(!path_under("/mnt/ab/Film.mkv", "/mnt/a"));
+        assert!(path_under("/Film.mkv", "/"));
+        assert!(path_under("D:\\Filmy\\a.mkv", "D:\\Filmy"));
+    }
+}
+
 /// Which way to nudge a library in the admin's shared display order — see
 /// [`move_library`]. A plain swap with the immediate neighbor (not a full
 /// reorder-to-index) is all the Admin Panel's "W górę"/"W dół" button pair

@@ -402,6 +402,24 @@
 			"refresh_save_first": "Save your changes first.",
 			"refetched": "Metadata fetched again: {matched} of {items} matched.",
 			"changed_hint": "The ids changed: saving fetches the metadata again from them."
+		},
+		"tab_api": "API",
+		"items_search_label": "Search this library",
+		"items_search_placeholder": "Search by title, year or episode (s01e02)…",
+		"items_search_count": "{shown} of {total}",
+		"items_search_none": "Nothing matches.",
+		"edit_library": {
+			"button": "Edit",
+			"title": "Edit library",
+			"paths_hint": "Absolute paths on the server. Add a folder for a new disk; the next scan walks every folder.",
+			"path_label": "Folder {number}",
+			"remove_path": "Remove folder {path}",
+			"path_invalid": "Each folder must be an absolute path on the server (for example /mnt/disk2/Movies or D:\\Movies).",
+			"removed_warning": "{count} folder(s) will be removed: their items leave the library (the files stay on disk).",
+			"failed": "The library could not be saved.",
+			"saved": "Library “{name}” saved.",
+			"removed_items": "{count} item(s) left the library with the removed folders.",
+			"missing_paths": "The server cannot see these folders right now (saved anyway): {paths}"
 		}
 	},
 	"errors": {
@@ -1252,19 +1270,7 @@
 			"watching": "Watching",
 			"abandoned": "Stopped"
 		},
-		"load_more": "Show more",
-		"bot_title": "Bot reports (Discord, Telegram)",
-		"bot_hint": "GET /api/stats/summary?period=daily|weekly returns a summary (rankings of users, films and series, watch time, plays, unique viewers). With format=discord it returns a ready Discord webhook body. The bot authenticates with the X-Lisek-Stats-Key header; the key can only read this summary.",
-		"bot_configured": "Key created {date}.",
-		"bot_none": "No key is set.",
-		"bot_create": "Create a key",
-		"bot_rotate": "Generate a new key",
-		"bot_revoke": "Revoke the key",
-		"bot_new": "Copy the key now — it will not be shown again. The previous key stopped working.",
-		"bot_copy": "Copy",
-		"bot_copied": "Copied",
-		"bot_example": "Example (e.g. cron at midnight, result posted to a Discord webhook):",
-		"bot_failed": "The key could not be changed."
+		"load_more": "Show more"
 	},
 	"toast": {
 		"close": "Close"
@@ -1389,5 +1395,38 @@
 			"invalid_code": "A room code has six letters and digits.",
 			"other_title": "This room plays another title."
 		}
+	},
+	"api_keys": {
+		"title": "API",
+		"subtitle": "Keys for scripts and automations — Discord or Telegram bots, Home Assistant, your own dashboards. Send a key in the {header} header.",
+		"name_label": "Key name",
+		"name_placeholder": "e.g. Discord stats, My bot",
+		"create": "Generate key",
+		"creating": "Generating…",
+		"name_invalid": "Give the key a name (up to 100 characters).",
+		"create_failed": "The key could not be created.",
+		"delete_failed": "The key could not be revoked.",
+		"rename_failed": "The key could not be renamed.",
+		"new_title": "New key “{name}”",
+		"new_hint": "Copy it now — it is shown only once. Only its fingerprint is kept on the server.",
+		"copy": "Copy",
+		"copied": "Copied",
+		"example": "Example: this week's report as a Discord webhook body",
+		"key_placeholder": "<KEY>",
+		"list_title": "Keys",
+		"none": "No keys yet.",
+		"col_name": "Name",
+		"col_key": "Key",
+		"col_created": "Created",
+		"col_last_used": "Last used",
+		"col_actions": "Actions",
+		"never_used": "Never",
+		"rename": "Rename",
+		"rename_label": "New name",
+		"revoke": "Revoke",
+		"confirm_revoke": "Click again to revoke",
+		"usage_title": "What a key can read",
+		"usage_hint": "A key is read-only. Requests with a valid key update “Last used” (at most once a minute).",
+		"usage_summary": "the day's or week's top films and series; format=discord returns a Discord webhook body."
 	}
 }

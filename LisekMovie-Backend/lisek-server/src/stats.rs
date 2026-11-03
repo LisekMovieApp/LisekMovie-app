@@ -8,8 +8,9 @@
 //! - `GET /api/stats/summary?period=daily|weekly`: a light summary for
 //!   Discord/Telegram bots — rankings with ready-made "1h 38m" strings, or
 //!   with `format=discord` a webhook payload (two embeds) that can be
-//!   posted as it is. Readable by an admin session or by the read-only
-//!   `X-Lisek-Stats-Key` an admin creates (`/api/admin/stats/key`).
+//!   posted as it is. Readable by an admin session or by an API key
+//!   (`X-Lisek-Api-Key`, or the older `X-Lisek-Stats-Key`; Faza 25: keys
+//!   are managed on the admin panel's API tab, see `api_keys`).
 //!
 //! Queries live in `lisek_db::stats`.
 
@@ -29,8 +30,6 @@ use crate::auth::{AdminUser, AuthError};
 use crate::playback::{PlaybackError, pool};
 use crate::state::SharedState;
 
-/// Header carrying the bots' read-only key.
-pub const STATS_KEY_HEADER: &str = "x-lisek-stats-key";
 /// Longest range one request may cover.
 const MAX_RANGE_DAYS: i64 = 1100;
 
@@ -38,7 +37,7 @@ fn bad(code: &'static str) -> PlaybackError {
     PlaybackError(StatusCode::BAD_REQUEST, code)
 }
 
-/// An admin session, or the bots' key in [`STATS_KEY_HEADER`].
+/// An admin session, or an API key (`crate::api_keys::ApiClient`).
 pub struct StatsReader;
 
 impl FromRequestParts<SharedState> for StatsReader {
@@ -48,32 +47,15 @@ impl FromRequestParts<SharedState> for StatsReader {
         parts: &mut Parts,
         state: &SharedState,
     ) -> Result<Self, Self::Rejection> {
-        let key = parts
-            .headers
-            .get(STATS_KEY_HEADER)
-            .and_then(|v| v.to_str().ok())
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(str::to_owned);
-        let Some(key) = key else {
-            return AdminUser::from_request_parts(parts, state)
-                .await
-                .map(|_| StatsReader);
-        };
-        let pool = state.pool().ok_or(AuthError::ServerNotReady)?;
-        let stored = db::api_key(&pool).await.map_err(|_| AuthError::Internal)?;
-        let presented = lisek_auth::hash_session_token(&key);
-        match stored {
-            Some((hash, _)) if constant_time_eq(hash.as_bytes(), presented.as_bytes()) => {
-                Ok(StatsReader)
-            }
-            _ => Err(AuthError::InvalidToken),
+        if crate::api_keys::presented_key(parts).is_some() {
+            let client = crate::api_keys::ApiClient::from_request_parts(parts, state).await?;
+            tracing::debug!(key_id = %client.key_id, key = %client.name, "stats read with an API key");
+            return Ok(StatsReader);
         }
+        AdminUser::from_request_parts(parts, state)
+            .await
+            .map(|_| StatsReader)
     }
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 // --- Admin dashboard -------------------------------------------------------
@@ -251,52 +233,6 @@ pub async fn sessions(
 
 // --- Bots' key ---------------------------------------------------------------
 
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct StatsKeyStatus {
-    pub configured: bool,
-    pub created_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct NewStatsKey {
-    /// Shown once; only its hash is stored. Send it as `X-Lisek-Stats-Key`.
-    pub key: String,
-    pub created_at: DateTime<Utc>,
-}
-
-#[utoipa::path(get, path = "/api/admin/stats/key", responses((status = 200, body = StatsKeyStatus), (status = 401), (status = 403)), security(("lisek_auth" = [])))]
-pub async fn key_status(
-    _admin: AdminUser,
-    State(state): State<SharedState>,
-) -> Result<Json<StatsKeyStatus>, PlaybackError> {
-    let stored = db::api_key(&pool(&state).await?).await?;
-    Ok(Json(StatsKeyStatus {
-        configured: stored.is_some(),
-        created_at: stored.map(|(_, at)| at),
-    }))
-}
-
-/// Creates the bots' key, replacing (and so revoking) any previous one.
-#[utoipa::path(post, path = "/api/admin/stats/key", responses((status = 200, body = NewStatsKey), (status = 401), (status = 403)), security(("lisek_auth" = [])))]
-pub async fn create_key(
-    _admin: AdminUser,
-    State(state): State<SharedState>,
-) -> Result<Json<NewStatsKey>, PlaybackError> {
-    let key = lisek_auth::generate_session_token();
-    let created_at =
-        db::set_api_key(&pool(&state).await?, &lisek_auth::hash_session_token(&key)).await?;
-    Ok(Json(NewStatsKey { key, created_at }))
-}
-
-#[utoipa::path(delete, path = "/api/admin/stats/key", responses((status = 204), (status = 401), (status = 403)), security(("lisek_auth" = [])))]
-pub async fn delete_key(
-    _admin: AdminUser,
-    State(state): State<SharedState>,
-) -> Result<StatusCode, PlaybackError> {
-    db::delete_api_key(&pool(&state).await?).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
 // --- Bot summary ---------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, utoipa::ToSchema)]
@@ -410,7 +346,7 @@ fn titles(rows: Vec<db::TitleRank>) -> Vec<SummaryTitle> {
         .collect()
 }
 
-#[utoipa::path(get, path = "/api/stats/summary", params(SummaryQuery), responses((status = 200, body = StatsSummary, description = "JSON summary, or with format=discord a Discord webhook payload"), (status = 400), (status = 401, description = "No admin session and no valid X-Lisek-Stats-Key")), security(("lisek_auth" = [])))]
+#[utoipa::path(get, path = "/api/stats/summary", params(SummaryQuery), responses((status = 200, body = StatsSummary, description = "JSON summary, or with format=discord a Discord webhook payload"), (status = 400), (status = 401, description = "No admin session and no valid X-Lisek-Api-Key")), security(("lisek_auth" = [])))]
 pub async fn summary(
     _reader: StatsReader,
     State(state): State<SharedState>,
@@ -858,8 +794,5 @@ mod tests {
                 "odtworzeń"
             ]
         );
-        assert!(constant_time_eq(b"abc", b"abc"));
-        assert!(!constant_time_eq(b"abc", b"abd"));
-        assert!(!constant_time_eq(b"abc", b"ab"));
     }
 }

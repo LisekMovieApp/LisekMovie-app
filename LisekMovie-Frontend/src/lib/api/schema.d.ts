@@ -4,6 +4,38 @@
  */
 
 export interface paths {
+    "/api/admin/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list"];
+        put?: never;
+        post: operations["create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/api-keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["rename"];
+        post?: never;
+        delete: operations["delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/games": {
         parameters: {
             query?: never;
@@ -116,7 +148,12 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        /**
+         * Renames a library and changes its folders ("Edytuj" on the libraries
+         *     tab). A live TV library only has a name here; its sources have their
+         *     own panel.
+         */
+        put: operations["update_library"];
         post?: never;
         delete: operations["delete_library"];
         options?: never;
@@ -637,23 +674,6 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/stats/key": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["key_status"];
-        put?: never;
-        /** Creates the bots' key, replacing (and so revoking) any previous one. */
-        post: operations["create_key"];
-        delete: operations["delete_key"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2238,6 +2258,22 @@ export interface components {
              */
             online: boolean;
         };
+        /** @description One key as the administrator sees it (never the key itself). */
+        ApiKey: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            last_used_at?: string | null;
+            name: string;
+            /** @description The key's first characters (`lsk_AbC1`), to tell keys apart. */
+            prefix: string;
+        };
+        ApiKeyRequest: {
+            /** @description "Statystyki Discord", "Home Assistant" … */
+            name: string;
+        };
         ArtworkResponse: {
             /** @description Items that got the new picture (a series counts every episode). */
             items: number;
@@ -3345,10 +3381,8 @@ export interface components {
             name: string;
             url: string;
         };
-        NewStatsKey: {
-            /** Format: date-time */
-            created_at: string;
-            /** @description Shown once; only its hash is stored. Send it as `X-Lisek-Stats-Key`. */
+        NewApiKey: components["schemas"]["ApiKey"] & {
+            /** @description Shown once; only its hash is stored. Send it as `X-Lisek-Api-Key`. */
             key: string;
         };
         /** @description The episode a player offers when one ends ("Następny odcinek"). */
@@ -4166,11 +4200,6 @@ export interface components {
             time_offset_seconds: number;
             title: string;
         };
-        StatsKeyStatus: {
-            configured: boolean;
-            /** Format: date-time */
-            created_at?: string | null;
-        };
         StatsSummary: {
             by_content: components["schemas"]["SummaryContent"][];
             /** Format: date-time */
@@ -4425,6 +4454,29 @@ export interface components {
             /** @description Generation waits because someone is transcoding. */
             paused_for_playback: boolean;
         };
+        /** @description Faza 25: what the "Edytuj" modal sends. Fields left out stay as they are. */
+        UpdateLibraryRequest: {
+            name?: string | null;
+            /**
+             * @description Every folder the library should scan (absolute paths). Items inside
+             *     a removed folder leave the library (the files stay on disk).
+             */
+            root_paths?: string[] | null;
+            save_metadata_in_media_folder?: boolean | null;
+        };
+        UpdateLibraryResponse: {
+            library: components["schemas"]["LibraryResponse"];
+            /**
+             * @description Folders the server cannot see right now (not mounted yet, a typo):
+             *     saved anyway, scanned once they exist.
+             */
+            missing_paths: string[];
+            /**
+             * Format: int64
+             * @description Items that left the library with a removed folder.
+             */
+            removed_items: number;
+        };
         UpdateMediaItemRequest: {
             /**
              * Format: int32
@@ -4565,6 +4617,163 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKey"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApiKeyRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewApiKey"];
+                };
+            };
+            /** @description invalid_key_name */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    rename: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApiKeyRequest"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     admin_list: {
         parameters: {
             query?: never;
@@ -4818,6 +5027,67 @@ export interface operations {
                 content?: never;
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_library: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                library_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateLibraryRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateLibraryResponse"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6557,97 +6827,6 @@ export interface operations {
             };
             /** @description invalid_range / invalid_platform / invalid_device_type / invalid_content / invalid_timezone */
             400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    key_status: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StatsKeyStatus"];
-                };
-            };
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    create_key: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NewStatsKey"];
-                };
-            };
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    delete_key: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            204: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10012,7 +10191,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description No admin session and no valid X-Lisek-Stats-Key */
+            /** @description No admin session and no valid X-Lisek-Api-Key */
             401: {
                 headers: {
                     [name: string]: unknown;

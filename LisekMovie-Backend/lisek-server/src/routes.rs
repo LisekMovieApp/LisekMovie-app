@@ -27,7 +27,7 @@ use crate::auth::{AdminUser, SessionUser};
 use crate::openapi::ApiDoc;
 use crate::state::SharedState;
 use crate::{
-    admin, auth, browser_notifications, collections, details, download, editor, games, hardware, identify, livetv, logging, media,
+    admin, api_keys, auth, browser_notifications, collections, details, download, editor, games, hardware, identify, livetv, logging, media,
     notifications, people, playback, profile, scan_jobs, search, series, setup, stats, syncplay, telemetry, trickplay, users,
 };
 
@@ -150,7 +150,7 @@ fn admin() -> OpenApiRouter<SharedState> {
         .routes(routes!(admin::update_provider))
         .routes(routes!(admin::set_provider_key, admin::clear_provider_key))
         .routes(routes!(admin::list_libraries, admin::create_library))
-        .routes(routes!(admin::delete_library))
+        .routes(routes!(admin::update_library, admin::delete_library))
         .routes(routes!(admin::move_library))
         .routes(routes!(admin::list_library_items))
         .routes(routes!(
@@ -180,7 +180,8 @@ fn admin() -> OpenApiRouter<SharedState> {
         .routes(routes!(telemetry::recent_sessions))
         .routes(routes!(stats::dashboard))
         .routes(routes!(stats::sessions))
-        .routes(routes!(stats::key_status, stats::create_key, stats::delete_key))
+        .routes(routes!(api_keys::list, api_keys::create))
+        .routes(routes!(api_keys::rename, api_keys::delete))
         .routes(routes!(hardware::diagnostics))
         .routes(routes!(hardware::status))
         .routes(routes!(hardware::set_pool))

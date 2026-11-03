@@ -72,6 +72,53 @@ export async function createLibrary(
 	return (await response.json()) as Library;
 }
 
+/** Faza 25: what the "Edytuj" modal changes; fields left out stay. */
+export interface LibraryChanges {
+	name?: string;
+	root_paths?: string[];
+	save_metadata_in_media_folder?: boolean;
+}
+
+export interface LibraryUpdateResult {
+	library: Library;
+	/** Items that left the library with a removed folder (files stay). */
+	removed_items: number;
+	/** Folders the server cannot see right now (saved anyway). */
+	missing_paths: string[];
+}
+
+export async function updateLibrary(
+	token: string,
+	libraryId: string,
+	changes: LibraryChanges
+): Promise<LibraryUpdateResult> {
+	const response = await fetch(`/api/admin/libraries/${encodeURIComponent(libraryId)}`, {
+		method: 'PUT',
+		headers: { ...buildAuthHeader(token), 'Content-Type': 'application/json' },
+		body: JSON.stringify(changes)
+	});
+	await assertOk(response);
+	return (await response.json()) as LibraryUpdateResult;
+}
+
+/** Faza 25: a folder as typed — trimmed, an absolute path (`/mnt/…`,
+ * `D:\…`, `\\nas\…`), without a trailing separator. `null`: not usable. */
+export function normalizeRoot(path: string): string | null {
+	let value = path.trim();
+	if (!value) return null;
+	const drive = /^[A-Za-z]:[\\/]/.test(value);
+	if (!(value.startsWith('/') || value.startsWith('\\\\') || drive)) return null;
+	const minimum = drive ? 3 : 1;
+	while (value.length > minimum && /[\\/]$/.test(value)) value = value.slice(0, -1);
+	return value;
+}
+
+/** Folders that were in `before` and are not in `after`. */
+export function removedRoots(before: string[], after: string[]): string[] {
+	const kept = new Set(after.map((p) => normalizeRoot(p) ?? p));
+	return before.filter((p) => !kept.has(normalizeRoot(p) ?? p));
+}
+
 export async function deleteLibrary(token: string, libraryId: string): Promise<void> {
 	const response = await fetch(`/api/admin/libraries/${encodeURIComponent(libraryId)}`, {
 		method: 'DELETE',

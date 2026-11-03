@@ -45,19 +45,34 @@ def check_stats(request, ok_json, sql, token, other_token, other_id, item_id, ha
     assert summary["totals"]["active_users"] >= 1 and summary["top_movies"][0]["watched"], summary
     assert summary["top_movies"][0]["unique_users"] >= 1
     assert request("/api/stats/summary", token=other_token)[0] == 403, "a non-admin session is not enough"
-    assert ok_json("/api/admin/stats/key", token=token)["configured"] is False
-    key = ok_json("/api/admin/stats/key", "POST", {}, token=token)["key"]
-    status, body, _ = request("/api/stats/summary?format=discord&period=daily", headers={"X-Lisek-Stats-Key": key})
+    # Faza 25: named API keys (the bots' key among them).
+    assert ok_json("/api/admin/api-keys", token=token) == []
+    created = ok_json("/api/admin/api-keys", "POST", {"name": "Statystyki Discord"}, token=token)
+    key = created["key"]
+    assert key.startswith("lsk_") and created["prefix"] == key[:8] and created["last_used_at"] is None, created
+    other = ok_json("/api/admin/api-keys", "POST", {"name": "Home Assistant"}, token=token)
+    assert request("/api/admin/api-keys", "POST", {"name": "  "}, token)[0] == 400
+    assert request("/api/admin/api-keys", token=other_token)[0] == 403
+    status, body, _ = request("/api/stats/summary?format=discord&period=daily", headers={"X-Lisek-Api-Key": key})
     assert status == 200, (status, body)
     embeds = json.loads(body)["embeds"]
     assert embeds[0]["title"].startswith("📊 Statystyki oglądania") and "Łącznie:" in embeds[0]["footer"]["text"], embeds
     assert "👤)" in embeds[1]["description"], embeds
-    assert request("/api/stats/summary", headers={"X-Lisek-Stats-Key": key + "x"})[0] == 401
-    assert request("/api/stats/summary?period=yearly", headers={"X-Lisek-Stats-Key": key})[0] == 400
-    assert request("/api/stats/summary?format=xml", headers={"X-Lisek-Stats-Key": key})[0] == 400
-    assert request("/api/admin/stats/dashboard", headers={"X-Lisek-Stats-Key": key})[0] == 401, "the key reads the summary only"
-    assert request("/api/admin/stats/key", "DELETE", None, token)[0] == 204
-    assert request("/api/stats/summary", headers={"X-Lisek-Stats-Key": key})[0] == 401
+    # The older header still works for bots set up before.
+    assert request("/api/stats/summary", headers={"X-Lisek-Stats-Key": other["key"]})[0] == 200
+    listed = {k["name"]: k for k in ok_json("/api/admin/api-keys", token=token)}
+    assert listed["Statystyki Discord"]["last_used_at"] and listed["Home Assistant"]["last_used_at"], listed
+    assert "key" not in listed["Statystyki Discord"], "the key itself is never listed"
+    assert request("/api/stats/summary", headers={"X-Lisek-Api-Key": key + "x"})[0] == 401
+    assert request("/api/stats/summary?period=yearly", headers={"X-Lisek-Api-Key": key})[0] == 400
+    assert request("/api/stats/summary?format=xml", headers={"X-Lisek-Api-Key": key})[0] == 400
+    assert request("/api/admin/stats/dashboard", headers={"X-Lisek-Api-Key": key})[0] == 401, "the key reads the summary only"
+    assert request(f"/api/admin/api-keys/{created['id']}", "PUT", {"name": "Bot"}, token)[0] == 204
+    assert ok_json("/api/admin/api-keys", token=token)[-1]["name"] in ("Bot", "Home Assistant")
+    assert request(f"/api/admin/api-keys/{created['id']}", "DELETE", None, token)[0] == 204
+    assert request(f"/api/admin/api-keys/{created['id']}", "DELETE", None, token)[0] == 404
+    assert request("/api/stats/summary", headers={"X-Lisek-Api-Key": key})[0] == 401
+    assert request(f"/api/admin/api-keys/{other['id']}", "DELETE", None, token)[0] == 204
 
     # Hardware survey: runs here without a GPU and still describes the machine.
     report = ok_json("/api/admin/hardware/diagnostics", "POST", {}, token=token)

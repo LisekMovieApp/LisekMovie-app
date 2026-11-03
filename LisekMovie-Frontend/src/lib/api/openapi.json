@@ -10,6 +10,169 @@
     "version": "1.0.0-beta"
   },
   "paths": {
+    "/api/admin/api-keys": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "list",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKey"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewApiKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_key_name"
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/api-keys/{key_id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "rename",
+        "parameters": [
+          {
+            "name": "key_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "delete",
+        "parameters": [
+          {
+            "name": "key_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/admin/games": {
       "get": {
         "operationId": "admin_list",
@@ -273,6 +436,69 @@
       }
     },
     "/api/admin/libraries/{library_id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Renames a library and changes its folders (\"Edytuj\" on the libraries\ntab). A live TV library only has a name here; its sources have their\nown panel.",
+        "operationId": "update_library",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLibraryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateLibraryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "500": {
+            "description": ""
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
       "delete": {
         "tags": [
           "admin"
@@ -2180,80 +2406,6 @@
           },
           "400": {
             "description": "invalid_range / invalid_platform / invalid_device_type / invalid_content / invalid_timezone"
-          },
-          "401": {
-            "description": ""
-          },
-          "403": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "lisek_auth": []
-          }
-        ]
-      }
-    },
-    "/api/admin/stats/key": {
-      "get": {
-        "operationId": "key_status",
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StatsKeyStatus"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": ""
-          },
-          "403": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "lisek_auth": []
-          }
-        ]
-      },
-      "post": {
-        "summary": "Creates the bots' key, replacing (and so revoking) any previous one.",
-        "operationId": "create_key",
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NewStatsKey"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": ""
-          },
-          "403": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "lisek_auth": []
-          }
-        ]
-      },
-      "delete": {
-        "operationId": "delete_key",
-        "responses": {
-          "204": {
-            "description": ""
           },
           "401": {
             "description": ""
@@ -6024,7 +6176,7 @@
             "description": ""
           },
           "401": {
-            "description": "No admin session and no valid X-Lisek-Stats-Key"
+            "description": "No admin session and no valid X-Lisek-Api-Key"
           }
         },
         "security": [
@@ -6442,6 +6594,52 @@
           }
         ],
         "description": "One account in the admin user list."
+      },
+      "ApiKey": {
+        "type": "object",
+        "description": "One key as the administrator sees it (never the key itself).",
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string",
+            "description": "The key's first characters (`lsk_AbC1`), to tell keys apart."
+          }
+        }
+      },
+      "ApiKeyRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "\"Statystyki Discord\", \"Home Assistant\" …"
+          }
+        }
       },
       "ArtworkResponse": {
         "type": "object",
@@ -9563,22 +9761,24 @@
           }
         }
       },
-      "NewStatsKey": {
-        "type": "object",
-        "required": [
-          "key",
-          "created_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
+      "NewApiKey": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ApiKey"
           },
-          "key": {
-            "type": "string",
-            "description": "Shown once; only its hash is stored. Send it as `X-Lisek-Stats-Key`."
+          {
+            "type": "object",
+            "required": [
+              "key"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "Shown once; only its hash is stored. Send it as `X-Lisek-Api-Key`."
+              }
+            }
           }
-        }
+        ]
       },
       "NextEpisodeResponse": {
         "type": "object",
@@ -11426,24 +11626,6 @@
           }
         }
       },
-      "StatsKeyStatus": {
-        "type": "object",
-        "required": [
-          "configured"
-        ],
-        "properties": {
-          "configured": {
-            "type": "boolean"
-          },
-          "created_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          }
-        }
-      },
       "StatsSummary": {
         "type": "object",
         "required": [
@@ -12118,6 +12300,60 @@
             }
           }
         ]
+      },
+      "UpdateLibraryRequest": {
+        "type": "object",
+        "description": "Faza 25: what the \"Edytuj\" modal sends. Fields left out stay as they are.",
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "root_paths": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Every folder the library should scan (absolute paths). Items inside\na removed folder leave the library (the files stay on disk)."
+          },
+          "save_metadata_in_media_folder": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        }
+      },
+      "UpdateLibraryResponse": {
+        "type": "object",
+        "required": [
+          "library",
+          "removed_items",
+          "missing_paths"
+        ],
+        "properties": {
+          "library": {
+            "$ref": "#/components/schemas/LibraryResponse"
+          },
+          "missing_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Folders the server cannot see right now (not mounted yet, a typo):\nsaved anyway, scanned once they exist."
+          },
+          "removed_items": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Items that left the library with a removed folder.",
+            "minimum": 0
+          }
+        }
       },
       "UpdateMediaItemRequest": {
         "type": "object",

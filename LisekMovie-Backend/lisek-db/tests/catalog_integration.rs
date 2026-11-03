@@ -296,3 +296,49 @@ async fn catalog_queries_merge_movies_and_series_correctly() {
     assert_eq!(lisek_db::scan_jobs::requeue_interrupted(pool).await.unwrap(), 1);
     db.drop().await;
 }
+
+#[tokio::test]
+async fn a_library_gets_a_second_folder_and_loses_one() {
+    let Some(db) = TestDb::create().await else { return };
+    let pool = &db.pool;
+    let lib = lisek_db::create_library(pool, "Filmy", "movies", &["/mnt/dysk1/Filmy".into()], false)
+        .await
+        .unwrap()
+        .id;
+    lisek_db::persist_scan_results(
+        pool,
+        lib,
+        &[
+            movie("/mnt/dysk1/Filmy/A (2001).mkv", "A", 2001, facts(1, 1)),
+            movie("/mnt/dysk1/Filmy2/B (2002).mkv", "B", 2002, facts(1, 1)),
+        ],
+    )
+    .await
+    .unwrap();
+
+    // A new disk: both folders, renamed.
+    let roots = vec!["/mnt/dysk1/Filmy".to_string(), "/mnt/dysk2/Filmy".to_string()];
+    let updated = lisek_db::update_library(pool, lib, "Wszystkie filmy", &roots, true).await.unwrap().unwrap();
+    assert_eq!(updated.library.name, "Wszystkie filmy");
+    assert_eq!(updated.library.root_paths, roots);
+    assert!(updated.library.save_metadata_in_media_folder);
+    assert_eq!(updated.removed_items, 0);
+    lisek_db::persist_scan_results(pool, lib, &[movie("/mnt/dysk2/Filmy/C (2003).mkv", "C", 2003, facts(1, 1))])
+        .await
+        .unwrap();
+
+    // The first disk goes: only its items leave ("Filmy2" is not inside "Filmy").
+    let updated = lisek_db::update_library(pool, lib, "Filmy", &["/mnt/dysk2/Filmy".to_string()], true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(updated.removed_items, 1);
+    let left: Vec<String> = sqlx::query_scalar("SELECT title FROM media_items WHERE library_id = $1 ORDER BY title")
+        .bind(lib)
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    assert_eq!(left, vec!["B".to_string(), "C".to_string()]);
+    assert!(lisek_db::update_library(pool, Uuid::new_v4(), "X", &[], false).await.unwrap().is_none());
+    db.drop().await;
+}

@@ -10,8 +10,8 @@
   session's stopping point. Clicking a title narrows everything to it, so
   "where do people give up on this film" is one click.
 
-  Below: the bots' read-only key for `GET /api/stats/summary` (Discord /
-  Telegram reports), and (Faza 4) playback quality per session.
+  Below: (Faza 4) playback quality per session. Faza 25: the bots' keys
+  moved to their own tab, `/admin/api`.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -40,8 +40,6 @@
 	} from '$lib/admin/stats';
 
 	type SessionQuality = components['schemas']['SessionQuality'];
-	type KeyStatus = components['schemas']['StatsKeyStatus'];
-	type NewKey = components['schemas']['NewStatsKey'];
 
 	const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 	const RANGES = [7, 30, 90, 365] as const;
@@ -210,63 +208,6 @@
 	const started = (iso: string) =>
 		new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
 
-	// --- bots' key --------------------------------------------------------------
-	let keyStatus = $state<KeyStatus | null>(null);
-	let newKey = $state<NewKey | null>(null);
-	let keyBusy = $state(false);
-	let keyFailed = $state(false);
-	let copied = $state(false);
-
-	async function loadKey() {
-		try {
-			keyStatus = await api<KeyStatus>(token, '/api/admin/stats/key');
-		} catch {
-			keyFailed = true;
-		}
-	}
-
-	async function createKey() {
-		keyBusy = true;
-		keyFailed = false;
-		copied = false;
-		try {
-			newKey = await api<NewKey>(token, '/api/admin/stats/key', 'POST');
-			keyStatus = { configured: true, created_at: newKey.created_at };
-		} catch {
-			keyFailed = true;
-		} finally {
-			keyBusy = false;
-		}
-	}
-
-	async function revokeKey() {
-		keyBusy = true;
-		keyFailed = false;
-		try {
-			await api(token, '/api/admin/stats/key', 'DELETE');
-			keyStatus = { configured: false, created_at: null };
-			newKey = null;
-		} catch {
-			keyFailed = true;
-		} finally {
-			keyBusy = false;
-		}
-	}
-
-	async function copyKey() {
-		if (!newKey) return;
-		try {
-			await navigator.clipboard.writeText(newKey.key);
-			copied = true;
-		} catch {
-			copied = false;
-		}
-	}
-
-	const example = $derived(
-		`curl -H "X-Lisek-Stats-Key: ${newKey?.key ?? '<KEY>'}" "${typeof location === 'undefined' ? '' : location.origin}/api/stats/summary?period=weekly&format=discord"`
-	);
-
 	// --- playback quality (Faza 4) ----------------------------------------------
 	let quality = $state<SessionQuality[]>([]);
 	let qualityFailed = $state(false);
@@ -286,7 +227,6 @@
 		api<{ id: string; username: string }[]>(token, '/api/admin/users')
 			.then((list) => (users = [...list].sort((a, b) => a.username.localeCompare(b.username))))
 			.catch(() => (users = []));
-		void loadKey();
 		void loadQuality();
 		const timer = setInterval(loadQuality, 15000);
 		return () => clearInterval(timer);
@@ -667,61 +607,6 @@
 	{:else if loading && !error}
 		<p role="status" class="mb-6 text-neutral-400">{t('stats.loading')}</p>
 	{/if}
-
-	<!-- Bots' key -->
-	<section class="{card} mb-10">
-		<h2 class="font-semibold">{t('stats.bot_title')}</h2>
-		<p class="mt-1 mb-4 text-sm text-neutral-400">{t('stats.bot_hint')}</p>
-		{#if keyStatus}
-			<p class="mb-3 text-sm">
-				{keyStatus.configured && keyStatus.created_at
-					? t('stats.bot_configured', { date: started(keyStatus.created_at) })
-					: t('stats.bot_none')}
-			</p>
-		{/if}
-		<div class="flex flex-wrap gap-2">
-			<button
-				type="button"
-				class="rounded-md bg-gold px-4 py-2 text-sm font-medium text-black hover:bg-[#d6bb66] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold disabled:opacity-50"
-				disabled={keyBusy}
-				onclick={createKey}
-			>
-				{keyStatus?.configured ? t('stats.bot_rotate') : t('stats.bot_create')}
-			</button>
-			{#if keyStatus?.configured}
-				<button
-					type="button"
-					class="rounded-md border border-white/15 px-4 py-2 text-sm hover:border-red-400 hover:text-red-300 focus-visible:outline-2 focus-visible:outline-gold disabled:opacity-50"
-					disabled={keyBusy}
-					onclick={revokeKey}
-				>
-					{t('stats.bot_revoke')}
-				</button>
-			{/if}
-		</div>
-		{#if newKey}
-			<div class="mt-4 rounded-lg bg-black/40 p-3 ring-1 ring-gold/40">
-				<p class="mb-2 text-sm text-gold">{t('stats.bot_new')}</p>
-				<div class="flex flex-wrap items-center gap-2">
-					<code class="min-w-0 flex-1 rounded bg-white/5 px-2 py-1.5 text-xs break-all"
-						>{newKey.key}</code
-					>
-					<button
-						type="button"
-						class="rounded-md border border-white/15 px-3 py-1.5 text-sm hover:border-gold focus-visible:outline-2 focus-visible:outline-gold"
-						onclick={copyKey}
-					>
-						{copied ? t('stats.bot_copied') : t('stats.bot_copy')}
-					</button>
-				</div>
-			</div>
-		{/if}
-		<p class="mt-4 mb-1 text-xs text-neutral-400">{t('stats.bot_example')}</p>
-		<pre class="overflow-x-auto rounded bg-black/40 p-3 text-xs text-neutral-300">{example}</pre>
-		{#if keyFailed}<p role="alert" class="mt-3 text-sm text-red-400">
-				{t('stats.bot_failed')}
-			</p>{/if}
-	</section>
 
 	<!-- Playback quality (Faza 4) -->
 	<h2 class="mb-2 text-xl font-semibold">{t('player.quality_title')}</h2>

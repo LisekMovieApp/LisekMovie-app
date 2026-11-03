@@ -402,6 +402,24 @@
 			"refresh_save_first": "Najpierw zapisz zmiany.",
 			"refetched": "Metadane pobrane ponownie: dopasowano {matched} z {items}.",
 			"changed_hint": "ID się zmieniły: zapis pobierze z nich metadane od nowa."
+		},
+		"tab_api": "API",
+		"items_search_label": "Szukaj w bibliotece",
+		"items_search_placeholder": "Szukaj po tytule, roku lub odcinku (s01e02)…",
+		"items_search_count": "{shown} z {total}",
+		"items_search_none": "Nic nie pasuje.",
+		"edit_library": {
+			"button": "Edytuj",
+			"title": "Edytuj bibliotekę",
+			"paths_hint": "Ścieżki bezwzględne na serwerze. Dla nowego dysku dodaj kolejny folder — następne skanowanie przejdzie wszystkie.",
+			"path_label": "Folder {number}",
+			"remove_path": "Usuń folder {path}",
+			"path_invalid": "Każdy folder musi być ścieżką bezwzględną na serwerze (np. /mnt/dysk2/Filmy albo D:\\Filmy).",
+			"removed_warning": "Usuniesz folderów: {count}. Ich pozycje znikną z biblioteki (pliki zostają na dysku).",
+			"failed": "Nie udało się zapisać biblioteki.",
+			"saved": "Zapisano bibliotekę „{name}”.",
+			"removed_items": "Z biblioteki zniknęło pozycji z usuniętych folderów: {count}.",
+			"missing_paths": "Serwer nie widzi teraz tych folderów (zapisano mimo to): {paths}"
 		}
 	},
 	"errors": {
@@ -1252,19 +1270,7 @@
 			"watching": "Ogląda",
 			"abandoned": "Przerwane"
 		},
-		"load_more": "Pokaż więcej",
-		"bot_title": "Raporty dla botów (Discord, Telegram)",
-		"bot_hint": "GET /api/stats/summary?period=daily|weekly zwraca podsumowanie (ranking użytkowników, filmów i seriali, czas oglądania, odtworzenia, unikalni widzowie). Z format=discord zwraca gotową treść webhooka Discord. Bot uwierzytelnia się nagłówkiem X-Lisek-Stats-Key; klucz pozwala tylko czytać to podsumowanie.",
-		"bot_configured": "Klucz utworzony {date}.",
-		"bot_none": "Klucz nie jest ustawiony.",
-		"bot_create": "Utwórz klucz",
-		"bot_rotate": "Wygeneruj nowy klucz",
-		"bot_revoke": "Unieważnij klucz",
-		"bot_new": "Skopiuj klucz teraz — nie zostanie pokazany ponownie. Poprzedni klucz przestał działać.",
-		"bot_copy": "Kopiuj",
-		"bot_copied": "Skopiowano",
-		"bot_example": "Przykład (np. cron o północy, wynik wysłany na webhook Discord):",
-		"bot_failed": "Nie udało się zmienić klucza."
+		"load_more": "Pokaż więcej"
 	},
 	"toast": {
 		"close": "Zamknij"
@@ -1389,5 +1395,38 @@
 			"invalid_code": "Kod pokoju ma sześć liter i cyfr.",
 			"other_title": "W tym pokoju leci inny tytuł."
 		}
+	},
+	"api_keys": {
+		"title": "API",
+		"subtitle": "Klucze dla skryptów i automatyzacji — boty Discord i Telegram, Home Assistant, własne dashboardy. Klucz wysyłaj w nagłówku {header}.",
+		"name_label": "Nazwa klucza",
+		"name_placeholder": "np. Statystyki Discord, Mój Bot",
+		"create": "Wygeneruj klucz",
+		"creating": "Generowanie…",
+		"name_invalid": "Nadaj kluczowi nazwę (do 100 znaków).",
+		"create_failed": "Nie udało się utworzyć klucza.",
+		"delete_failed": "Nie udało się unieważnić klucza.",
+		"rename_failed": "Nie udało się zmienić nazwy klucza.",
+		"new_title": "Nowy klucz „{name}”",
+		"new_hint": "Skopiuj go teraz — wyświetla się tylko raz. Serwer przechowuje wyłącznie jego odcisk.",
+		"copy": "Kopiuj",
+		"copied": "Skopiowano",
+		"example": "Przykład: raport tygodnia jako treść webhooka Discord",
+		"key_placeholder": "<KLUCZ>",
+		"list_title": "Klucze",
+		"none": "Brak kluczy.",
+		"col_name": "Nazwa",
+		"col_key": "Klucz",
+		"col_created": "Utworzono",
+		"col_last_used": "Ostatnio użyto",
+		"col_actions": "Akcje",
+		"never_used": "Nigdy",
+		"rename": "Zmień nazwę",
+		"rename_label": "Nowa nazwa",
+		"revoke": "Unieważnij",
+		"confirm_revoke": "Kliknij ponownie, aby unieważnić",
+		"usage_title": "Co klucz może odczytać",
+		"usage_hint": "Klucz daje dostęp tylko do odczytu. Każde zapytanie z poprawnym kluczem odświeża „Ostatnio użyto” (najwyżej raz na minutę).",
+		"usage_summary": "najpopularniejsze filmy i seriale dnia lub tygodnia; format=discord zwraca gotową treść webhooka Discord."
 	}
 }

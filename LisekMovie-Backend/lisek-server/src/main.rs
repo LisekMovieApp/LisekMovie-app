@@ -9,6 +9,7 @@
 //! that output (`npm run gen:api`).
 
 mod admin;
+mod api_keys;
 mod auth;
 mod users;
 mod background_refresh;

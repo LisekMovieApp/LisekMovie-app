@@ -46,12 +46,34 @@
 		type ScanWatch
 	} from '$lib/admin/libraries';
 	import AddLibraryModal from '$lib/components/AddLibraryModal.svelte';
+	import EditLibraryModal from '$lib/components/EditLibraryModal.svelte';
+	import { showToast } from '$lib/toast/toast.svelte';
+	import type { LibraryUpdateResult } from '$lib/admin/libraries';
 	import LiveTvSourcePanel from '$lib/components/LiveTvSourcePanel.svelte';
 
 	let libraries: Library[] = $state([]);
 	let loading = $state(true);
 	let loadFailed = $state(false);
 	let adding = $state(false);
+	/** Faza 25: the library in the "Edytuj" modal. */
+	let editing = $state<Library | null>(null);
+
+	function handleEdited(result: LibraryUpdateResult) {
+		libraries = libraries.map((l) => (l.id === result.library.id ? result.library : l));
+		showToast('success', t('admin.edit_library.saved', { name: result.library.name }));
+		if (result.removed_items > 0) {
+			showToast(
+				'warning',
+				t('admin.edit_library.removed_items', { count: String(result.removed_items) })
+			);
+		}
+		if (result.missing_paths.length > 0) {
+			showToast(
+				'warning',
+				t('admin.edit_library.missing_paths', { paths: result.missing_paths.join(', ') })
+			);
+		}
+	}
 
 	let busyLibraryId: string | null = $state(null);
 	let scanFailedFor: string | null = $state(null);
@@ -242,9 +264,10 @@
 												: t('admin.library_type_tv_shows')}
 									</span>
 								</div>
-								<p class="mt-1 truncate text-xs text-neutral-500">
-									{library.root_paths.join(', ')}
-								</p>
+								<!-- Faza 25: one line per folder (a library can span disks). -->
+								{#each library.root_paths as path (path)}
+									<p class="mt-1 truncate font-mono text-xs text-neutral-500">{path}</p>
+								{/each}
 							</div>
 
 							<div class="flex items-center gap-2">
@@ -296,6 +319,14 @@
 									{isScanning(library.id) ? t('admin.scanning') : t('admin.scan')}
 								</button>
 								{/if}
+								<button
+									type="button"
+									disabled={busyLibraryId === library.id}
+									onclick={() => (editing = library)}
+									class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-gold-dim disabled:cursor-not-allowed disabled:opacity-50"
+								>
+									{t('admin.edit_library.button')}
+								</button>
 								<button
 									type="button"
 									disabled={busyLibraryId === library.id}
@@ -379,4 +410,8 @@
 
 {#if adding}
 	<AddLibraryModal onClose={() => (adding = false)} onCreated={handleCreated} />
+{/if}
+
+{#if editing}
+	<EditLibraryModal library={editing} onClose={() => (editing = null)} onSaved={handleEdited} />
 {/if}

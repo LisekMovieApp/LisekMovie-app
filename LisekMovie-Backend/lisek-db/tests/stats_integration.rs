@@ -322,13 +322,23 @@ async fn statistics_over_known_sessions() {
     let hours = stats::by_hour(pool, &week, "UTC").await.unwrap();
     assert_eq!(hours.iter().map(|h| h.sessions).sum::<i64>(), 5);
 
-    // The bots' key.
-    assert!(stats::api_key(pool).await.unwrap().is_none());
-    stats::set_api_key(pool, "hash1").await.unwrap();
-    stats::set_api_key(pool, "hash2").await.unwrap();
-    assert_eq!(stats::api_key(pool).await.unwrap().unwrap().0, "hash2");
-    stats::delete_api_key(pool).await.unwrap();
-    assert!(stats::api_key(pool).await.unwrap().is_none());
+    // Faza 25: named API keys (the bots' key among them).
+    use lisek_db::api_keys;
+    assert!(api_keys::list(pool).await.unwrap().is_empty());
+    let bot = api_keys::create(pool, "Statystyki Discord", "hash1", "lsk_aaaa", None).await.unwrap();
+    let home = api_keys::create(pool, "Home Assistant", "hash2", "lsk_bbbb", None).await.unwrap();
+    assert!(api_keys::create(pool, "Duplikat", "hash1", "x", None).await.is_err(), "hashes are unique");
+    assert_eq!(api_keys::list(pool).await.unwrap().len(), 2);
+    assert!(bot.last_used_at.is_none());
+    assert_eq!(api_keys::authenticate(pool, "hash1").await.unwrap(), Some((bot.id, "Statystyki Discord".into())));
+    assert!(api_keys::authenticate(pool, "nope").await.unwrap().is_none());
+    let used = api_keys::list(pool).await.unwrap();
+    assert!(used.iter().find(|k| k.id == bot.id).unwrap().last_used_at.is_some());
+    assert!(used.iter().find(|k| k.id == home.id).unwrap().last_used_at.is_none());
+    assert!(api_keys::rename(pool, home.id, "HA").await.unwrap());
+    assert!(api_keys::delete(pool, bot.id).await.unwrap());
+    assert!(!api_keys::delete(pool, bot.id).await.unwrap());
+    assert!(api_keys::authenticate(pool, "hash1").await.unwrap().is_none());
 
     // Scale: two years of sessions. A week's statistics read the week
     // through the time index, not the whole table.
