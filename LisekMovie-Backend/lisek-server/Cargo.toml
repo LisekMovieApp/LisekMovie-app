@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 lisek-core = { path = "../lisek-core" }
 lisek-db = { path = "../lisek-db" }
+lisek-tv = { path = "../lisek-tv" }
 lisek-auth = { path = "../lisek-auth" }
 lisek-library = { path = "../lisek-library" }
 lisek-metadata = { path = "../lisek-metadata" }

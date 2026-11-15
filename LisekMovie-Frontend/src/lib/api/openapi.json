@@ -890,6 +890,58 @@
         ]
       }
     },
+    "/api/admin/livetv/channels/{channel_id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Turns a channel on or off and overrides its number, group and logo.",
+        "operationId": "admin_set_channel",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_channel_settings"
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/admin/livetv/{library_id}": {
       "put": {
         "tags": [
@@ -939,6 +991,52 @@
             "description": ""
           },
           "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/livetv/{library_id}/channels": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The channels of one Live TV library as the administrator edits them.",
+        "operationId": "admin_channels",
+        "parameters": [
+          {
+            "name": "library_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdminLiveChannel"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
             "description": ""
           }
         },
@@ -2686,6 +2784,999 @@
         ]
       }
     },
+    "/api/admin/tv/channels": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "list_channels",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdminChannel"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "create_channel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TvChannel"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": "number_taken"
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tv/channels/order": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "reorder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tv/channels/{id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "update_channel",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TvChannel"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": "number_taken"
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "delete_channel",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tv/channels/{id}/copy-schedule": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "copy_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Slot"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tv/channels/{id}/logo": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "upload_logo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "image/*": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "logo_invalid_image"
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "413": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "delete_logo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tv/channels/{id}/preview": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "preview",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlayoutEntry"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tv/channels/{id}/rebuild": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "rebuild",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RebuildBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RebuildResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tv/channels/{id}/slots": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "list_slots",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Slot"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "replace_slots",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SlotInput"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Slot"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tv/fillers/folders": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "list_folders",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FillerFolder"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "add_folder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FillerFolder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": "folder_exists"
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tv/fillers/folders/{id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "set_folder_enabled",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderEnabled"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "delete_folder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tv/fillers/folders/{id}/files": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "folder_files",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FillerFileRow"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tv/fillers/folders/{id}/scan": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "scan_folder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tv/fillers/presets": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "list_presets",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FillerPresetRow"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Creates a preset (no `id`) or changes one (`id`).",
+        "operationId": "save_preset",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FillerPresetRow"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FillerPresetRow"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "409": {
+            "description": "name_taken"
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tv/fillers/presets/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "delete_preset",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/admin/tv/sources": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "search_sources",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SourceHit"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
     "/api/admin/user-restrictions": {
       "get": {
         "summary": "Accounts that browse with restrictions (the user list marks them).",
@@ -4075,7 +5166,7 @@
         "tags": [
           "media"
         ],
-        "summary": "Starts watching a channel. Answers once the first segment is ready.",
+        "summary": "Starts watching a channel. Answers once the first segment is ready. The\nstream is shared: every viewer of a channel gets the same FFmpeg.",
         "operationId": "play",
         "parameters": [
           {
@@ -4194,7 +5285,7 @@
         "tags": [
           "media"
         ],
-        "summary": "Stops a live stream (leaving the player).",
+        "summary": "Stops watching (leaving the player). The stream itself stops when nobody\nis left.",
         "operationId": "stop",
         "parameters": [
           {
@@ -4252,53 +5343,6 @@
             "lisek_auth": []
           }
         ]
-      }
-    },
-    "/api/livetv/stream/{session_id}/{ticket}/{file}": {
-      "get": {
-        "tags": [
-          "media"
-        ],
-        "summary": "A live playlist or segment. The ticket in the path authorizes it.",
-        "operationId": "stream",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "ticket",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "file",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "HLS playlist or MPEG-TS segment"
-          },
-          "403": {
-            "description": ""
-          },
-          "404": {
-            "description": ""
-          }
-        }
       }
     },
     "/api/logs/client": {
@@ -6369,6 +7413,263 @@
         ]
       }
     },
+    "/api/tv/channels": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "operationId": "channels",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TvChannelView"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/tv/channels/{id}/logo": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "operationId": "logo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Image"
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/tv/channels/{id}/play": {
+      "post": {
+        "tags": [
+          "media"
+        ],
+        "operationId": "play",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TvPlayResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "429": {
+            "description": "tv_capacity_reached"
+          },
+          "502": {
+            "description": "tv_stream_unavailable"
+          },
+          "503": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/tv/guide": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "operationId": "guide",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "path",
+            "description": "Start (RFC 3339); default: now.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "hours",
+            "in": "path",
+            "description": "Hours to show (1-48); default 6.",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GuideChannel"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/tv/sessions/{session_id}": {
+      "delete": {
+        "tags": [
+          "media"
+        ],
+        "operationId": "stop",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "lisek_auth": []
+          }
+        ]
+      }
+    },
+    "/api/tv/stream/{session_id}/{ticket}/{file}": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "operationId": "stream",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "ticket",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "file",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HLS playlist or MPEG-TS segment"
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
     "/api/users/me/avatar": {
       "post": {
         "tags": [
@@ -6551,10 +7852,333 @@
           }
         ]
       }
+    },
+    "/iptv/channels.m3u": {
+      "get": {
+        "tags": [
+          "iptv"
+        ],
+        "summary": "The channel list for IPTV players.",
+        "operationId": "channels_m3u",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "The API key, for players that can only open a URL.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "M3U playlist"
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/iptv/epg.xml": {
+      "get": {
+        "tags": [
+          "iptv"
+        ],
+        "summary": "The programme guide (XMLTV) of every channel in the list.",
+        "operationId": "epg_xml",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "The API key, for players that can only open a URL.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "XMLTV guide"
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/iptv/logo/{channel_id}": {
+      "get": {
+        "tags": [
+          "iptv"
+        ],
+        "summary": "An own channel's logo.",
+        "operationId": "logo",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "description": "The API key, for players that can only open a URL.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Image"
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/iptv/stream/{channel_id}/{file}": {
+      "get": {
+        "tags": [
+          "iptv"
+        ],
+        "summary": "A channel's playlist and segments. Asking for the playlist starts the\nchannel when nobody is watching it.",
+        "operationId": "stream",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "file",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "description": "The API key, for players that can only open a URL.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HLS playlist or MPEG-TS segment"
+          },
+          "401": {
+            "description": ""
+          },
+          "403": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "429": {
+            "description": ""
+          },
+          "502": {
+            "description": ""
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AdminChannel": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/TvChannel"
+          },
+          {
+            "type": "object",
+            "required": [
+              "dirty",
+              "slot_count",
+              "streaming",
+              "viewers"
+            ],
+            "properties": {
+              "built_until": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "dirty": {
+                "type": "boolean"
+              },
+              "last_build_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "last_error": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Notes of the last build (\"slot 2 has nothing to play\")."
+              },
+              "now_ends_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "now_subtitle": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "now_title": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "What plays right now."
+              },
+              "slot_count": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "streaming": {
+                "type": "boolean",
+                "description": "The channel is being streamed now, and how many browser viewers it has."
+              },
+              "viewers": {
+                "type": "integer",
+                "format": "int64"
+              }
+            }
+          }
+        ]
+      },
+      "AdminLiveChannel": {
+        "type": "object",
+        "description": "A channel as the administrator edits it (Faza 26): what the provider\nsays and what the administrator overrode.",
+        "required": [
+          "id",
+          "library_id",
+          "name",
+          "enabled",
+          "failure_count"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "failure_count": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Failed starts since the last good one (a dead channel climbs)."
+          },
+          "group_override": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "group_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_failure_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "library_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "logo_override": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "logo_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "number": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "number_override": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "AdminUserEntry": {
         "allOf": [
           {
@@ -6602,7 +8226,8 @@
           "id",
           "name",
           "prefix",
-          "created_at"
+          "created_at",
+          "scopes"
         ],
         "properties": {
           "created_at": {
@@ -6626,6 +8251,13 @@
           "prefix": {
             "type": "string",
             "description": "The key's first characters (`lsk_AbC1`), to tell keys apart."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the key may do: `stats` (read statistics), `iptv` (the channel\nlist, guide and streams for IPTV players)."
           }
         }
       },
@@ -6638,6 +8270,16 @@
           "name": {
             "type": "string",
             "description": "\"Statystyki Discord\", \"Home Assistant\" …"
+          },
+          "scopes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "`stats` and/or `iptv`. Missing: `stats` (a key made before scopes)."
           }
         }
       },
@@ -6879,6 +8521,47 @@
           }
         }
       },
+      "ChannelBody": {
+        "type": "object",
+        "required": [
+          "name",
+          "timezone"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "fallback_filler_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "group_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "keep_running": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string",
+            "description": "Empty: the smallest free number."
+          },
+          "quality": {
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string"
+          }
+        }
+      },
       "ChannelResponse": {
         "allOf": [
           {
@@ -6917,6 +8600,37 @@
             }
           }
         ]
+      },
+      "ChannelSettings": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "group_override": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "logo_override": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A logo address (http/https) replacing the provider's; empty clears it."
+          },
+          "number_override": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Replaces the provider's number in the lists and the IPTV export; empty clears it."
+          }
+        }
       },
       "ChapterResponse": {
         "type": "object",
@@ -7139,6 +8853,18 @@
           },
           "poster_url": {
             "type": "string"
+          }
+        }
+      },
+      "CopyBody": {
+        "type": "object",
+        "required": [
+          "from_channel_id"
+        ],
+        "properties": {
+          "from_channel_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -8162,6 +9888,123 @@
           }
         }
       },
+      "FillerFileRow": {
+        "type": "object",
+        "required": [
+          "id",
+          "folder_id",
+          "path",
+          "duration_ms"
+        ],
+        "properties": {
+          "duration_ms": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "folder_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "FillerFolder": {
+        "type": "object",
+        "required": [
+          "id",
+          "path",
+          "enabled",
+          "file_count"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "file_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "scanned_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "FillerPresetRow": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "mode"
+        ],
+        "properties": {
+          "count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "duration_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "folder_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "description": "`pre`, `mid`, `post`, `tail` or `fallback`."
+          },
+          "mode": {
+            "type": "string",
+            "description": "`count`, `duration` or `pad`."
+          },
+          "name": {
+            "type": "string"
+          },
+          "pad_minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          }
+        }
+      },
       "FilmographyItemResponse": {
         "type": "object",
         "description": "One title of a person's filmography.",
@@ -8243,6 +10086,28 @@
               "boolean",
               "null"
             ]
+          }
+        }
+      },
+      "FolderBody": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "FolderEnabled": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
           }
         }
       },
@@ -8364,31 +10229,23 @@
         }
       },
       "GuideChannel": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/LiveChannel"
+        "type": "object",
+        "required": [
+          "channel_id",
+          "programmes"
+        ],
+        "properties": {
+          "channel_id": {
+            "type": "string",
+            "format": "uuid"
           },
-          {
-            "type": "object",
-            "required": [
-              "programs"
-            ],
-            "properties": {
-              "logo_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "programs": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/LiveProgram"
-                }
-              }
+          "programmes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Programme"
             }
           }
-        ]
+        }
       },
       "GuideResponse": {
         "type": "object",
@@ -8891,6 +10748,17 @@
             }
           }
         }
+      },
+      "ItemKind": {
+        "type": "string",
+        "enum": [
+          "content",
+          "pre",
+          "mid",
+          "post",
+          "tail",
+          "pad"
+        ]
       },
       "ItemPeopleResponse": {
         "type": "object",
@@ -9836,6 +11704,48 @@
           }
         }
       },
+      "NowNext": {
+        "type": "object",
+        "required": [
+          "title",
+          "starts_at",
+          "ends_at"
+        ],
+        "properties": {
+          "ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "subtitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "OrderBody": {
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
       "Period": {
         "type": "string",
         "enum": [
@@ -10335,6 +12245,64 @@
         },
         "additionalProperties": false
       },
+      "PlayoutEntry": {
+        "type": "object",
+        "description": "One timeline entry, with the file it plays.",
+        "required": [
+          "starts_at",
+          "ends_at",
+          "kind",
+          "title",
+          "in_ms",
+          "out_ms",
+          "guide_group",
+          "in_guide"
+        ],
+        "properties": {
+          "ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "guide_group": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "in_guide": {
+            "type": "boolean"
+          },
+          "in_ms": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ItemKind"
+          },
+          "media_item_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "out_ms": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "subtitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
       "PoolRequest": {
         "type": "object",
         "required": [
@@ -10352,6 +12320,47 @@
           "use_pool": {
             "type": "boolean",
             "description": "Transcode with the pool (`hardware_acceleration = \"pool\"`). Off:\nback to the CPU when the pool was in use; other modes stay."
+          }
+        }
+      },
+      "Programme": {
+        "type": "object",
+        "description": "One programme of the guide: a film or episode with its ads.",
+        "required": [
+          "starts_at",
+          "ends_at",
+          "title"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "media_item_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "subtitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
           }
         }
       },
@@ -10595,6 +12604,49 @@
           },
           "name": {
             "type": "string"
+          }
+        }
+      },
+      "RebuildBody": {
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/RebuildMode"
+          }
+        }
+      },
+      "RebuildMode": {
+        "type": "string",
+        "enum": [
+          "continue",
+          "refresh",
+          "reset"
+        ]
+      },
+      "RebuildResult": {
+        "type": "object",
+        "required": [
+          "planned",
+          "built_until",
+          "warnings"
+        ],
+        "properties": {
+          "built_until": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "planned": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -11427,6 +13479,135 @@
           }
         }
       },
+      "Slot": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SlotInput"
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "position"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "position": {
+                "type": "integer",
+                "format": "int32"
+              },
+              "source_label": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Name of the library, series, film or collection; none if it is gone."
+              }
+            }
+          }
+        ],
+        "description": "A stored slot, with the name of its source for display."
+      },
+      "SlotInput": {
+        "type": "object",
+        "description": "A schedule slot as the admin edits it.",
+        "required": [
+          "start_mode",
+          "days_of_week",
+          "source_kind",
+          "source_id",
+          "play_order",
+          "mode",
+          "tail_mode",
+          "in_guide"
+        ],
+        "properties": {
+          "count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "days_of_week": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "duration_minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "in_guide": {
+            "type": "boolean"
+          },
+          "mid_filler_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "play_order": {
+            "type": "string"
+          },
+          "post_filler_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "pre_filler_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "source_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_kind": {
+            "type": "string"
+          },
+          "start_mode": {
+            "type": "string"
+          },
+          "start_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Local time of day, `HH:MM`; none: right after the slot before."
+          },
+          "tail_filler_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "tail_mode": {
+            "type": "string"
+          },
+          "title_override": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "Source": {
         "type": "string",
         "description": "Where a verdict came from.",
@@ -11435,6 +13616,34 @@
           "diagnostics",
           "runtime"
         ]
+      },
+      "SourceHit": {
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "title"
+        ],
+        "properties": {
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "\"12 odcinków\", the year, the library type..."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "description": "`library`, `series`, `movie` or `collection`."
+          },
+          "title": {
+            "type": "string"
+          }
+        }
       },
       "StartRequest": {
         "type": "object",
@@ -12300,6 +14509,150 @@
             }
           }
         ]
+      },
+      "TvChannel": {
+        "type": "object",
+        "required": [
+          "id",
+          "number",
+          "name",
+          "has_logo",
+          "enabled",
+          "position",
+          "timezone",
+          "quality",
+          "keep_running",
+          "schedule_version",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "fallback_filler_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "group_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "has_logo": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "keep_running": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "schedule_version": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "timezone": {
+            "type": "string"
+          }
+        }
+      },
+      "TvChannelView": {
+        "type": "object",
+        "required": [
+          "id",
+          "number",
+          "name",
+          "has_logo"
+        ],
+        "properties": {
+          "group_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "has_logo": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "next": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NowNext"
+              }
+            ]
+          },
+          "now": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NowNext"
+              }
+            ]
+          },
+          "number": {
+            "type": "string"
+          }
+        }
+      },
+      "TvPlayResponse": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "stream_url",
+          "channel_id",
+          "name"
+        ],
+        "properties": {
+          "channel_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream_url": {
+            "type": "string",
+            "description": "Live HLS playlist (no headers needed)."
+          }
+        }
       },
       "UpdateLibraryRequest": {
         "type": "object",

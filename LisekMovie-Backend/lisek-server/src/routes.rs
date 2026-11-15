@@ -27,8 +27,8 @@ use crate::auth::{AdminUser, SessionUser};
 use crate::openapi::ApiDoc;
 use crate::state::SharedState;
 use crate::{
-    admin, api_keys, auth, browser_notifications, collections, details, download, editor, games, hardware, identify, livetv, logging, media,
-    notifications, people, playback, profile, scan_jobs, search, series, setup, stats, syncplay, telemetry, trickplay, users,
+    admin, api_keys, auth, iptv, browser_notifications, collections, details, download, editor, games, hardware, identify, livetv, logging, media,
+    notifications, people, playback, profile, scan_jobs, search, series, setup, stats, syncplay, telemetry, trickplay, tv, tvwatch, users,
 };
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -68,12 +68,23 @@ fn public() -> OpenApiRouter<SharedState> {
         // Faza 20: watch together; the session comes in the first frame.
         .routes(routes!(syncplay::socket))
         // Faza 20: live TV segments, authorized by the ticket in the path.
-        .routes(routes!(livetv::stream))
+        .routes(routes!(tvwatch::stream))
         // An admin session or the bots' read-only `X-Lisek-Stats-Key`
         // (checked by the handler's `StatsReader`).
         .routes(routes!(stats::summary))
         // Browser errors, signed in or not (rate-limited per address).
         .routes(routes!(logging::client))
+}
+
+/// Faza 26: the IPTV provider. Guarded by an API key with the `iptv` scope
+/// (header or `?key=`), and logged with the key masked.
+fn iptv() -> OpenApiRouter<SharedState> {
+    OpenApiRouter::new()
+        .routes(routes!(iptv::channels_m3u))
+        .routes(routes!(iptv::epg_xml))
+        .routes(routes!(iptv::logo))
+        .routes(routes!(iptv::stream))
+        .layer(middleware::from_fn(iptv::log_request))
 }
 
 fn user() -> OpenApiRouter<SharedState> {
@@ -137,6 +148,11 @@ fn user() -> OpenApiRouter<SharedState> {
         .routes(routes!(livetv::logo))
         .routes(routes!(livetv::play))
         .routes(routes!(livetv::stop))
+        .routes(routes!(tvwatch::channels))
+        .routes(routes!(tvwatch::guide))
+        .routes(routes!(tvwatch::logo))
+        .routes(routes!(tvwatch::play))
+        .routes(routes!(tvwatch::stop))
 }
 
 fn admin() -> OpenApiRouter<SharedState> {
@@ -196,6 +212,23 @@ fn admin() -> OpenApiRouter<SharedState> {
         .routes(routes!(livetv::admin_sources))
         .routes(routes!(livetv::admin_set_source))
         .routes(routes!(livetv::admin_refresh))
+        .routes(routes!(livetv::admin_channels))
+        .routes(routes!(livetv::admin_set_channel))
+        .routes(routes!(tv::list_channels, tv::create_channel))
+        .routes(routes!(tv::reorder))
+        .routes(routes!(tv::update_channel, tv::delete_channel))
+        .routes(routes!(tv::upload_logo, tv::delete_logo))
+        .routes(routes!(tv::list_slots, tv::replace_slots))
+        .routes(routes!(tv::copy_schedule))
+        .routes(routes!(tv::rebuild))
+        .routes(routes!(tv::preview))
+        .routes(routes!(tv::search_sources))
+        .routes(routes!(tv::list_folders, tv::add_folder))
+        .routes(routes!(tv::set_folder_enabled, tv::delete_folder))
+        .routes(routes!(tv::scan_folder))
+        .routes(routes!(tv::folder_files))
+        .routes(routes!(tv::list_presets, tv::save_preset))
+        .routes(routes!(tv::delete_preset))
 }
 
 /// Puts extractor `E` in front of every route of `group` as a route layer:
@@ -220,9 +253,11 @@ pub fn build(state: &SharedState) -> (Router<SharedState>, OpenApiDoc) {
     let (public_router, mut api) = public().split_for_parts();
     let (user_router, user_api) = guarded::<SessionUser>(user(), state);
     let (admin_router, admin_api) = guarded::<AdminUser>(admin(), state);
+    let (iptv_router, iptv_api) = guarded::<iptv::IptvClient>(iptv(), state);
+    api.merge(iptv_api);
     api.merge(user_api);
     api.merge(admin_api);
-    let router = public_router.merge(user_router);
+    let router = public_router.merge(user_router).merge(iptv_router);
 
     // Serialized once; the spec does not change while the process runs.
     let spec: Arc<str> = api.to_json().expect("OpenAPI document serializes").into();

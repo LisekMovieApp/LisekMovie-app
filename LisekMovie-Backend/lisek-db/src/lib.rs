@@ -40,6 +40,7 @@ pub mod seasons;
 pub mod stats;
 pub mod streams;
 pub mod trickplay;
+pub mod tv;
 pub mod users;
 
 pub use accounts::*;

@@ -13,6 +13,7 @@
 	import { getSessionCookieClientSide } from '$lib/auth';
 	import {
 		API_KEY_HEADER,
+		KEY_SCOPES,
 		SUMMARY_ENDPOINT,
 		createApiKey,
 		curlExample,
@@ -29,6 +30,7 @@
 	let loading = $state(true);
 	let loadFailed = $state(false);
 	let name = $state('');
+	let scopes = $state<string[]>(['stats']);
 	let creating = $state(false);
 	let errorKey = $state<string | null>(null);
 	let fresh = $state<NewApiKey | null>(null);
@@ -69,7 +71,7 @@
 		errorKey = null;
 		copied = null;
 		try {
-			fresh = await createApiKey(token(), name.trim());
+			fresh = await createApiKey(token(), name.trim(), scopes);
 			name = '';
 			keys = [fresh, ...keys];
 		} catch {
@@ -159,9 +161,25 @@
 					class="rounded-md border border-neutral-700 bg-black px-3 py-2 text-neutral-100 focus:border-gold"
 				/>
 			</label>
+			<fieldset class="flex flex-wrap items-center gap-3 text-sm text-neutral-300">
+				<legend class="sr-only">{t('api_keys.scopes_label')}</legend>
+				{#each KEY_SCOPES as scope (scope)}
+					<label class="flex items-center gap-1.5">
+						<input
+							type="checkbox"
+							checked={scopes.includes(scope)}
+							onchange={() =>
+								(scopes = scopes.includes(scope)
+									? scopes.filter((s) => s !== scope)
+									: [...scopes, scope])}
+						/>
+						{t(`api_keys.scope.${scope}`)}
+					</label>
+				{/each}
+			</fieldset>
 			<button
 				type="submit"
-				disabled={creating}
+				disabled={creating || scopes.length === 0}
 				class="flex items-center justify-center gap-1.5 rounded-md bg-gold px-4 py-2 text-sm font-medium text-black transition-colors hover:bg-gold-dim disabled:opacity-50"
 			>
 				<Icon name="key" class="size-4" />
@@ -188,6 +206,12 @@
 						{copied === 'key' ? t('api_keys.copied') : t('api_keys.copy')}
 					</button>
 				</div>
+				{#if fresh.scopes.includes('iptv')}
+					<p class="mt-3 mb-1 text-xs text-neutral-400">{t('api_keys.iptv_example')}</p>
+					<pre class="overflow-x-auto rounded bg-black/40 p-3 text-xs text-neutral-300">{`${origin}/iptv/channels.m3u?key=${fresh.key}`}</pre>
+					<p class="mt-1 text-xs text-amber-400">{t('tv_admin.export_warning')}</p>
+				{/if}
+				{#if fresh.scopes.includes('stats')}
 				<p class="mt-3 mb-1 text-xs text-neutral-400">{t('api_keys.example')}</p>
 				<div class="flex flex-wrap items-start gap-2">
 					<pre
@@ -196,6 +220,7 @@
 						{copied === 'curl' ? t('api_keys.copied') : t('api_keys.copy')}
 					</button>
 				</div>
+				{/if}
 			</section>
 		{/if}
 
@@ -216,6 +241,7 @@
 							<tr>
 								<th class="p-3 font-medium">{t('api_keys.col_name')}</th>
 								<th class="p-3 font-medium">{t('api_keys.col_key')}</th>
+								<th class="p-3 font-medium">{t('api_keys.col_scopes')}</th>
 								<th class="p-3 font-medium whitespace-nowrap">{t('api_keys.col_created')}</th>
 								<th class="p-3 font-medium whitespace-nowrap">{t('api_keys.col_last_used')}</th>
 								<th class="p-3"><span class="sr-only">{t('api_keys.col_actions')}</span></th>
@@ -249,6 +275,9 @@
 									<td class="p-3 font-mono text-xs whitespace-nowrap text-neutral-400"
 										>{key.prefix ? `${key.prefix}…` : '—'}</td
 									>
+									<td class="p-3 text-xs text-neutral-300">
+										{key.scopes.map((s) => t(`api_keys.scope.${s}`)).join(', ')}
+									</td>
 									<td class="p-3 whitespace-nowrap text-neutral-300">{when(key.created_at)}</td>
 									<td class="p-3 whitespace-nowrap">
 										{#if key.last_used_at}

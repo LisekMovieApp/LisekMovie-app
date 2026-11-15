@@ -516,6 +516,10 @@ def main():
             # Faza 25: a library edited in place (name, folders).
             import phase25_smoke
             phase25_smoke.check_library_edit(request,ok_json,sql,token,other_token,root,movie_path)
+            # Faza 26: own TV channels, shared HLS stream, IPTV export with API keys.
+            if args.ffmpeg:
+                import phase26_smoke
+                phase26_smoke.check_tv_channels(request,ok_json,sql,base,token,other_token,root,args.ffmpeg,args.ffprobe)
             ok_json("/api/auth/logout","POST",{},token)
             if args.node:
                 event=notification_queue.get(timeout=15)
@@ -536,7 +540,7 @@ def main():
             server.wait(timeout=10)
             log.close()
             server = None
-            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls, fix match, downloads, cast and crew, details and chapters, series pages, global search, alpha picker, watch statistics, hardware diagnostics, fix match by IMDb id after a reload, central logs, avatars and online status, metadata editor and artwork, quality presets, watch together, live TV, GPU software fallback, season editor, metadata language order and cascade, identity kept by ids, ids in the editor, cast replaced by fix match, library folders edited, named API keys")
+            print("PASS: migrations, concurrent setup, auth, sealed provider keys, closed CORS, login rate limit, queued scan + progress + stored probe, ranges, resume, ownership, stats, games, ticket revocation, webhook retry, playback settings, remote limits, optional FFmpeg/HLS/NVENC, remux/subtitles/seek/burn-in, browser notifications, collections, parental controls, fix match, downloads, cast and crew, details and chapters, series pages, global search, alpha picker, watch statistics, hardware diagnostics, fix match by IMDb id after a reload, central logs, avatars and online status, metadata editor and artwork, quality presets, watch together, live TV, GPU software fallback, season editor, metadata language order and cascade, identity kept by ids, ids in the editor, cast replaced by fix match, library folders edited, named API keys, own TV channels with a shared HLS stream, fillers and the IPTV export")
     finally:
         if server:
             server.terminate()

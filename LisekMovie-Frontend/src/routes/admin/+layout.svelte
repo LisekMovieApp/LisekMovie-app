@@ -55,6 +55,7 @@
         { href: '/admin/playback', labelKey: 'admin.tab_hardware' },
 		{ href: '/admin/trickplay', labelKey: 'trickplay_admin.tab' },
         { href: '/admin/notifications', labelKey: 'notifications.title' },
+		{ href: '/admin/tv', labelKey: 'tv_admin.tab' },
 		{ href: '/admin/games', labelKey: 'nav.games' },
 		{ href: '/admin/libraries', labelKey: 'admin.tab_libraries' },
 		{ href: '/admin/media/fallback', labelKey: 'admin.tab_fallback' },

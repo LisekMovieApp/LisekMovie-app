@@ -115,8 +115,10 @@ pub struct AppState {
     pub presence: crate::profile::Presence,
     /// Watch-together rooms (Faza 20).
     pub syncplay: crate::syncplay::Rooms,
-    /// Running live TV streams (Faza 20).
-    pub live: crate::livetv::LiveSessions,
+    /// Own TV channels that are being streamed (Faza 26).
+    pub tv: crate::tvlive::TvSessions,
+    /// Wakes the TV timeline builder after a schedule or filler edit.
+    pub tv_wakeup: Notify,
 }
 
 impl AppState {
@@ -134,7 +136,8 @@ impl AppState {
             download_tickets: crate::download::DownloadTickets::default(),
             presence: crate::profile::Presence::default(),
             syncplay: crate::syncplay::Rooms::default(),
-            live: crate::livetv::LiveSessions::default(),
+            tv: crate::tvlive::TvSessions::default(),
+            tv_wakeup: Notify::new(),
         }
     }
 

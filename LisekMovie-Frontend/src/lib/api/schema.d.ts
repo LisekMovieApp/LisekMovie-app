@@ -266,6 +266,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/livetv/channels/{channel_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Turns a channel on or off and overrides its number, group and logo. */
+        put: operations["admin_set_channel"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/livetv/{library_id}": {
         parameters: {
             query?: never;
@@ -276,6 +293,23 @@ export interface paths {
         get?: never;
         /** Changes a Live TV library's links and refreshes it. */
         put: operations["admin_set_source"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/livetv/{library_id}/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The channels of one Live TV library as the administrator edits them. */
+        get: operations["admin_channels"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -739,6 +773,247 @@ export interface paths {
          *     progress and recent failures. The admin page polls it.
          */
         get: operations["status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tv/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_channels"];
+        put?: never;
+        post: operations["create_channel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tv/channels/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["reorder"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tv/channels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_channel"];
+        post?: never;
+        delete: operations["delete_channel"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tv/channels/{id}/copy-schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["copy_schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tv/channels/{id}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["upload_logo"];
+        delete: operations["delete_logo"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tv/channels/{id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["preview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tv/channels/{id}/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["rebuild"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tv/channels/{id}/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_slots"];
+        put: operations["replace_slots"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tv/fillers/folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_folders"];
+        put?: never;
+        post: operations["add_folder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tv/fillers/folders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["set_folder_enabled"];
+        post?: never;
+        delete: operations["delete_folder"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tv/fillers/folders/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["folder_files"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tv/fillers/folders/{id}/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["scan_folder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tv/fillers/presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_presets"];
+        put?: never;
+        /** Creates a preset (no `id`) or changes one (`id`). */
+        post: operations["save_preset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tv/fillers/presets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["delete_preset"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tv/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["search_sources"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1309,7 +1584,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Starts watching a channel. Answers once the first segment is ready. */
+        /**
+         * Starts watching a channel. Answers once the first segment is ready. The
+         *     stream is shared: every viewer of a channel gets the same FFmpeg.
+         */
         post: operations["play"];
         delete?: never;
         options?: never;
@@ -1344,7 +1622,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Stops a live stream (leaving the player). */
+        /**
+         * Stops watching (leaving the player). The stream itself stops when nobody
+         *     is left.
+         */
         delete: operations["stop"];
         options?: never;
         head?: never;
@@ -1360,23 +1641,6 @@ export interface paths {
         };
         /** Whether Live TV is there for this account (the main menu's tab). */
         get: operations["status"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/livetv/stream/{session_id}/{ticket}/{file}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** A live playlist or segment. The ticket in the path authorizes it. */
-        get: operations["stream"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2163,6 +2427,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tv/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["channels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tv/channels/{id}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["logo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tv/channels/{id}/play": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["play"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tv/guide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["guide"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tv/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["stop"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tv/stream/{session_id}/{ticket}/{file}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["stream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/users/me/avatar": {
         parameters: {
             query?: never;
@@ -2241,10 +2601,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/iptv/channels.m3u": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The channel list for IPTV players. */
+        get: operations["channels_m3u"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iptv/epg.xml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The programme guide (XMLTV) of every channel in the list. */
+        get: operations["epg_xml"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iptv/logo/{channel_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An own channel's logo. */
+        get: operations["logo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/iptv/stream/{channel_id}/{file}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A channel's playlist and segments. Asking for the playlist starts the
+         *     channel when nobody is watching it.
+         */
+        get: operations["stream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AdminChannel: components["schemas"]["TvChannel"] & {
+            /** Format: date-time */
+            built_until?: string | null;
+            dirty: boolean;
+            /** Format: date-time */
+            last_build_at?: string | null;
+            /** @description Notes of the last build ("slot 2 has nothing to play"). */
+            last_error?: string | null;
+            /** Format: date-time */
+            now_ends_at?: string | null;
+            now_subtitle?: string | null;
+            /** @description What plays right now. */
+            now_title?: string | null;
+            /** Format: int64 */
+            slot_count: number;
+            /** @description The channel is being streamed now, and how many browser viewers it has. */
+            streaming: boolean;
+            /** Format: int64 */
+            viewers: number;
+        };
+        /**
+         * @description A channel as the administrator edits it (Faza 26): what the provider
+         *     says and what the administrator overrode.
+         */
+        AdminLiveChannel: {
+            enabled: boolean;
+            /**
+             * Format: int32
+             * @description Failed starts since the last good one (a dead channel climbs).
+             */
+            failure_count: number;
+            group_override?: string | null;
+            group_title?: string | null;
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            last_failure_at?: string | null;
+            /** Format: uuid */
+            library_id: string;
+            logo_override?: string | null;
+            logo_url?: string | null;
+            name: string;
+            number?: string | null;
+            number_override?: string | null;
+        };
         /** @description One account in the admin user list. */
         AdminUserEntry: components["schemas"]["User"] & {
             avatar_url?: string | null;
@@ -2269,10 +2745,17 @@ export interface components {
             name: string;
             /** @description The key's first characters (`lsk_AbC1`), to tell keys apart. */
             prefix: string;
+            /**
+             * @description What the key may do: `stats` (read statistics), `iptv` (the channel
+             *     list, guide and streams for IPTV players).
+             */
+            scopes: string[];
         };
         ApiKeyRequest: {
             /** @description "Statystyki Discord", "Home Assistant" … */
             name: string;
+            /** @description `stats` and/or `iptv`. Missing: `stats` (a key made before scopes). */
+            scopes?: string[] | null;
         };
         ArtworkResponse: {
             /** @description Items that got the new picture (a series counts every episode). */
@@ -2342,11 +2825,31 @@ export interface components {
             current_password?: string | null;
             new_password: string;
         };
+        ChannelBody: {
+            enabled?: boolean;
+            /** Format: uuid */
+            fallback_filler_id?: string | null;
+            group_title?: string | null;
+            keep_running?: boolean;
+            name: string;
+            /** @description Empty: the smallest free number. */
+            number?: string;
+            quality?: string;
+            timezone: string;
+        };
         ChannelResponse: components["schemas"]["LiveChannel"] & {
             /** @description `/api/livetv/channels/{id}/logo`, or null. */
             logo_url?: string | null;
             next?: null | components["schemas"]["LiveProgram"];
             now?: null | components["schemas"]["LiveProgram"];
+        };
+        ChannelSettings: {
+            enabled: boolean;
+            group_override?: string | null;
+            /** @description A logo address (http/https) replacing the provider's; empty clears it. */
+            logo_override?: string | null;
+            /** @description Replaces the provider's number in the lists and the IPTV export; empty clears it. */
+            number_override?: string | null;
         };
         ChapterResponse: {
             /** @description `/api/media/{id}/chapters/{index}/image?v=...` (`?token=` works). */
@@ -2451,6 +2954,10 @@ export interface components {
             last_year?: number | null;
             name: string;
             poster_url: string;
+        };
+        CopyBody: {
+            /** Format: uuid */
+            from_channel_id: string;
         };
         CpuInfo: {
             logical_cores: number;
@@ -2786,6 +3293,42 @@ export interface components {
             path: string;
             version?: string | null;
         };
+        FillerFileRow: {
+            /** Format: int32 */
+            duration_ms: number;
+            /** Format: uuid */
+            folder_id: string;
+            /** Format: uuid */
+            id: string;
+            path: string;
+        };
+        FillerFolder: {
+            enabled: boolean;
+            /** Format: int32 */
+            file_count: number;
+            /** Format: uuid */
+            id: string;
+            last_error?: string | null;
+            path: string;
+            /** Format: date-time */
+            scanned_at?: string | null;
+        };
+        FillerPresetRow: {
+            /** Format: int32 */
+            count?: number | null;
+            /** Format: int32 */
+            duration_seconds?: number | null;
+            folder_ids?: string[];
+            /** Format: uuid */
+            id?: string;
+            /** @description `pre`, `mid`, `post`, `tail` or `fallback`. */
+            kind: string;
+            /** @description `count`, `duration` or `pad`. */
+            mode: string;
+            name: string;
+            /** Format: int32 */
+            pad_minutes?: number | null;
+        };
         /** @description One title of a person's filmography. */
         FilmographyItemResponse: {
             character?: string | null;
@@ -2805,6 +3348,12 @@ export interface components {
         FlagsRequest: {
             favorite?: boolean | null;
             watched?: boolean | null;
+        };
+        FolderBody: {
+            path: string;
+        };
+        FolderEnabled: {
+            enabled: boolean;
         };
         Game: {
             enabled: boolean;
@@ -2844,9 +3393,10 @@ export interface components {
             /** @description `nvidia`, `intel`, `amd` or `other`. */
             vendor: string;
         };
-        GuideChannel: components["schemas"]["LiveChannel"] & {
-            logo_url?: string | null;
-            programs: components["schemas"]["LiveProgram"][];
+        GuideChannel: {
+            /** Format: uuid */
+            channel_id: string;
+            programmes: components["schemas"]["Programme"][];
         };
         GuideResponse: {
             channels: components["schemas"]["GuideChannel"][];
@@ -3036,6 +3586,8 @@ export interface components {
             video?: null | components["schemas"]["VideoSummary"];
             writers: components["schemas"]["CrewMember"][];
         };
+        /** @enum {string} */
+        ItemKind: "content" | "pre" | "mid" | "post" | "tail" | "pad";
         ItemPeopleResponse: {
             /** @description Directors, writers, then the cast in billing order. */
             items: components["schemas"]["CreditResponse"][];
@@ -3403,6 +3955,17 @@ export interface components {
             /** @description Series title (episodes carry no title of their own yet). */
             title: string;
         };
+        NowNext: {
+            /** Format: date-time */
+            ends_at: string;
+            /** Format: date-time */
+            starts_at: string;
+            subtitle?: string | null;
+            title: string;
+        };
+        OrderBody: {
+            ids: string[];
+        };
         /** @enum {string} */
         Period: "daily" | "weekly";
         PersonResponse: {
@@ -3714,6 +4277,25 @@ export interface components {
              */
             video_bitrate_kbps?: number;
         };
+        /** @description One timeline entry, with the file it plays. */
+        PlayoutEntry: {
+            /** Format: date-time */
+            ends_at: string;
+            /** Format: int32 */
+            guide_group: number;
+            in_guide: boolean;
+            /** Format: int32 */
+            in_ms: number;
+            kind: components["schemas"]["ItemKind"];
+            /** Format: uuid */
+            media_item_id?: string | null;
+            /** Format: int32 */
+            out_ms: number;
+            /** Format: date-time */
+            starts_at: string;
+            subtitle?: string | null;
+            title: string;
+        };
         PoolRequest: {
             /** @description The whole pool as the admin panel shows it (enabled and disabled). */
             devices: components["schemas"]["HardwareDevice"][];
@@ -3722,6 +4304,18 @@ export interface components {
              *     back to the CPU when the pool was in use; other modes stay.
              */
             use_pool: boolean;
+        };
+        /** @description One programme of the guide: a film or episode with its ads. */
+        Programme: {
+            description?: string | null;
+            /** Format: date-time */
+            ends_at: string;
+            /** Format: uuid */
+            media_item_id?: string | null;
+            /** Format: date-time */
+            starts_at: string;
+            subtitle?: string | null;
+            title: string;
         };
         /** @description What the server answers a report with. */
         ProgressAck: {
@@ -3822,6 +4416,17 @@ export interface components {
             id: string;
             library_type: string;
             name: string;
+        };
+        RebuildBody: {
+            mode: components["schemas"]["RebuildMode"];
+        };
+        /** @enum {string} */
+        RebuildMode: "continue" | "refresh" | "reset";
+        RebuildResult: {
+            /** Format: date-time */
+            built_until: string;
+            planned: number;
+            warnings: string[];
         };
         /** @description What one refetch did. */
         RefetchSummary: {
@@ -4113,11 +4718,57 @@ export interface components {
             /** Format: double */
             watched_seconds: number;
         };
+        /** @description A stored slot, with the name of its source for display. */
+        Slot: components["schemas"]["SlotInput"] & {
+            /** Format: uuid */
+            id: string;
+            /** Format: int32 */
+            position: number;
+            /** @description Name of the library, series, film or collection; none if it is gone. */
+            source_label?: string | null;
+        };
+        /** @description A schedule slot as the admin edits it. */
+        SlotInput: {
+            /** Format: int32 */
+            count?: number | null;
+            /** Format: int32 */
+            days_of_week: number;
+            /** Format: int32 */
+            duration_minutes?: number | null;
+            in_guide: boolean;
+            /** Format: uuid */
+            mid_filler_id?: string | null;
+            mode: string;
+            play_order: string;
+            /** Format: uuid */
+            post_filler_id?: string | null;
+            /** Format: uuid */
+            pre_filler_id?: string | null;
+            /** Format: uuid */
+            source_id: string;
+            source_kind: string;
+            start_mode: string;
+            /** @description Local time of day, `HH:MM`; none: right after the slot before. */
+            start_time?: string | null;
+            /** Format: uuid */
+            tail_filler_id?: string | null;
+            tail_mode: string;
+            title_override?: string | null;
+        };
         /**
          * @description Where a verdict came from.
          * @enum {string}
          */
         Source: "probe" | "diagnostics" | "runtime";
+        SourceHit: {
+            /** @description "12 odcinków", the year, the library type... */
+            detail?: string | null;
+            /** Format: uuid */
+            id: string;
+            /** @description `library`, `series`, `movie` or `collection`. */
+            kind: string;
+            title: string;
+        };
         /**
          * @description The client's choices when starting playback. Every field is optional;
          *     an empty body plays the default tracks the way the client's family
@@ -4453,6 +5104,45 @@ export interface components {
             libraries: components["schemas"]["LibraryTrickplayStats"][];
             /** @description Generation waits because someone is transcoding. */
             paused_for_playback: boolean;
+        };
+        TvChannel: {
+            /** Format: date-time */
+            created_at: string;
+            enabled: boolean;
+            /** Format: uuid */
+            fallback_filler_id?: string | null;
+            group_title?: string | null;
+            has_logo: boolean;
+            /** Format: uuid */
+            id: string;
+            keep_running: boolean;
+            name: string;
+            number: string;
+            /** Format: int32 */
+            position: number;
+            quality: string;
+            /** Format: int32 */
+            schedule_version: number;
+            timezone: string;
+        };
+        TvChannelView: {
+            group_title?: string | null;
+            has_logo: boolean;
+            /** Format: uuid */
+            id: string;
+            name: string;
+            next?: null | components["schemas"]["NowNext"];
+            now?: null | components["schemas"]["NowNext"];
+            number: string;
+        };
+        TvPlayResponse: {
+            /** Format: uuid */
+            channel_id: string;
+            name: string;
+            /** Format: uuid */
+            session_id: string;
+            /** @description Live HLS playlist (no headers needed). */
+            stream_url: string;
         };
         /** @description Faza 25: what the "Edytuj" modal sends. Fields left out stay as they are. */
         UpdateLibraryRequest: {
@@ -5485,6 +6175,54 @@ export interface operations {
             };
         };
     };
+    admin_set_channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channel_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChannelSettings"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_channel_settings */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     admin_set_source: {
         parameters: {
             query?: never;
@@ -5527,6 +6265,39 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    admin_channels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                library_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminLiveChannel"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7005,6 +7776,893 @@ export interface operations {
             };
         };
     };
+    list_channels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminChannel"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    create_channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChannelBody"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TvChannel"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description number_taken */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reorder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderBody"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChannelBody"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TvChannel"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description number_taken */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_channel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    copy_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CopyBody"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Slot"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    upload_logo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "image/*": number[];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description logo_invalid_image */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_logo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    preview: {
+        parameters: {
+            query?: {
+                hours?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayoutEntry"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    rebuild: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildBody"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildResult"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_slots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Slot"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    replace_slots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SlotInput"][];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Slot"][];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_folders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FillerFolder"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    add_folder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FolderBody"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FillerFolder"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description folder_exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_folder_enabled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FolderEnabled"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_folder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    folder_files: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FillerFileRow"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    scan_folder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_presets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FillerPresetRow"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    save_preset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FillerPresetRow"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FillerPresetRow"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description name_taken */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_preset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    search_sources: {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceHit"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_restrictions: {
         parameters: {
             query?: never;
@@ -8437,40 +10095,6 @@ export interface operations {
                 };
             };
             401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    stream: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                session_id: string;
-                ticket: string;
-                file: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description HLS playlist or MPEG-TS segment */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10398,6 +12022,211 @@ export interface operations {
             };
         };
     };
+    channels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TvChannelView"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    logo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    play: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TvPlayResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description tv_capacity_reached */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description tv_stream_unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    guide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Start (RFC 3339); default: now. */
+                from: string | null;
+                /** @description Hours to show (1-48); default 6. */
+                hours: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuideChannel"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                ticket: string;
+                file: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HLS playlist or MPEG-TS segment */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     upload_avatar: {
         parameters: {
             query?: never;
@@ -10556,6 +12385,165 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    channels_m3u: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The API key, for players that can only open a URL. */
+                key: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description M3U playlist */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    epg_xml: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The API key, for players that can only open a URL. */
+                key: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description XMLTV guide */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    logo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channel_id: string;
+                /** @description The API key, for players that can only open a URL. */
+                key: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    stream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channel_id: string;
+                file: string;
+                /** @description The API key, for players that can only open a URL. */
+                key: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HLS playlist or MPEG-TS segment */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

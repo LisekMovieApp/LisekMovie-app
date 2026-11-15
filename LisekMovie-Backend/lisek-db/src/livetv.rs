@@ -223,6 +223,98 @@ pub struct LiveChannel {
     pub has_logo: bool,
 }
 
+/// A channel as the administrator edits it (Faza 26): what the provider
+/// says and what the administrator overrode.
+#[derive(Debug, Clone, Serialize, sqlx::FromRow, utoipa::ToSchema)]
+pub struct AdminLiveChannel {
+    pub id: Uuid,
+    pub library_id: Uuid,
+    pub name: String,
+    pub number: Option<String>,
+    pub number_override: Option<String>,
+    pub group_title: Option<String>,
+    pub group_override: Option<String>,
+    pub logo_url: Option<String>,
+    pub logo_override: Option<String>,
+    pub enabled: bool,
+    /// Failed starts since the last good one (a dead channel climbs).
+    pub failure_count: i32,
+    pub last_failure_at: Option<DateTime<Utc>>,
+}
+
+pub async fn admin_channels(pool: &PgPool, library_id: Uuid) -> Result<Vec<AdminLiveChannel>, DbError> {
+    Ok(sqlx::query_as(
+        "SELECT id, library_id, name, number, number_override, group_title, group_override, logo_url, logo_override, \
+                enabled, failure_count, last_failure_at \
+         FROM live_channels WHERE library_id = $1 ORDER BY position",
+    )
+    .bind(library_id)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// The administrator's changes to a channel; an empty override clears it.
+pub async fn update_channel_settings(
+    pool: &PgPool,
+    id: Uuid,
+    enabled: bool,
+    number_override: Option<&str>,
+    group_override: Option<&str>,
+    logo_override: Option<&str>,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query(
+        "UPDATE live_channels SET enabled = $2, number_override = $3, group_override = $4, logo_override = $5, \
+                failure_count = CASE WHEN $2 AND NOT enabled THEN 0 ELSE failure_count END \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(enabled)
+    .bind(number_override)
+    .bind(group_override)
+    .bind(logo_override)
+    .execute(pool)
+    .await?
+    .rows_affected()
+        > 0)
+}
+
+/// A channel started (`ok`) or did not.
+pub async fn record_outcome(pool: &PgPool, id: Uuid, ok: bool) -> Result<(), DbError> {
+    let sql = if ok {
+        "UPDATE live_channels SET failure_count = 0 WHERE id = $1 AND failure_count <> 0"
+    } else {
+        "UPDATE live_channels SET failure_count = failure_count + 1, last_failure_at = now() WHERE id = $1"
+    };
+    sqlx::query(sql).bind(id).execute(pool).await?;
+    Ok(())
+}
+
+/// A channel the IPTV export lists (enabled ones, with the overrides applied).
+#[derive(Debug, Clone)]
+pub struct ExportChannel {
+    pub id: Uuid,
+    pub library_id: Uuid,
+    pub name: String,
+    pub number: Option<String>,
+    pub group_title: Option<String>,
+    /// The logo's address (the provider's, or the administrator's).
+    pub logo_url: Option<String>,
+    pub tvg_id: Option<String>,
+}
+
+pub async fn export_channels(pool: &PgPool) -> Result<Vec<ExportChannel>, DbError> {
+    type Row = (Uuid, Uuid, String, Option<String>, Option<String>, Option<String>, Option<String>);
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT c.id, c.library_id, c.name, COALESCE(c.number_override, c.number), COALESCE(c.group_override, c.group_title), \
+                COALESCE(c.logo_override, c.logo_url), c.tvg_id \
+         FROM live_channels c JOIN libraries l ON l.id = c.library_id WHERE c.enabled \
+         ORDER BY l.sort_order, l.name, c.position",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|r| ExportChannel { id: r.0, library_id: r.1, name: r.2, number: r.3, group_title: r.4, logo_url: r.5, tvg_id: r.6 }).collect())
+}
+
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct LiveProgram {
     pub id: i64,
@@ -240,9 +332,10 @@ pub struct LiveProgram {
 pub async fn channels(pool: &PgPool, libraries: Option<&[Uuid]>) -> Result<Vec<LiveChannel>, DbError> {
     type Row = (Uuid, Uuid, String, Option<String>, Option<String>, bool);
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT c.id, c.library_id, c.name, c.number, c.group_title, c.logo_url IS NOT NULL \
+        "SELECT c.id, c.library_id, c.name, COALESCE(c.number_override, c.number), COALESCE(c.group_override, c.group_title), \
+                COALESCE(c.logo_override, c.logo_url) IS NOT NULL \
          FROM live_channels c JOIN libraries l ON l.id = c.library_id \
-         WHERE $1::uuid[] IS NULL OR c.library_id = ANY($1) \
+         WHERE c.enabled AND ($1::uuid[] IS NULL OR c.library_id = ANY($1)) \
          ORDER BY l.sort_order, l.name, c.position",
     )
     .bind(libraries)
@@ -265,7 +358,7 @@ pub async fn programs(
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT p.id, p.channel_id, p.starts_at, p.ends_at, p.title, p.subtitle, p.description, p.category \
          FROM live_programs p JOIN live_channels c ON c.id = p.channel_id \
-         WHERE ($1::uuid[] IS NULL OR c.library_id = ANY($1)) AND p.ends_at > $2 AND p.starts_at < $3 \
+         WHERE c.enabled AND ($1::uuid[] IS NULL OR c.library_id = ANY($1)) AND p.ends_at > $2 AND p.starts_at < $3 \
          ORDER BY p.channel_id, p.starts_at \
          LIMIT 50000",
     )
@@ -301,7 +394,7 @@ pub struct ChannelSource {
 pub async fn channel_source(pool: &PgPool, channel_id: Uuid) -> Result<Option<ChannelSource>, DbError> {
     type Row = (Uuid, Uuid, String, String, Option<String>);
     let row: Option<Row> = sqlx::query_as(
-        "SELECT id, library_id, name, stream_url, logo_url FROM live_channels WHERE id = $1",
+        "SELECT id, library_id, name, stream_url, COALESCE(logo_override, logo_url) FROM live_channels WHERE id = $1 AND enabled",
     )
     .bind(channel_id)
     .fetch_optional(pool)

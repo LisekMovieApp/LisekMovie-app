@@ -26,6 +26,10 @@ mod games;
 mod hardware;
 mod livetv;
 mod livetv_parse;
+mod iptv;
+mod tv;
+mod tvlive;
+mod tvwatch;
 mod logging;
 mod http_cache;
 mod notifications;
@@ -120,7 +124,8 @@ async fn main() {
     tokio::spawn(scan_jobs::run_worker(state.clone()));
     tokio::spawn(trickplay::run_worker(state.clone()));
     tokio::spawn(livetv::run(state.clone()));
-    tokio::spawn(livetv::run_reaper(state.clone()));
+    tokio::spawn(tv::run_builder(state.clone()));
+    tokio::spawn(tvlive::run_reaper(state.clone()));
     tokio::spawn(async {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;

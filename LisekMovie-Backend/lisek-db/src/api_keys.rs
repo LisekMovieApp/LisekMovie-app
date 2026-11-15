@@ -17,12 +17,18 @@ pub struct ApiKey {
     pub prefix: String,
     pub created_at: DateTime<Utc>,
     pub last_used_at: Option<DateTime<Utc>>,
+    /// What the key may do: `stats` (read statistics), `iptv` (the channel
+    /// list, guide and streams for IPTV players).
+    pub scopes: Vec<String>,
 }
+
+/// The scopes a key can have.
+pub const SCOPES: &[&str] = &["stats", "iptv"];
 
 /// Every key, newest first.
 pub async fn list(pool: &PgPool) -> Result<Vec<ApiKey>, DbError> {
     Ok(sqlx::query_as(
-        "SELECT id, name, prefix, created_at, last_used_at FROM api_keys ORDER BY created_at DESC, name",
+        "SELECT id, name, prefix, created_at, last_used_at, scopes FROM api_keys ORDER BY created_at DESC, name",
     )
     .fetch_all(pool)
     .await?)
@@ -35,15 +41,17 @@ pub async fn create(
     token_hash: &str,
     prefix: &str,
     created_by: Option<Uuid>,
+    scopes: &[String],
 ) -> Result<ApiKey, DbError> {
     Ok(sqlx::query_as(
-        "INSERT INTO api_keys (name, token_hash, prefix, created_by) VALUES ($1, $2, $3, $4) \
-         RETURNING id, name, prefix, created_at, last_used_at",
+        "INSERT INTO api_keys (name, token_hash, prefix, created_by, scopes) VALUES ($1, $2, $3, $4, $5) \
+         RETURNING id, name, prefix, created_at, last_used_at, scopes",
     )
     .bind(name)
     .bind(token_hash)
     .bind(prefix)
     .bind(created_by)
+    .bind(scopes)
     .fetch_one(pool)
     .await?)
 }
@@ -53,6 +61,17 @@ pub async fn rename(pool: &PgPool, id: Uuid, name: &str) -> Result<bool, DbError
     Ok(sqlx::query("UPDATE api_keys SET name = $2 WHERE id = $1")
         .bind(id)
         .bind(name)
+        .execute(pool)
+        .await?
+        .rows_affected()
+        > 0)
+}
+
+/// Replaces a key's scopes. `false`: no such key.
+pub async fn set_scopes(pool: &PgPool, id: Uuid, scopes: &[String]) -> Result<bool, DbError> {
+    Ok(sqlx::query("UPDATE api_keys SET scopes = $2 WHERE id = $1")
+        .bind(id)
+        .bind(scopes)
         .execute(pool)
         .await?
         .rows_affected()
@@ -69,15 +88,17 @@ pub async fn delete(pool: &PgPool, id: Uuid) -> Result<bool, DbError> {
         > 0)
 }
 
+type KeyRow = (Uuid, String, Option<DateTime<Utc>>, Vec<String>);
+
 /// The key with this hash, if any, marked as used now (at most once a
-/// minute). Returns its id and name.
-pub async fn authenticate(pool: &PgPool, token_hash: &str) -> Result<Option<(Uuid, String)>, DbError> {
-    let found: Option<(Uuid, String, Option<DateTime<Utc>>)> =
-        sqlx::query_as("SELECT id, name, last_used_at FROM api_keys WHERE token_hash = $1")
+/// minute). Returns its id, name and scopes.
+pub async fn authenticate(pool: &PgPool, token_hash: &str) -> Result<Option<(Uuid, String, Vec<String>)>, DbError> {
+    let found: Option<KeyRow> =
+        sqlx::query_as("SELECT id, name, last_used_at, scopes FROM api_keys WHERE token_hash = $1")
             .bind(token_hash)
             .fetch_optional(pool)
             .await?;
-    let Some((id, name, last_used)) = found else {
+    let Some((id, name, last_used, scopes)) = found else {
         return Ok(None);
     };
     if last_used.is_none_or(|at| Utc::now() - at > chrono::TimeDelta::seconds(60)) {
@@ -86,5 +107,5 @@ pub async fn authenticate(pool: &PgPool, token_hash: &str) -> Result<Option<(Uui
             .execute(pool)
             .await?;
     }
-    Ok(Some((id, name)))
+    Ok(Some((id, name, scopes)))
 }

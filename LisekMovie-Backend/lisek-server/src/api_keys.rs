@@ -33,6 +33,26 @@ const KEY_PREFIX: &str = "lsk_";
 pub struct ApiClient {
     pub key_id: Uuid,
     pub name: String,
+    pub scopes: Vec<String>,
+}
+
+impl ApiClient {
+    pub fn has(&self, scope: &str) -> bool {
+        self.scopes.iter().any(|s| s == scope)
+    }
+}
+
+/// Looks a key up. `None`: unknown.
+pub async fn authenticate(state: &SharedState, key: &str) -> Result<ApiClient, AuthError> {
+    let pool = state.pool().ok_or(AuthError::ServerNotReady)?;
+    match lisek_db::api_keys::authenticate(&pool, &lisek_auth::hash_session_token(key)).await {
+        Ok(Some((key_id, name, scopes))) => Ok(ApiClient { key_id, name, scopes }),
+        Ok(None) => Err(AuthError::InvalidToken),
+        Err(err) => {
+            tracing::error!(%err, "API key lookup failed");
+            Err(AuthError::Internal)
+        }
+    }
 }
 
 /// The key a request carries, if any.
@@ -53,16 +73,7 @@ impl FromRequestParts<SharedState> for ApiClient {
 
     async fn from_request_parts(parts: &mut Parts, state: &SharedState) -> Result<Self, Self::Rejection> {
         let key = presented_key(parts).ok_or(AuthError::MissingToken)?;
-        let pool = state.pool().ok_or(AuthError::ServerNotReady)?;
-        let hash = lisek_auth::hash_session_token(&key);
-        match lisek_db::api_keys::authenticate(&pool, &hash).await {
-            Ok(Some((key_id, name))) => Ok(ApiClient { key_id, name }),
-            Ok(None) => Err(AuthError::InvalidToken),
-            Err(err) => {
-                tracing::error!(%err, "API key lookup failed");
-                Err(AuthError::Internal)
-            }
-        }
+        authenticate(state, &key).await
     }
 }
 
@@ -85,6 +96,20 @@ fn clean_name(name: &str) -> Result<String, PlaybackError> {
 pub struct ApiKeyRequest {
     /// "Statystyki Discord", "Home Assistant" …
     pub name: String,
+    /// `stats` and/or `iptv`. Missing: `stats` (a key made before scopes).
+    #[serde(default)]
+    pub scopes: Option<Vec<String>>,
+}
+
+/// Scopes checked: known, deduplicated, at least one.
+fn clean_scopes(scopes: Option<Vec<String>>) -> Result<Vec<String>, PlaybackError> {
+    let mut scopes = scopes.unwrap_or_else(|| vec!["stats".to_string()]);
+    scopes.sort();
+    scopes.dedup();
+    if scopes.is_empty() || scopes.iter().any(|s| !lisek_db::api_keys::SCOPES.contains(&s.as_str())) {
+        return Err(PlaybackError(StatusCode::BAD_REQUEST, "invalid_key_scopes"));
+    }
+    Ok(scopes)
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -110,6 +135,7 @@ pub async fn create(
     Json(req): Json<ApiKeyRequest>,
 ) -> Result<Json<NewApiKey>, PlaybackError> {
     let name = clean_name(&req.name)?;
+    let scopes = clean_scopes(req.scopes)?;
     let key = format!("{KEY_PREFIX}{}", lisek_auth::generate_session_token());
     let prefix: String = key.chars().take(KEY_PREFIX.len() + 4).collect();
     let item = lisek_db::api_keys::create(
@@ -118,6 +144,7 @@ pub async fn create(
         &lisek_auth::hash_session_token(&key),
         &prefix,
         Some(auth.user.id),
+        &scopes,
     )
     .await?;
     tracing::info!(key_id = %item.id, name, admin = %auth.user.username, "API key created");
@@ -132,7 +159,12 @@ pub async fn rename(
     Json(req): Json<ApiKeyRequest>,
 ) -> Result<StatusCode, PlaybackError> {
     let name = clean_name(&req.name)?;
-    if lisek_db::api_keys::rename(&pool(&state)?, key_id, &name).await? {
+    let scopes = req.scopes.map(|s| clean_scopes(Some(s))).transpose()?;
+    let pool = pool(&state)?;
+    if lisek_db::api_keys::rename(&pool, key_id, &name).await? {
+        if let Some(scopes) = scopes {
+            lisek_db::api_keys::set_scopes(&pool, key_id, &scopes).await?;
+        }
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(PlaybackError(StatusCode::NOT_FOUND, "api_key_not_found"))

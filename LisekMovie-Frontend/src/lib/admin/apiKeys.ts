@@ -12,7 +12,11 @@ export interface ApiKey {
 	prefix: string;
 	created_at: string;
 	last_used_at: string | null;
+	/** What the key may do (`stats`, `iptv`). */
+	scopes: string[];
 }
+
+export const KEY_SCOPES = ['stats', 'iptv'] as const;
 
 export interface NewApiKey extends ApiKey {
 	/** The whole key — shown once. */
@@ -31,11 +35,15 @@ export async function fetchApiKeys(token: string): Promise<ApiKey[]> {
 	return (await response.json()) as ApiKey[];
 }
 
-export async function createApiKey(token: string, name: string): Promise<NewApiKey> {
+export async function createApiKey(
+	token: string,
+	name: string,
+	scopes: string[] = ["stats"]
+): Promise<NewApiKey> {
 	const response = await fetch('/api/admin/api-keys', {
 		method: 'POST',
 		headers: { ...buildAuthHeader(token), 'Content-Type': 'application/json' },
-		body: JSON.stringify({ name })
+		body: JSON.stringify({ name, scopes })
 	});
 	await assertOk(response);
 	return (await response.json()) as NewApiKey;

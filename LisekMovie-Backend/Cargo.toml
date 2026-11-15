@@ -12,6 +12,7 @@ members = [
     "lisek-notifications",
     "lisek-games",
     "lisek-plugin-api",
+    "lisek-tv",
 ]
 
 # Shared metadata inherited by every crate via `field.workspace = true`.

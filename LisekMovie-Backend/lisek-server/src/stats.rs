@@ -49,6 +49,9 @@ impl FromRequestParts<SharedState> for StatsReader {
     ) -> Result<Self, Self::Rejection> {
         if crate::api_keys::presented_key(parts).is_some() {
             let client = crate::api_keys::ApiClient::from_request_parts(parts, state).await?;
+            if !client.has("stats") {
+                return Err(AuthError::InvalidToken);
+            }
             tracing::debug!(key_id = %client.key_id, key = %client.name, "stats read with an API key");
             return Ok(StatsReader);
         }

@@ -16,19 +16,15 @@
 //! need no headers. A session nobody fetched for `IDLE_TIMEOUT` is stopped;
 //! one account has one live stream at a time.
 
-use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
-use std::process::Stdio;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::collections::HashMap;
+use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncBufReadExt;
 use uuid::Uuid;
 
 use lisek_db::livetv as db;
@@ -45,9 +41,6 @@ const MAX_GUIDE_BYTES: usize = 256 * 1024 * 1024;
 const GUIDE_PAST_HOURS: i64 = 12;
 const GUIDE_FUTURE_DAYS: i64 = 8;
 const MAX_GUIDE_HOURS: i64 = 48;
-pub const MAX_LIVE_SESSIONS: usize = 8;
-const IDLE_TIMEOUT: Duration = Duration::from_secs(45);
-const START_TIMEOUT: Duration = Duration::from_secs(25);
 const PROTOCOLS: &str = "http,https,tcp,tls,crypto,udp,rtp,rtsp,rtmp,rtmps,rtmpt,httpproxy";
 
 pub struct LiveError(StatusCode, &'static str);
@@ -163,14 +156,6 @@ pub async fn run(state: SharedState) {
     }
 }
 
-/// Stops idle live streams, every 15 s.
-pub async fn run_reaper(state: SharedState) {
-    loop {
-        tokio::time::sleep(Duration::from_secs(15)).await;
-        state.live.reap(IDLE_TIMEOUT);
-    }
-}
-
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct SetSource {
     /// http(s) link to the M3U playlist, or an absolute path on the server.
@@ -183,6 +168,61 @@ pub struct SetSource {
 #[utoipa::path(get,path="/api/admin/livetv",tag="admin",responses((status=200,body=Vec<db::LiveTvSource>),(status=401),(status=403)),security(("lisek_auth"=[])))]
 pub async fn admin_sources(_admin: AdminUser, State(state): State<SharedState>) -> Result<Json<Vec<db::LiveTvSource>>, LiveError> {
     Ok(Json(db::list_sources(&pool(&state)?).await?))
+}
+
+/// The channels of one Live TV library as the administrator edits them.
+#[utoipa::path(get,path="/api/admin/livetv/{library_id}/channels",tag="admin",params(("library_id"=Uuid,Path)),responses((status=200,body=Vec<db::AdminLiveChannel>),(status=401),(status=403)),security(("lisek_auth"=[])))]
+pub async fn admin_channels(_admin: AdminUser, State(state): State<SharedState>, Path(library_id): Path<Uuid>) -> Result<Json<Vec<db::AdminLiveChannel>>, LiveError> {
+    Ok(Json(db::admin_channels(&pool(&state)?, library_id).await?))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct ChannelSettings {
+    pub enabled: bool,
+    /// Replaces the provider's number in the lists and the IPTV export; empty clears it.
+    #[serde(default)]
+    pub number_override: Option<String>,
+    #[serde(default)]
+    pub group_override: Option<String>,
+    /// A logo address (http/https) replacing the provider's; empty clears it.
+    #[serde(default)]
+    pub logo_override: Option<String>,
+}
+
+fn clean_override(value: Option<String>, max: usize) -> Result<Option<String>, LiveError> {
+    let value = value.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    if value.as_ref().is_some_and(|v| v.chars().count() > max) {
+        return Err(LiveError(StatusCode::BAD_REQUEST, "invalid_channel_settings"));
+    }
+    Ok(value)
+}
+
+/// Checked settings: enabled, number, group, logo.
+type Cleaned = (bool, Option<String>, Option<String>, Option<String>);
+
+pub fn clean_settings(s: ChannelSettings) -> Result<Cleaned, LiveError> {
+    let number = clean_override(s.number_override, 20)?;
+    let group = clean_override(s.group_override, 100)?;
+    let logo = clean_override(s.logo_override, 500)?;
+    if let Some(logo) = &logo
+        && !reqwest::Url::parse(logo).is_ok_and(|u| matches!(u.scheme(), "http" | "https") && u.host_str().is_some())
+    {
+        return Err(LiveError(StatusCode::BAD_REQUEST, "invalid_channel_settings"));
+    }
+    Ok((s.enabled, number, group, logo))
+}
+
+/// Turns a channel on or off and overrides its number, group and logo.
+#[utoipa::path(put,path="/api/admin/livetv/channels/{channel_id}",tag="admin",params(("channel_id"=Uuid,Path)),request_body=ChannelSettings,responses((status=204),(status=400,description="invalid_channel_settings"),(status=401),(status=403),(status=404)),security(("lisek_auth"=[])))]
+pub async fn admin_set_channel(_admin: AdminUser, State(state): State<SharedState>, Path(channel_id): Path<Uuid>, Json(settings): Json<ChannelSettings>) -> Result<StatusCode, LiveError> {
+    let (enabled, number, group, logo) = clean_settings(settings)?;
+    if !db::update_channel_settings(&pool(&state)?, channel_id, enabled, number.as_deref(), group.as_deref(), logo.as_deref()).await? {
+        return Err(not_found());
+    }
+    if !enabled {
+        state.tv.stop_channel(channel_id);
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub fn check_source(req: &SetSource) -> Result<(), LiveError> {
@@ -409,106 +449,6 @@ pub async fn logo(auth: AuthUser, State(state): State<SharedState>, Path(channel
 
 // ---- Live streams ----------------------------------------------------------------
 
-struct LiveSession {
-    user_id: Uuid,
-    channel_id: Uuid,
-    ticket: String,
-    dir: PathBuf,
-    child: tokio::process::Child,
-    last_access: Instant,
-    log: Arc<Mutex<VecDeque<String>>>,
-}
-
-/// Running live streams, by session id.
-#[derive(Default)]
-pub struct LiveSessions {
-    sessions: Mutex<HashMap<Uuid, LiveSession>>,
-}
-
-impl LiveSessions {
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<Uuid, LiveSession>> {
-        self.sessions.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    fn stop_session(mut session: LiveSession) {
-        let _ = session.child.start_kill();
-        let dir = session.dir.clone();
-        tokio::spawn(async move {
-            let _ = session.child.wait().await;
-            let _ = tokio::fs::remove_dir_all(&dir).await;
-        });
-    }
-
-    /// Stops one session (only the owner's).
-    pub fn stop(&self, id: Uuid, user_id: Uuid) -> bool {
-        let session = {
-            let mut sessions = self.lock();
-            if sessions.get(&id).is_none_or(|s| s.user_id != user_id) {
-                return false;
-            }
-            sessions.remove(&id)
-        };
-        if let Some(session) = session {
-            Self::stop_session(session);
-        }
-        true
-    }
-
-    fn stop_user(&self, user_id: Uuid) {
-        let stopped: Vec<LiveSession> = {
-            let mut sessions = self.lock();
-            let ids: Vec<Uuid> = sessions.iter().filter(|(_, s)| s.user_id == user_id).map(|(id, _)| *id).collect();
-            ids.into_iter().filter_map(|id| sessions.remove(&id)).collect()
-        };
-        stopped.into_iter().for_each(Self::stop_session);
-    }
-
-    pub fn reap(&self, idle: Duration) {
-        let stopped: Vec<LiveSession> = {
-            let mut sessions = self.lock();
-            let now = Instant::now();
-            let ids: Vec<Uuid> = sessions
-                .iter_mut()
-                .filter_map(|(id, s)| {
-                    let ended = s.child.try_wait().ok().flatten().is_some();
-                    (ended || now.duration_since(s.last_access) > idle).then_some(*id)
-                })
-                .collect();
-            ids.into_iter().filter_map(|id| sessions.remove(&id)).collect()
-        };
-        for session in stopped {
-            tracing::debug!(channel = %session.channel_id, "live stream stopped (idle or ended)");
-            Self::stop_session(session);
-        }
-    }
-
-    fn count(&self) -> usize {
-        self.lock().len()
-    }
-
-    /// The folder of a session, if `ticket` is its ticket; marks it used.
-    fn touch(&self, id: Uuid, ticket: &str) -> Option<PathBuf> {
-        let mut sessions = self.lock();
-        let session = sessions.get_mut(&id)?;
-        if !constant_time_eq(session.ticket.as_bytes(), ticket.as_bytes()) {
-            return None;
-        }
-        session.last_access = Instant::now();
-        Some(session.dir.clone())
-    }
-
-    fn log_tail(&self, id: Uuid) -> String {
-        self.lock()
-            .get(&id)
-            .map(|s| s.log.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect::<Vec<_>>().join(" | "))
-            .unwrap_or_default()
-    }
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
 /// FFmpeg arguments for one live stream into `dir`.
 pub fn ffmpeg_args(stream_url: &str, dir: &std::path::Path, transcode: bool) -> Vec<String> {
     let mut args: Vec<String> = ["-hide_banner", "-nostdin", "-loglevel", "warning"].map(String::from).to_vec();
@@ -562,7 +502,8 @@ pub struct PlayResponse {
     pub transcoding: bool,
 }
 
-/// Starts watching a channel. Answers once the first segment is ready.
+/// Starts watching a channel. Answers once the first segment is ready. The
+/// stream is shared: every viewer of a channel gets the same FFmpeg.
 #[utoipa::path(post,path="/api/livetv/channels/{channel_id}/play",tag="media",params(("channel_id"=Uuid,Path)),request_body=PlayRequest,responses((status=200,body=PlayResponse),(status=401),(status=404),(status=429,description="live_capacity_reached"),(status=502,description="live_stream_unavailable"),(status=503)),security(("lisek_auth"=[])))]
 pub async fn play(
     auth: AuthUser,
@@ -576,80 +517,17 @@ pub async fn play(
     if !livetv_parse::allowed_stream_url(&channel.stream_url) {
         return Err(LiveError(StatusCode::BAD_GATEWAY, "live_stream_unavailable"));
     }
-    // One live stream per account: switching channels replaces it.
-    state.live.stop_user(auth.user.id);
-    if state.live.count() >= MAX_LIVE_SESSIONS {
-        return Err(LiveError(StatusCode::TOO_MANY_REQUESTS, "live_capacity_reached"));
-    }
-    let settings = lisek_db::playback::settings(&pool).await?;
-    let ffmpeg = lisek_playback::transcode::binary_path("ffmpeg", &settings);
-    let session_id = Uuid::new_v4();
-    let dir = std::env::temp_dir().join("lisekmovie-live").join(session_id.to_string());
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|_| LiveError(StatusCode::INTERNAL_SERVER_ERROR, "internal_error"))?;
-    let mut command = tokio::process::Command::new(&ffmpeg);
-    command
-        .args(ffmpeg_args(&channel.stream_url, &dir, request.transcode))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
-    let mut child = command.spawn().map_err(|e| {
-        tracing::error!(error = %e, ffmpeg = %ffmpeg.display(), "cannot start FFmpeg for live TV");
-        LiveError(StatusCode::SERVICE_UNAVAILABLE, "transcode_unavailable")
+    let started = crate::tvlive::ensure_iptv(&state, channel.id, &channel.name, &channel.stream_url, request.transcode).await;
+    let _ = db::record_outcome(&pool, channel.id, started.is_ok()).await;
+    started.map_err(|e| match e {
+        crate::tvlive::StreamError::Capacity => LiveError(StatusCode::TOO_MANY_REQUESTS, "live_capacity_reached"),
+        crate::tvlive::StreamError::Unavailable => LiveError(StatusCode::BAD_GATEWAY, "live_stream_unavailable"),
     })?;
-    let log = Arc::new(Mutex::new(VecDeque::new()));
-    if let Some(stderr) = child.stderr.take() {
-        let log = log.clone();
-        let channel_name = channel.name.clone();
-        tokio::spawn(async move {
-            let mut lines = tokio::io::BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                tracing::debug!(target: "lisek_playback::ffmpeg", channel = %channel_name, "[FFMPEG] {line}");
-                let mut log = log.lock().unwrap_or_else(|e| e.into_inner());
-                if log.len() >= 20 {
-                    log.pop_front();
-                }
-                log.push_back(line);
-            }
-        });
-    }
-    let ticket = Uuid::new_v4().simple().to_string();
-    state.live.lock().insert(
-        session_id,
-        LiveSession {
-            user_id: auth.user.id,
-            channel_id,
-            ticket: ticket.clone(),
-            dir: dir.clone(),
-            child,
-            last_access: Instant::now(),
-            log,
-        },
-    );
-    // Ready once the playlist names a segment.
-    let started = Instant::now();
-    loop {
-        if let Ok(text) = tokio::fs::read_to_string(dir.join("index.m3u8")).await
-            && text.contains(".ts")
-        {
-            break;
-        }
-        let exited = state.live.lock().get_mut(&session_id).is_none_or(|s| s.child.try_wait().ok().flatten().is_some());
-        if exited || started.elapsed() > START_TIMEOUT {
-            let tail = state.live.log_tail(session_id);
-            tracing::warn!(channel = %channel.name, ffmpeg = %tail, "live stream did not start");
-            state.live.stop(session_id, auth.user.id);
-            return Err(LiveError(StatusCode::BAD_GATEWAY, "live_stream_unavailable"));
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
-    tracing::info!(channel = %channel.name, user = %auth.user.username, transcode = request.transcode, "live stream started");
+    // One channel per account: switching replaces the earlier one.
+    let (session_id, ticket) = state.tv.add_viewer(auth.user.id, channel.id);
+    tracing::info!(channel = %channel.name, user = %auth.user.username, transcode = request.transcode, "live stream opened");
     Ok(Json(PlayResponse {
-        stream_url: format!("/api/livetv/stream/{session_id}/{ticket}/index.m3u8"),
+        stream_url: format!("/api/tv/stream/{session_id}/{ticket}/index.m3u8"),
         session_id,
         channel_id,
         name: channel.name,
@@ -657,28 +535,13 @@ pub async fn play(
     }))
 }
 
-/// Stops a live stream (leaving the player).
+/// Stops watching (leaving the player). The stream itself stops when nobody
+/// is left.
 #[utoipa::path(delete,path="/api/livetv/sessions/{session_id}",tag="media",params(("session_id"=Uuid,Path)),responses((status=204),(status=401),(status=404)),security(("lisek_auth"=[])))]
 pub async fn stop(auth: AuthUser, State(state): State<SharedState>, Path(session_id): Path<Uuid>) -> StatusCode {
-    if state.live.stop(session_id, auth.user.id) { StatusCode::NO_CONTENT } else { StatusCode::NOT_FOUND }
+    if state.tv.stop_viewer(session_id, auth.user.id) { StatusCode::NO_CONTENT } else { StatusCode::NOT_FOUND }
 }
 
-/// A live playlist or segment. The ticket in the path authorizes it.
-#[utoipa::path(get,path="/api/livetv/stream/{session_id}/{ticket}/{file}",tag="media",params(("session_id"=Uuid,Path),("ticket"=String,Path),("file"=String,Path)),responses((status=200,description="HLS playlist or MPEG-TS segment"),(status=403),(status=404)))]
-pub async fn stream(State(state): State<SharedState>, Path((session_id, ticket, file)): Path<(Uuid, String, String)>) -> Response {
-    let valid_name = file == "index.m3u8"
-        || (file.starts_with("seg") && file.ends_with(".ts") && file[3..file.len() - 3].chars().all(|c| c.is_ascii_digit()) && file.len() <= 16);
-    // An unknown session or a wrong ticket: forbidden, like an expired
-    // playback ticket.
-    let Some(dir) = valid_name.then(|| state.live.touch(session_id, &ticket)).flatten() else {
-        return StatusCode::FORBIDDEN.into_response();
-    };
-    let Ok(bytes) = tokio::fs::read(dir.join(&file)).await else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    let content_type = if file.ends_with(".m3u8") { "application/vnd.apple.mpegurl" } else { "video/mp2t" };
-    ([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, "no-store")], bytes).into_response()
-}
 
 #[cfg(test)]
 mod tests {
@@ -707,12 +570,5 @@ mod tests {
         assert!(args.last().unwrap().ends_with("index.m3u8"));
         let transcode = ffmpeg_args("udp://239.0.0.1:1234", dir, true).join(" ");
         assert!(transcode.contains("libx264") && !transcode.contains("-reconnect"));
-    }
-
-    #[test]
-    fn tickets_compare_in_constant_time() {
-        assert!(constant_time_eq(b"abc", b"abc"));
-        assert!(!constant_time_eq(b"abc", b"abd"));
-        assert!(!constant_time_eq(b"abc", b"ab"));
     }
 }

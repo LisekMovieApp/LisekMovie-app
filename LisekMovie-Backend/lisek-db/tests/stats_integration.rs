@@ -325,17 +325,19 @@ async fn statistics_over_known_sessions() {
     // Faza 25: named API keys (the bots' key among them).
     use lisek_db::api_keys;
     assert!(api_keys::list(pool).await.unwrap().is_empty());
-    let bot = api_keys::create(pool, "Statystyki Discord", "hash1", "lsk_aaaa", None).await.unwrap();
-    let home = api_keys::create(pool, "Home Assistant", "hash2", "lsk_bbbb", None).await.unwrap();
-    assert!(api_keys::create(pool, "Duplikat", "hash1", "x", None).await.is_err(), "hashes are unique");
+    let bot = api_keys::create(pool, "Statystyki Discord", "hash1", "lsk_aaaa", None, &["stats".to_string()]).await.unwrap();
+    let home = api_keys::create(pool, "Home Assistant", "hash2", "lsk_bbbb", None, &["iptv".to_string()]).await.unwrap();
+    assert!(api_keys::create(pool, "Duplikat", "hash1", "x", None, &[]).await.is_err(), "hashes are unique");
     assert_eq!(api_keys::list(pool).await.unwrap().len(), 2);
     assert!(bot.last_used_at.is_none());
-    assert_eq!(api_keys::authenticate(pool, "hash1").await.unwrap(), Some((bot.id, "Statystyki Discord".into())));
+    assert_eq!(api_keys::authenticate(pool, "hash1").await.unwrap(), Some((bot.id, "Statystyki Discord".into(), vec!["stats".to_string()])));
     assert!(api_keys::authenticate(pool, "nope").await.unwrap().is_none());
     let used = api_keys::list(pool).await.unwrap();
     assert!(used.iter().find(|k| k.id == bot.id).unwrap().last_used_at.is_some());
     assert!(used.iter().find(|k| k.id == home.id).unwrap().last_used_at.is_none());
     assert!(api_keys::rename(pool, home.id, "HA").await.unwrap());
+    assert!(api_keys::set_scopes(pool, home.id, &["stats".to_string(), "iptv".to_string()]).await.unwrap());
+    assert_eq!(api_keys::authenticate(pool, "hash2").await.unwrap().unwrap().2, ["stats", "iptv"]);
     assert!(api_keys::delete(pool, bot.id).await.unwrap());
     assert!(!api_keys::delete(pool, bot.id).await.unwrap());
     assert!(api_keys::authenticate(pool, "hash1").await.unwrap().is_none());

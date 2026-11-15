@@ -30,7 +30,7 @@ describe('API keys (Faza 25)', () => {
 		expect(fetchMock.mock.calls[0][0]).toBe('/api/admin/api-keys');
 		await createApiKey('tok', 'Mój Bot');
 		expect(fetchMock.mock.calls[1][1].method).toBe('POST');
-		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ name: 'Mój Bot' });
+		expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ name: 'Mój Bot', scopes: ['stats'] });
 		await renameApiKey('tok', 'k1', 'HA');
 		expect(fetchMock.mock.calls[2][0]).toBe('/api/admin/api-keys/k1');
 		expect(fetchMock.mock.calls[2][1].method).toBe('PUT');
